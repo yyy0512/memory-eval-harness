@@ -1,0 +1,79 @@
+diff --git a/EduGate_ScholarLink/Makefile b/EduGate_ScholarLink/Makefile
+index 7f07044..243a0d4 100644
+--- a/EduGate_ScholarLink/Makefile
++++ b/EduGate_ScholarLink/Makefile
+@@ -83,6 +83,7 @@ endif
+ # ---------------------------------------------------------------------------
+ SRC_CORE        := \
+     src/main.c \
++    src/rate_limiter.c \
+     src/router/router.c \
+     src/validator/validator.c \
+     src/graphql/schema_registry.c \
+diff --git a/EduGate_ScholarLink/src/main.c b/EduGate_ScholarLink/src/main.c
+index d3ba2b2..f411d74 100644
+--- a/EduGate_ScholarLink/src/main.c
++++ b/EduGate_ScholarLink/src/main.c
+@@ -21,7 +21,12 @@
+ 
+ #define _POSIX_C_SOURCE 200809L /* sigaction, strdup, etc. */
+ 
++#include <arpa/inet.h>
+ #include <microhttpd.h>
++#include <netinet/in.h>
++#include <sys/socket.h>
++
++#include "rate_limiter.h"
+ 
+ #include <stdatomic.h>
+ #include <stdbool.h>
+@@ -246,9 +251,28 @@ handle_quiz_graphql(struct MHD_Connection *conn, const char *method,
+     return MHD_YES;
+ }
+ 
+-/* ------------------------------------------------------------------------- */
+-/* Routing                                                                   */
+-/* ------------------------------------------------------------------------- */
++static const char *
++client_ip_from_connection(struct MHD_Connection *conn, char *buf, size_t buf_len)
++{
++    const union MHD_ConnectionInfo *info =
++        MHD_get_connection_info(conn, MHD_CONNECTION_INFO_CLIENT_ADDRESS);
++
++    if (!info || !info->client_addr)
++        return "unknown";
++
++    const struct sockaddr *addr = info->client_addr;
++    if (addr->sa_family == AF_INET) {
++        const struct sockaddr_in *ipv4 = (const struct sockaddr_in *)addr;
++        return inet_ntop(AF_INET, &ipv4->sin_addr, buf, (socklen_t)buf_len) ? buf : "unknown";
++    }
++
++    if (addr->sa_family == AF_INET6) {
++        const struct sockaddr_in6 *ipv6 = (const struct sockaddr_in6 *)addr;
++        return inet_ntop(AF_INET6, &ipv6->sin6_addr, buf, (socklen_t)buf_len) ? buf : "unknown";
++    }
++
++    return "unknown";
++}
+ 
+ typedef enum {
+     ROUTE_TYPE_SIMPLE,     /* GET /path */
+@@ -295,6 +319,17 @@ ahc_router_cb(void *cls,
+      */
+     bool consumed_upload = (*con_cls != NULL);
+ 
++    if (!*con_cls) {
++        char client_ip_buf[INET6_ADDRSTRLEN];
++        const char *client_ip = client_ip_from_connection(conn, client_ip_buf, sizeof(client_ip_buf));
++        if (!rate_limiter_allow(client_ip)) {
++            atomic_fetch_add_explicit(&g_total_requests, 1, memory_order_relaxed);
++            atomic_fetch_add_explicit(&g_failed_requests, 1, memory_order_relaxed);
++            return respond_json(conn, MHD_HTTP_TOO_MANY_REQUESTS,
++                                "{ \"error\": \"Rate limit exceeded\" }");
++        }
++    }
++
+     /* Dispatch to appropriate route */
+     for (size_t i = 0; i < g_route_count; ++i) {
+         if (strcmp(url, g_routes[i].path) == 0) {

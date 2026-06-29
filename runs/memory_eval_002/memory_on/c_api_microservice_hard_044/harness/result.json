@@ -1,0 +1,240 @@
+{
+  "scenario_id": "c_api_microservice_hard_044_multi_session_development_hard_01",
+  "case_id": "c_api_microservice_hard_044",
+  "variant": "memory_on",
+  "run_environment": {
+    "agent_bin": "codeagentcli",
+    "memory_mode": "on",
+    "home": "/home/yyy/projects/LoCoBench-Agent/.claude/worktrees/memory-eval-harness/runs/memory_eval_002/memory_on/c_api_microservice_hard_044/harness/home",
+    "xdg_config_home": "/home/yyy/projects/LoCoBench-Agent/.claude/worktrees/memory-eval-harness/runs/memory_eval_002/memory_on/c_api_microservice_hard_044/harness/xdg_config",
+    "xdg_cache_home": "/home/yyy/projects/LoCoBench-Agent/.claude/worktrees/memory-eval-harness/runs/memory_eval_002/memory_on/c_api_microservice_hard_044/harness/xdg_cache"
+  },
+  "sessions": [
+    {
+      "session": 1,
+      "turns_file": "turns/session_1.jsonl",
+      "turn_count": 1,
+      "exit_code": 0,
+      "duration_sec": 975.5957664959715,
+      "stdout": "logs/session_1.stream.jsonl",
+      "stderr": "logs/session_1.stderr",
+      "stream_json_log": "logs/session_1.stream.jsonl",
+      "cli_result_json": "logs/session_1.result.json",
+      "subtype": "success",
+      "is_error": false,
+      "session_id": "37bb77de-379c-4bd6-964a-2d8557e65e65",
+      "num_turns": 58,
+      "stop_reason": "end_turn",
+      "total_cost_usd": 5.214763000000001,
+      "usage": {
+        "input_tokens": 752760,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 1790976,
+        "output_tokens": 22219,
+        "server_tool_use": {
+          "web_search_requests": 0,
+          "web_fetch_requests": 0
+        },
+        "service_tier": "standard",
+        "cache_creation": {
+          "ephemeral_1h_input_tokens": 0,
+          "ephemeral_5m_input_tokens": 0
+        },
+        "cache_deleted_input_tokens": 0,
+        "inference_geo": "",
+        "iterations": [],
+        "speed": "standard"
+      },
+      "modelUsage": {
+        "gpt-5.5": {
+          "inputTokens": 752760,
+          "outputTokens": 22219,
+          "cacheReadInputTokens": 1790976,
+          "cacheCreationInputTokens": 0,
+          "webSearchRequests": 0,
+          "costUSD": 5.214763000000001,
+          "contextWindow": 196000,
+          "maxOutputTokens": 32000
+        }
+      },
+      "permission_denials": [],
+      "errors": [],
+      "token_metrics": {
+        "input_tokens": 752760,
+        "output_tokens": 22219,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 1790976,
+        "new_input_output_tokens": 774979,
+        "total_reported_tokens": 2565955,
+        "total_cost_usd": 5.214763000000001,
+        "duration_ms": 948561,
+        "duration_api_ms": 945563
+      },
+      "diff": "snapshots/session_1.diff",
+      "memory_snapshot": "snapshots/session_1_memory",
+      "memory_diff": null,
+      "files_changed": [
+        "chronoflow_fabric/scripts/init_db.sql",
+        "chronoflow_fabric/src/domain.h",
+        "chronoflow_fabric/src/repository.c",
+        "chronoflow_fabric/src/repository.h"
+      ]
+    },
+    {
+      "session": 2,
+      "turns_file": "turns/session_2.jsonl",
+      "turn_count": 1,
+      "exit_code": 0,
+      "duration_sec": 1210.5035011220025,
+      "stdout": "logs/session_2.stream.jsonl",
+      "stderr": "logs/session_2.stderr",
+      "stream_json_log": "logs/session_2.stream.jsonl",
+      "cli_result_json": "logs/session_2.result.json",
+      "subtype": "success",
+      "is_error": false,
+      "session_id": "39c3361c-57d4-4419-a747-28a20d33048b",
+      "num_turns": 88,
+      "stop_reason": "end_turn",
+      "total_cost_usd": 11.329993,
+      "usage": {
+        "input_tokens": 1621047,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 5103616,
+        "output_tokens": 26918,
+        "server_tool_use": {
+          "web_search_requests": 0,
+          "web_fetch_requests": 0
+        },
+        "service_tier": "standard",
+        "cache_creation": {
+          "ephemeral_1h_input_tokens": 0,
+          "ephemeral_5m_input_tokens": 0
+        },
+        "cache_deleted_input_tokens": 0,
+        "inference_geo": "",
+        "iterations": [],
+        "speed": "standard"
+      },
+      "modelUsage": {
+        "gpt-5.5": {
+          "inputTokens": 1621047,
+          "outputTokens": 26918,
+          "cacheReadInputTokens": 5103616,
+          "cacheCreationInputTokens": 0,
+          "webSearchRequests": 0,
+          "costUSD": 11.329993,
+          "contextWindow": 196000,
+          "maxOutputTokens": 32000
+        }
+      },
+      "permission_denials": [],
+      "errors": [],
+      "token_metrics": {
+        "input_tokens": 1621047,
+        "output_tokens": 26918,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 5103616,
+        "new_input_output_tokens": 1647965,
+        "total_reported_tokens": 6751581,
+        "total_cost_usd": 11.329993,
+        "duration_ms": 1209747,
+        "duration_api_ms": 1203091
+      },
+      "diff": "snapshots/session_2.diff",
+      "memory_snapshot": "snapshots/session_2_memory",
+      "memory_diff": null,
+      "files_changed": [
+        "chronoflow_fabric/scripts/init_db.sql",
+        "chronoflow_fabric/src/command_handlers.c",
+        "chronoflow_fabric/src/cqs_bus.h",
+        "chronoflow_fabric/src/domain.h",
+        "chronoflow_fabric/src/query_handlers.c",
+        "chronoflow_fabric/src/repository.c",
+        "chronoflow_fabric/src/repository.h",
+        "chronoflow_fabric/tests/unit/test_task_dependency_command_handlers.c"
+      ]
+    },
+    {
+      "session": 3,
+      "turns_file": "turns/session_3.jsonl",
+      "turn_count": 1,
+      "exit_code": 0,
+      "duration_sec": 873.2517482169787,
+      "stdout": "logs/session_3.stream.jsonl",
+      "stderr": "logs/session_3.stderr",
+      "stream_json_log": "logs/session_3.stream.jsonl",
+      "cli_result_json": "logs/session_3.result.json",
+      "subtype": "success",
+      "is_error": false,
+      "session_id": "3c907a56-5d3c-4e82-a253-0ed9d7657896",
+      "num_turns": 71,
+      "stop_reason": "end_turn",
+      "total_cost_usd": 8.992574999999999,
+      "usage": {
+        "input_tokens": 1334493,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 3678720,
+        "output_tokens": 19230,
+        "server_tool_use": {
+          "web_search_requests": 0,
+          "web_fetch_requests": 0
+        },
+        "service_tier": "standard",
+        "cache_creation": {
+          "ephemeral_1h_input_tokens": 0,
+          "ephemeral_5m_input_tokens": 0
+        },
+        "cache_deleted_input_tokens": 0,
+        "inference_geo": "",
+        "iterations": [],
+        "speed": "standard"
+      },
+      "modelUsage": {
+        "gpt-5.5": {
+          "inputTokens": 1334493,
+          "outputTokens": 19230,
+          "cacheReadInputTokens": 3678720,
+          "cacheCreationInputTokens": 0,
+          "webSearchRequests": 0,
+          "costUSD": 8.992574999999999,
+          "contextWindow": 196000,
+          "maxOutputTokens": 32000
+        }
+      },
+      "permission_denials": [],
+      "errors": [],
+      "token_metrics": {
+        "input_tokens": 1334493,
+        "output_tokens": 19230,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 3678720,
+        "new_input_output_tokens": 1353723,
+        "total_reported_tokens": 5032443,
+        "total_cost_usd": 8.992574999999999,
+        "duration_ms": 872540,
+        "duration_api_ms": 868943
+      },
+      "diff": "snapshots/session_3.diff",
+      "memory_snapshot": "snapshots/session_3_memory",
+      "memory_diff": null,
+      "files_changed": [
+        "chronoflow_fabric/docs/api/schema.graphql",
+        "chronoflow_fabric/scripts/init_db.sql",
+        "chronoflow_fabric/src/command_handlers.c",
+        "chronoflow_fabric/src/cqs_bus.h",
+        "chronoflow_fabric/src/domain.h",
+        "chronoflow_fabric/src/graphql_api.c",
+        "chronoflow_fabric/src/graphql_api.h",
+        "chronoflow_fabric/src/query_handlers.c",
+        "chronoflow_fabric/src/repository.c",
+        "chronoflow_fabric/src/repository.h",
+        "chronoflow_fabric/src/rest_api_v1.c",
+        "chronoflow_fabric/tests/integration/test_rest_api.c",
+        "chronoflow_fabric/tests/unit/test_task_dependency_command_handlers.c"
+      ]
+    }
+  ],
+  "final_diff": "snapshots/final.diff",
+  "final_memory_snapshot": "snapshots/final_memory",
+  "errors": []
+}

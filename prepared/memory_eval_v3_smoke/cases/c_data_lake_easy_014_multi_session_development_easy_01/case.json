@@ -1,0 +1,38 @@
+{
+  "scenario_id": "c_data_lake_easy_014_multi_session_development_easy_01",
+  "case_id": "c_data_lake_easy_014",
+  "category": "extended_development_projects",
+  "original_task_category": "multi_session_development",
+  "project_source": "/home/yyy/projects/LoCoBench-Agent/.claude/worktrees/memory-eval-harness/data/generated/c_data_lake_easy_014",
+  "project_name": "StreamScoop Utility Lake",
+  "language": "c",
+  "complexity": "easy",
+  "session_count": 2,
+  "turns": [
+    {
+      "session": 1,
+      "file": "turns/session_1.jsonl",
+      "turn_count": 1
+    },
+    {
+      "session": 2,
+      "file": "turns/session_2.jsonl",
+      "turn_count": 1
+    }
+  ],
+  "prompts_for_review": [
+    {
+      "session": 1,
+      "file": "prompts/session_1.txt"
+    },
+    {
+      "session": 2,
+      "file": "prompts/session_2.txt"
+    }
+  ],
+  "hashes": {
+    "scenario_json_sha256": "ea79a191ddb831f98263737ff2f4c95702091ecc5e7cc7f2c4a41ebe4f72e825",
+    "project_tree_sha256": "2fc89535c9f50e61eba595fa7b7b71713c1f9670c68c78a40213fc66cf123082",
+    "prepared_case_sha256": "f09ce4186b8bdd17392cfc2c0207ac4bc48004df8d727c8ddee730684bec94a3"
+  }
+}

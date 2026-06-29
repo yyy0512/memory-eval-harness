@@ -1,0 +1,56 @@
+{
+  "scenario_id": "c_mobile_social_expert_022_multi_session_development_medium_01",
+  "case_id": "c_mobile_social_expert_022",
+  "title": "Enhance Marketplace Offline Capability and Implement Low-Data Mode",
+  "description": "PocketOps Nexus users are experiencing a bug where previously viewed marketplace item previews are not loading when the device is offline. The expected behavior is for any viewed asset to be cached and available for offline viewing. Additionally, the product team wants to introduce a 'Low-Data Mode' to give users more control over their data consumption. This multi-session task involves first diagnosing and fixing the caching bug, and then implementing the new data-saving feature.",
+  "difficulty": "medium",
+  "project_spec": {
+    "unique_id": "c_mobile_social_expert_022",
+    "name": "PocketOps Nexus",
+    "description": "PocketOps Nexus is an expert-grade mobile utility and social collaboration toolkit written in C that turns everyday operational tasks—scanning, measuring, sharing, and logging—into friction-free micro-workflows. Users can capture data with the device camera, annotate it, attach contextual location tags, and instantly sync or share through serverless endpoints. The application layers a strong utility core (document scanner, QR/Code generator, unit converter, quick-measure AR overlay) with opt-in social features such as collaborative workspaces and real-time progress feeds.\n\nServerless micro-services handle heavy processing (OCR, image normalization, sharing permissions) and event fan-out (push notifications, analytics, crash traces) so the mobile binary stays lean and snappy. Built around an MVVM front-end with Repository, Adapter, Factory, Observer, and Singleton patterns, the project targets 82 logically isolated source files and ~760 k tokens, ensuring maximum modularity and testability while keeping the C code portable across iOS and Android via a thin native bridge layer. Advanced capabilities include offline data queues with background delta sync, biometric-secured vaults for sensitive files, and an in-app marketplace that unlocks premium utility plug-ins—all seamlessly orchestrated through serverless functions.",
+    "domain": "mobile_social",
+    "complexity": "expert",
+    "language": "c",
+    "architecture": "serverless",
+    "theme": "utility",
+    "target_file_count": 82,
+    "target_token_count": 760491,
+    "features": [
+      "in_app_purchases",
+      "responsive_ui",
+      "social_sharing",
+      "offline_sync",
+      "camera_integration",
+      "push_notifications",
+      "crash_reporting",
+      "biometric_auth",
+      "analytics",
+      "location_services",
+      "local_storage"
+    ],
+    "architecture_patterns": [
+      "Singleton",
+      "MVVM",
+      "Adapter_Pattern",
+      "Factory_Pattern",
+      "Observer_Pattern",
+      "Repository_Pattern"
+    ],
+    "dependencies": [
+      "AWS Lambda + API Gateway (stateless business logic / OCR / image normalization)",
+      "AWS Amplify or Azure Static Web Apps (CI/CD, hosting of configuration)",
+      "Firebase Cloud Messaging (push_notifications)",
+      "Firebase Crashlytics SDK C-bridge (crash_reporting)",
+      "SQLite (local_storage, offline_sync)",
+      "OpenCV (camera_integration, image processing)",
+      "libcurl (HTTPS networking for serverless endpoints)",
+      "mbedTLS (TLS + biometric secure enclave binding)",
+      "cJSON (lightweight JSON parsing/serialization)",
+      "Google Analytics C SDK wrapper (analytics)",
+      "Mapbox GL Native (location_services, offline maps)",
+      "Stripe C SDK (in_app_purchases)",
+      "License compatibility: MIT / Apache 2.0 mix"
+    ],
+    "seed": 902790
+  }
+}

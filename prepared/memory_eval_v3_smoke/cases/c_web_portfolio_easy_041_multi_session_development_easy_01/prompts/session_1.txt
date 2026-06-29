@@ -1,0 +1,17 @@
+You are working in the repository at the current working directory. This is session 1 of a multi-session development task. Complete only the requirements for this session. At the end, save any useful project-specific memory for future sessions.
+
+This task will be completed over two sessions.
+
+**Session 1: Backend Foundation**
+"Hi team, we need a new feature to allow users to control the visibility of their portfolio artefacts. Please start by implementing the backend logic.
+
+Your task is to modify the C services to support a `visibility` property for each artefact. This property should accept one of two string values: `public` or `private`.
+
+1.  Locate the primary data structure representing an 'artefact' in the `artefact-api` service.
+2.  Add a `visibility` field to this structure.
+3.  Update the artefact creation/update logic within `artefact_service.c` to handle this new field from incoming requests.
+4.  Ensure the `ui-gateway` can correctly pass this new field to the `artefact-api` service.
+
+For now, do not make any changes to the frontend files."
+
+**(After the agent completes the first session, a new session is started with the following prompt.)**

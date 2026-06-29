@@ -1,0 +1,17 @@
+{
+  "firstStartTime": "2026-06-28T17:48:19.226Z",
+  "opusProMigrationComplete": true,
+  "sonnet1m45MigrationComplete": true,
+  "growthBookOverrides": {
+    "tengu_passport_quail": true,
+    "tengu_slate_thimble": true,
+    "tengu_onyx_plover": {
+      "enabled": true,
+      "minHours": 24,
+      "minSessions": 5
+    },
+    "tengu_session_memory": true
+  },
+  "migrationVersion": 13,
+  "userID": "1fbab09eafa2428e8d22a45b83b0105e025065c15d511a03ea6bb90d0912e323"
+}

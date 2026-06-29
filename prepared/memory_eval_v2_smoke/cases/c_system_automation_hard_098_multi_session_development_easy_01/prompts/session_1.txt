@@ -1,0 +1,6 @@
+You are working in the repository at the current working directory. This is session 1 of a multi-session development task. Complete only the requirements for this session. At the end, save any useful project-specific memory for future sessions.
+
+We need to make the deployment health check timeout configurable. We will do this over three separate sessions.
+
+**Session 1:**
+Your first task is to update the core data model to support the new configuration parameter. Please modify the `DeploymentConfig` struct in `src/models/domain_model.h` to include a new integer field named `deployment_health_check_timeout_seconds`. Do not implement any other logic or modify other files in this session.

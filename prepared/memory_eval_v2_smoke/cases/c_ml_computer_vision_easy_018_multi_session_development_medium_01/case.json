@@ -1,0 +1,29 @@
+{
+  "scenario_id": "c_ml_computer_vision_easy_018_multi_session_development_medium_01",
+  "case_id": "c_ml_computer_vision_easy_018",
+  "category": "extended_development_projects",
+  "original_task_category": "multi_session_development",
+  "project_source": "/home/yyy/projects/LoCoBench-Agent/.claude/worktrees/memory-eval-harness/data/generated/c_ml_computer_vision_easy_018",
+  "project_name": "PulseScope Lite – Vital-Sign Camera Monitor",
+  "language": "c",
+  "complexity": "easy",
+  "session_count": 1,
+  "turns": [
+    {
+      "session": 1,
+      "file": "turns/session_1.jsonl",
+      "turn_count": 1
+    }
+  ],
+  "prompts_for_review": [
+    {
+      "session": 1,
+      "file": "prompts/session_1.txt"
+    }
+  ],
+  "hashes": {
+    "scenario_json_sha256": "3fea06c10b02f698d28efb71e02b72b9a815ed14b54a8a0091971aeb7c8018ab",
+    "project_tree_sha256": "77aa1047fc05b0334262d46a1311d99d00dc6317e0f2e949d4f774edd6975739",
+    "prepared_case_sha256": "253dd4d3163bd78c675c3ca38a0c28587f3e704bbb9b7d72751b097405b58bbe"
+  }
+}

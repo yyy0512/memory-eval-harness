@@ -1,0 +1,8 @@
+You are working in the repository at the current working directory. This is session 1 of a multi-session development task. Complete only the requirements for this session. At the end, save any useful project-specific memory for future sessions.
+
+Your goal is to implement a comprehensive File Integrity Monitoring (FIM) feature. This is a multi-stage task. Treat each stage as a separate development session, ensuring you maintain context between sessions.
+
+**Session 1: Foundational Work - Event Definition**
+1.  Analyze the existing event structure in `common/include/sentinel_event.h` and `common/src/sentinel_event.c`.
+2.  Define a new event type for FIM alerts. This event should contain the file path, its previous hash, its new hash, and the type of change (CREATED, MODIFIED, DELETED).
+3.  Implement the necessary serialization/deserialization functions for this new event type in `sentinel_event.c`.

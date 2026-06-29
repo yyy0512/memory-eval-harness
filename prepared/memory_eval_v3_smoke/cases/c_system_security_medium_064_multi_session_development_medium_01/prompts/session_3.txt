@@ -1,0 +1,6 @@
+You are working in the repository at the current working directory. This is session 3 of a 4-session development task. The previous session has ended and conversation context is unavailable. Use the repository state and your persistent memory if available. Do not ask for previous conversation context. Complete only the requirements for this session. At the end, update memory with decisions and remaining work.
+
+Your overall goal is to implement configuration hot-reloading. We will build this feature incrementally over several sessions.
+
+**Session 3: Abstracting Reconfiguration**
+The system needs a generic way to notify different components about configuration changes. Your task is to extend the service registry to support this. Modify the service definition in `src/domain/service_registry.h` to include a function pointer for a `reconfigure` callback. Then, update the `reload_configuration()` function in `src/core/config_loader.c`. It should now re-parse the configuration file and then iterate through all registered services, calling their `reconfigure` callback if one has been provided.

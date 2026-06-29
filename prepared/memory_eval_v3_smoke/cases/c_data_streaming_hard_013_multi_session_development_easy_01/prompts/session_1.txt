@@ -1,0 +1,9 @@
+You are working in the repository at the current working directory. This is session 1 of a multi-session development task. Complete only the requirements for this session. At the end, save any useful project-specific memory for future sessions.
+
+This task is divided into two sessions. You must retain context between sessions to complete the full task.
+
+**Session 1: Configuration Setup**
+Your first objective is to introduce a new configuration parameter, `heartbeat_interval_ms`, for the `ingestion_service`. To do this, you must:
+1.  Locate the common configuration data structures in the `ps_common` library and add a new integer field for `heartbeat_interval_ms`.
+2.  Update the configuration parsing logic in `ps_config.c` to read this new key-value pair from a configuration file.
+3.  Add the new parameter to the `pulsesphere/config/ingestion_service.conf` file, setting its value to `5000`.

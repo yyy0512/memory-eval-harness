@@ -1,0 +1,23 @@
+You are working in the repository at the current working directory. This is session 1 of a multi-session development task. Complete only the requirements for this session. At the end, save any useful project-specific memory for future sessions.
+
+You are tasked with implementing the new Flash Sale feature for BusiCart Core. This task will be completed over multiple sessions. Follow the instructions for each session carefully.
+
+### Session 1: Database Schema Foundation
+**Goal:** Lay the groundwork for the flash sale feature in the database.
+**Instructions:** Design and implement the necessary database schema changes. You should create a `flash_sales` table to store sale metadata (e.g., name, start_time, end_time) and a linking table, `flash_sale_products`, to associate products with a specific sale and define their discounted price. Modify `src/core/database.c` or add new files as needed to manage these new tables. You should add functions to create the tables and to query for active sales on a given product. Do not implement the business logic in the catalog service yet. Conclude this session by summarizing the new database functions you have exposed.
+
+### Session 2: Core Business Logic
+**Goal:** Integrate the flash sale data into the product catalog.
+**Instructions:** Welcome back. Using the database functions you created in the previous session, modify the `catalog_service.c` file. The primary function for fetching product details must now check if an active flash sale applies to the requested product. If an active sale is found, the product's price must be temporarily overridden with the sale price before being returned. Ensure your implementation is robust and correctly handles cases where no sale is active. For now, do not worry about caching; focus only on the direct database-driven logic.
+
+### Session 3: Performance Optimization & Caching
+**Goal:** Address performance issues and make the feature production-ready.
+**Instructions:** You've implemented the core logic, but repeatedly querying the database for sales on every product view is inefficient. Furthermore, the existing product cache in `src/core/cache.c` is naive and will not work correctly with time-sensitive data; it would cache the sale price indefinitely. Your task is to refactor the caching mechanism to support flash sales. The system must ensure that a product's cached data is invalidated as soon as its flash sale ends. You will need to modify `src/core/cache.c` and how it is used in `src/services/catalog_service.c` to achieve this. The solution should be efficient and reliable.
+
+### Session 4: Testing and Verification
+**Goal:** Ensure the feature is correct and robust.
+**Instructions:** In this final session, you will validate the entire feature. Write a comprehensive suite of unit tests for the flash sale functionality in `tests/test_catalog_service.c`. Your tests must cover the following scenarios:
+1. A product that is not on sale.
+2. A product that is part of an active flash sale.
+3. A product whose flash sale has expired, ensuring the price reverts to normal.
+Your tests should be self-contained and effectively prove the correctness of the work done in all previous sessions.

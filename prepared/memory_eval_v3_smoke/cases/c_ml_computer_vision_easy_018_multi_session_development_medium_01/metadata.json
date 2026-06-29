@@ -1,0 +1,44 @@
+{
+  "scenario_id": "c_ml_computer_vision_easy_018_multi_session_development_medium_01",
+  "case_id": "c_ml_computer_vision_easy_018",
+  "title": "Implement Experiment Logging for Signal Processing Metrics",
+  "description": "The PulseScope Lite project currently processes video to extract a heart rate (BPM) but lacks a systematic way to track and evaluate the performance of its signal processing pipeline. This task involves implementing a basic experiment logging feature. The goal is to save key metrics—specifically the calculated BPM and the Signal-to-Noise Ratio (SNR) of the processed signal—to a user-specified CSV file. This will require modifications across the configuration, signal processing, and application entry point, as well as documentation updates.",
+  "difficulty": "medium",
+  "project_spec": {
+    "unique_id": "c_ml_computer_vision_easy_018",
+    "name": "PulseScope Lite – Vital-Sign Camera Monitor",
+    "description": "PulseScope Lite is a lightweight, C-based computer-vision application that continuously analyzes live webcam footage to estimate patients’ heart and respiratory rates by tracking subtle skin-tone fluctuations and thoracic motion. Designed for small outpatient clinics and home-care settings, the project implements an MVVM architecture to clearly separate low-level frame acquisition (Model), signal-processing/computer-vision logic (ViewModel), and the nurse-oriented UI dashboard (View).  \n\nDespite its compact scope, PulseScope Lite integrates core MLOps concepts: a Factory Pattern loads different preprocessing and model variants at runtime; a simple experiment-tracking module logs model versions and hyperparameter selections to a local SQLite feature store; and an automated retraining pipeline can be scheduled nightly to fine-tune the lightweight CNN on freshly captured, clinician-labeled data. This focus on vital-sign extraction keeps the project emphatically healthcare-centric while remaining approachable for beginners.",
+    "domain": "ml_computer_vision",
+    "complexity": "easy",
+    "language": "c",
+    "architecture": "mvvm",
+    "theme": "healthcare",
+    "target_file_count": 14,
+    "target_token_count": 79465,
+    "features": [
+      "automated_retraining",
+      "feature_store",
+      "hyperparameter_tuning",
+      "feature_engineering",
+      "experiment_tracking",
+      "model_training"
+    ],
+    "architecture_patterns": [
+      "Factory_Pattern",
+      "MLOps_Architecture",
+      "Pipeline_Pattern"
+    ],
+    "dependencies": [
+      "OpenCV C API (image capture & basic CV ops)",
+      "stb_image / stb_image_write (lightweight image I/O)",
+      "SQLite3 (embedded feature store & experiment logs)",
+      "cJSON (configuration, experiment-tracking payloads)",
+      "GLib/GObject (signals, event loop for MVVM bindings)",
+      "GTK+3 (cross-platform GUI View layer)",
+      "libmlpack (C bindings for lightweight CNN training)",
+      "CMake (build & dependency management)",
+      "Unity Test Framework (unit tests)"
+    ],
+    "seed": 995288
+  }
+}

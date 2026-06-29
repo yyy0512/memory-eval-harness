@@ -1,0 +1,43 @@
+{
+  "scenario_id": "c_ml_inference_easy_088_multi_session_development_expert_01",
+  "case_id": "c_ml_inference_easy_088",
+  "title": "Implement A/B Model Testing Framework in BizSight Inference Dashboard",
+  "description": "The BizSight Inference Dashboard is a C-based command-line tool for running and monitoring ML model inference pipelines. Currently, it supports evaluating only one model at a time. The objective is to extend its functionality to support A/B testing, allowing a 'champion' model to be compared against a 'challenger' model on the same dataset. This is a complex task requiring incremental development and a deep understanding of the existing architecture, from data structures and model execution to monitoring and viewmodel logic.",
+  "difficulty": "expert",
+  "project_spec": {
+    "unique_id": "c_ml_inference_easy_088",
+    "name": "BizSight Inference Dashboard",
+    "description": "BizSight Inference Dashboard is an entry-level yet fully-structured ML-inference toolkit targeted at small and mid-sized companies that want to embed predictive insights into existing C-based back-office software (pricing engines, inventory trackers, POS terminals). Built on a strict MVVM separation, the project demonstrates how a lightweight C codebase can expose business-ready forecasts while remaining maintainable and testable.\n\nWithin the Model layer, a factory builds concrete inference engines (e.g., LinearReg, RandomForest) that are automatically registered in a Model Registry to enable painless model_versioning and shadow deployments. A declarative Pipeline Pattern feeds business data through data_preprocessing, feature_engineering, model_evaluation, and model_monitoring steps. The ViewModel translates business questions—such as “expected weekly demand” or “likelihood of customer churn”—into normalized feature vectors, invokes the selected model, and pushes human-readable results to the View. The View is a thin GTK-based dashboard that offers data_visualization widgets (spark-lines, residual plots) so analysts can explore forecasts without touching the underlying code.\n\nAlthough the codebase stays ‘easy’ in complexity, it covers all stages of the inference life-cycle a real company meets: automated retraining hooks, JSON-based configuration for A/B testing newer models, and an on-disk audit trail for regulatory compliance. By isolating business logic in the ViewModel and inference mechanics in Model factories, BizSight makes it trivial for non-data-scientist developers to integrate or swap prediction workflows while preserving a clear boundary between UI and analytics.",
+    "domain": "ml_inference",
+    "complexity": "easy",
+    "language": "c",
+    "architecture": "mvvm",
+    "theme": "business",
+    "target_file_count": 15,
+    "target_token_count": 39749,
+    "features": [
+      "data_preprocessing",
+      "feature_engineering",
+      "model_evaluation",
+      "model_monitoring",
+      "model_versioning",
+      "data_visualization"
+    ],
+    "architecture_patterns": [
+      "Factory_Pattern",
+      "Model_Registry",
+      "Pipeline_Pattern"
+    ],
+    "dependencies": [
+      "glib >= 2.0   (core utilities & event loop)",
+      "gtk4 >= 4.0    (lightweight GUI for View data_visualization)",
+      "cJSON          (JSON I/O for model_registry metadata & pipeline configs)",
+      "OpenBLAS       (matrix ops used by linear models; keeps code pure-C)",
+      "gnuplot-iostream (optional CLI visualization fallback)",
+      "libuuid        (unique model_versioning IDs)",
+      "libuv          (file-watcher for model_monitoring alerts)",
+      "cmocka         (unit tests for Model and ViewModel interactions)"
+    ],
+    "seed": 10074
+  }
+}

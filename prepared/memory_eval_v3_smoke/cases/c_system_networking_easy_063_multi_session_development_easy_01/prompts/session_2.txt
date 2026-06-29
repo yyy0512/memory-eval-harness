@@ -1,0 +1,9 @@
+You are working in the repository at the current working directory. This is session 2 of a 3-session development task. The previous session has ended and conversation context is unavailable. Use the repository state and your persistent memory if available. Do not ask for previous conversation context. Complete only the requirements for this session. At the end, update memory with decisions and remaining work.
+
+You will implement a new, configurable heartbeat feature. The task is broken down into three sessions.
+
+**Session 2: Feature Implementation**
+Based on the plan from our previous session, you will now implement the core feature.
+1.  Modify `SynestheticPulseMesh/src/config.h` to add the new data members to the configuration structure.
+2.  Modify `SynestheticPulseMesh/src/main.c` to parse the `HEARTBEAT_ENABLED` and `HEARTBEAT_INTERVAL_SECONDS` directives from the configuration file.
+3.  In the main loop within `main.c`, add the logic to publish a `HEARTBEAT_EVENT` at the specified interval. You can assume a function `void publish_event(EventType type, const char* message)` and an enum `EventType { ..., HEARTBEAT_EVENT, ... }` already exist or can be added.

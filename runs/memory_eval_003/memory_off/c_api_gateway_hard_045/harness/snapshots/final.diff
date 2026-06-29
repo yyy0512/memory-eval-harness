@@ -1,0 +1,286 @@
+diff --git a/socialpulse_gateway/src/adapters/graphql/graphql_parser.c b/socialpulse_gateway/src/adapters/graphql/graphql_parser.c
+index d686e2c..06b0571 100644
+--- a/socialpulse_gateway/src/adapters/graphql/graphql_parser.c
++++ b/socialpulse_gateway/src/adapters/graphql/graphql_parser.c
+@@ -24,6 +24,7 @@
+ #include <stdint.h>
+ #include <stdio.h>
+ #include <stdlib.h>
++#include <jansson.h>
+ #include <string.h>
+ 
+ #include "logger.h"             /* project-wide structured logger            */
+@@ -441,6 +442,169 @@ GraphQLDocument *graphql_parse(const char *query, GqlError **out_err)
+     return doc;
+ }
+ 
++static GqlError *make_heap_error(uint32_t line,
++                                 uint32_t col,
++                                 GqlErrorCode code,
++                                 const char *fmt, ...)
++{
++    GqlError *err = (GqlError *) calloc(1, sizeof(GqlError));
++    if (!err) { return NULL; }
++
++    err->code = code;
++    err->line = line;
++    err->column = col;
++
++    va_list ap;
++    va_start(ap, fmt);
++    vsnprintf(err->message, sizeof(err->message), fmt, ap);
++    va_end(ap);
++
++    return err;
++}
++
++static char *copy_json_string(json_t *obj, const char *key)
++{
++    json_t *value = json_object_get(obj, key);
++    if (!value || json_is_null(value)) { return NULL; }
++    if (!json_is_string(value)) { return NULL; }
++
++    const char *s = json_string_value(value);
++    if (!s) { return NULL; }
++
++    size_t len = strlen(s);
++    char *copy = (char *) malloc(len + 1);
++    if (!copy) { return NULL; }
++    memcpy(copy, s, len + 1);
++    return copy;
++}
++
++static bool parse_request_item(json_t *obj, GraphQLRequestItem *item)
++{
++    if (!json_is_object(obj)) {
++        item->error = make_heap_error(1, 1, GQL_ERR_INVALID_REQUEST,
++                                      "GraphQL request entry must be an object");
++        return false;
++    }
++
++    json_t *query = json_object_get(obj, "query");
++    if (!json_is_string(query)) {
++        item->error = make_heap_error(1, 1, GQL_ERR_INVALID_REQUEST,
++                                      "GraphQL request object must include string field 'query'");
++        return false;
++    }
++
++    item->query = copy_json_string(obj, "query");
++    item->operation_name = copy_json_string(obj, "operationName");
++
++    json_t *variables = json_object_get(obj, "variables");
++    if (variables && !json_is_null(variables)) {
++        item->variables_json = json_dumps(variables, JSON_COMPACT);
++        if (!item->variables_json) {
++            item->error = make_heap_error(1, 1, GQL_ERR_INVALID_REQUEST,
++                                          "Unable to serialize GraphQL variables");
++            return false;
++        }
++    }
++
++    GqlError *parse_error = NULL;
++    item->document = graphql_parse(item->query, &parse_error);
++    if (parse_error) {
++        item->error = make_heap_error(parse_error->line, parse_error->column,
++                                      parse_error->code, "%s",
++                                      parse_error->message);
++    }
++    return item->error == NULL;
++}
++
++GraphQLRequest *graphql_request_parse(const char *payload, GqlError **out_err)
++{
++    if (out_err) { *out_err = NULL; }
++    if (!payload) {
++        if (out_err) {
++            *out_err = make_heap_error(1, 1, GQL_ERR_INVALID_REQUEST,
++                                       "GraphQL request payload is NULL");
++        }
++        return NULL;
++    }
++
++    json_error_t json_err;
++    json_t *root = json_loads(payload, 0, &json_err);
++    if (!root) {
++        if (out_err) {
++            *out_err = make_heap_error((uint32_t) json_err.line,
++                                       (uint32_t) json_err.column,
++                                       GQL_ERR_INVALID_REQUEST,
++                                       "Invalid GraphQL JSON payload: %s",
++                                       json_err.text);
++        }
++        return NULL;
++    }
++
++    bool is_batch = json_is_array(root);
++    bool is_single = json_is_object(root);
++    if (!is_batch && !is_single) {
++        json_decref(root);
++        if (out_err) {
++            *out_err = make_heap_error(1, 1, GQL_ERR_INVALID_REQUEST,
++                                       "GraphQL request payload must be an object or array");
++        }
++        return NULL;
++    }
++
++    size_t count = is_batch ? json_array_size(root) : 1;
++    GraphQLRequest *request = (GraphQLRequest *) calloc(1, sizeof(GraphQLRequest));
++    if (!request) {
++        json_decref(root);
++        if (out_err) {
++            *out_err = make_heap_error(1, 1, GQL_ERR_OOM,
++                                       "Unable to allocate GraphQL request");
++        }
++        return NULL;
++    }
++
++    request->kind = is_batch ? GRAPHQL_REQUEST_BATCH : GRAPHQL_REQUEST_SINGLE;
++    request->count = count;
++    request->items = (GraphQLRequestItem *) calloc(count ? count : 1,
++                                                   sizeof(GraphQLRequestItem));
++    if (!request->items) {
++        free(request);
++        json_decref(root);
++        if (out_err) {
++            *out_err = make_heap_error(1, 1, GQL_ERR_OOM,
++                                       "Unable to allocate GraphQL request items");
++        }
++        return NULL;
++    }
++
++    if (is_batch) {
++        for (size_t i = 0; i < count; ++i) {
++            json_t *entry = json_array_get(root, i);
++            parse_request_item(entry, &request->items[i]);
++        }
++    } else {
++        parse_request_item(root, &request->items[0]);
++    }
++
++    json_decref(root);
++    return request;
++}
++
++void graphql_request_free(GraphQLRequest *request)
++{
++    if (!request) { return; }
++    for (size_t i = 0; i < request->count; ++i) {
++        free(request->items[i].query);
++        free(request->items[i].operation_name);
++        free(request->items[i].variables_json);
++        free(request->items[i].error);
++        if (request->items[i].document) {
++            graphql_doc_free(request->items[i].document);
++        }
++    }
++    free(request->items);
++    free(request);
++}
++
+ void graphql_doc_free(GraphQLDocument *doc)
+ {
+     if (!doc) return;
+diff --git a/socialpulse_gateway/src/adapters/graphql/graphql_parser.h b/socialpulse_gateway/src/adapters/graphql/graphql_parser.h
+index af1c7bf..58b464f 100644
+--- a/socialpulse_gateway/src/adapters/graphql/graphql_parser.h
++++ b/socialpulse_gateway/src/adapters/graphql/graphql_parser.h
+@@ -188,9 +188,96 @@ typedef struct {
+     sp_gql_vec_t fragments;      /* vector<sp_gql_node_t*>                     */
+ } sp_gql_doc_t;
+ 
+-/*───────────────────────────
+- *        Public API
+- *───────────────────────────*/
++/* Request envelope model used by the HTTP GraphQL adapter.  A payload can be
++ * either a single standard GraphQL request object or an array of such objects. */
++typedef enum {
++    SP_GQL_REQUEST_SINGLE = 0,
++    SP_GQL_REQUEST_BATCH  = 1,
++} sp_gql_request_kind_t;
++
++typedef struct sp_gql_request_item_s {
++    char         *query;          /* Copied GraphQL query string.                */
++    char         *operation_name; /* Optional operationName, copied if present.  */
++    char         *variables_json; /* Optional variables object serialized JSON.  */
++    sp_gql_doc_t *document;       /* Parsed query document for this item.        */
++} sp_gql_request_item_t;
++
++typedef struct {
++    sp_gql_request_kind_t kind;
++    size_t                count;
++    sp_gql_request_item_t *items;
++} sp_gql_request_t;
++
++/* Legacy parser.c model.  These declarations are kept alongside the sp_gql_*
++ * API because current gateway code includes this header from graphql_parser.c. */
++typedef enum {
++    GQL_ERR_SYNTAX = 1,
++    GQL_ERR_OOM,
++    GQL_ERR_INVALID_REQUEST,
++} GqlErrorCode;
++
++typedef struct GqlError {
++    GqlErrorCode code;
++    uint32_t line;
++    uint32_t column;
++    char message[SP_GQL_MAX_ERROR_MSG];
++} GqlError;
++
++typedef enum {
++    GQL_OP_QUERY = 0,
++    GQL_OP_MUTATION,
++    GQL_OP_SUBSCRIPTION,
++} GqlOperationType;
++
++typedef struct GqlArgument {
++    char *name;
++    char *value;
++    struct GqlArgument *next;
++} GqlArgument;
++
++typedef struct GqlField {
++    char *name;
++    char *alias;
++    GqlArgument *arguments;
++    struct GqlField *children;
++    struct GqlField *next;
++} GqlField;
++
++typedef struct GqlOperation {
++    GqlOperationType type;
++    char *name;
++    GqlField *selection_set;
++    struct GqlOperation *next;
++} GqlOperation;
++
++typedef struct GraphQLDocument {
++    GqlOperation *operations;
++} GraphQLDocument;
++
++typedef enum {
++    GRAPHQL_REQUEST_SINGLE = 0,
++    GRAPHQL_REQUEST_BATCH  = 1,
++} GraphQLRequestKind;
++
++typedef struct GraphQLRequestItem {
++    char *query;
++    char *operation_name;
++    char *variables_json;
++    GraphQLDocument *document;
++    GqlError *error;
++} GraphQLRequestItem;
++
++typedef struct GraphQLRequest {
++    GraphQLRequestKind kind;
++    size_t count;
++    GraphQLRequestItem *items;
++} GraphQLRequest;
++
++GraphQLDocument *graphql_parse(const char *query, GqlError **out_err);
++GraphQLRequest *graphql_request_parse(const char *payload, GqlError **out_err);
++void graphql_request_free(GraphQLRequest *request);
++void graphql_doc_free(GraphQLDocument *doc);
++void graphql_doc_debug_print(const GraphQLDocument *doc);
+ 
+ /*
+  * Parse a raw GraphQL UTF-8 document into an AST.

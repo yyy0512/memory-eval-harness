@@ -1,0 +1,39 @@
+diff --git a/chromacanvas_api_gateway/src/main.c b/chromacanvas_api_gateway/src/main.c
+index 03d54bc..ab8ddbf 100644
+--- a/chromacanvas_api_gateway/src/main.c
++++ b/chromacanvas_api_gateway/src/main.c
+@@ -41,10 +41,13 @@
+ /* ---------------------------------------------------------------------------
+  * Logging Utilities
+  * --------------------------------------------------------------------------*/
++#define LOG_LEVEL_DEBUG 0
+ #define LOG_LEVEL_INFO  1
+ #define LOG_LEVEL_WARN  2
+ #define LOG_LEVEL_ERROR 3
+ 
++extern int cc_cfg_log_level(void);
++
+ #ifndef LOG_LEVEL
+ #define LOG_LEVEL LOG_LEVEL_INFO
+ #endif
+@@ -63,8 +66,9 @@ timestamp_iso8601(void)
+ 
+ #define LOG(level, fmt, ...)                                            \
+     do {                                                                \
+-        if (level >= LOG_LEVEL) {                                       \
++        if (level >= cc_cfg_log_level()) {                              \
+             const char *lvl_str =                                       \
++                (level == LOG_LEVEL_DEBUG) ? "DEBUG" :                  \
+                 (level == LOG_LEVEL_INFO)  ? "INFO"  :                  \
+                 (level == LOG_LEVEL_WARN)  ? "WARN"  : "ERROR";         \
+             fprintf(stderr, "%s [%s] " fmt "\n",                        \
+@@ -207,7 +211,8 @@ handle_graphql(struct MHD_Connection *conn,
+                const char            *body,
+                size_t                 len)
+ {
+-    (void)len;
++    LOG(LOG_LEVEL_DEBUG, "Handling GraphQL request body with %zu bytes", len);
++
+     cJSON *root = cJSON_Parse(body);
+     if (!root) {
+         send_json_response(conn,

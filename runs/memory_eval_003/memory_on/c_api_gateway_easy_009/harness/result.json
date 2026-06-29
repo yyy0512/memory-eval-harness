@@ -1,0 +1,234 @@
+{
+  "scenario_id": "c_api_gateway_easy_009_multi_session_development_expert_01",
+  "case_id": "c_api_gateway_easy_009",
+  "variant": "memory_on",
+  "run_environment": {
+    "agent_bin": "codeagentcli",
+    "memory_mode": "on",
+    "home": "/home/yyy/projects/LoCoBench-Agent/.claude/worktrees/memory-eval-harness/runs/memory_eval_003/memory_on/c_api_gateway_easy_009/harness/home",
+    "xdg_config_home": "/home/yyy/projects/LoCoBench-Agent/.claude/worktrees/memory-eval-harness/runs/memory_eval_003/memory_on/c_api_gateway_easy_009/harness/xdg_config",
+    "xdg_cache_home": "/home/yyy/projects/LoCoBench-Agent/.claude/worktrees/memory-eval-harness/runs/memory_eval_003/memory_on/c_api_gateway_easy_009/harness/xdg_cache"
+  },
+  "sessions": [
+    {
+      "session": 1,
+      "turns_file": "turns/session_1.jsonl",
+      "turn_count": 1,
+      "exit_code": 0,
+      "duration_sec": 597.0457758810371,
+      "stdout": "logs/session_1.stream.jsonl",
+      "stderr": "logs/session_1.stderr",
+      "stream_json_log": "logs/session_1.stream.jsonl",
+      "cli_result_json": "logs/session_1.result.json",
+      "subtype": "success",
+      "is_error": false,
+      "session_id": "c75806c4-9ec8-4373-9d62-13ffdd42b37f",
+      "num_turns": 48,
+      "stop_reason": "end_turn",
+      "total_cost_usd": 4.419166000000001,
+      "usage": {
+        "input_tokens": 726320,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 1004032,
+        "output_tokens": 11422,
+        "server_tool_use": {
+          "web_search_requests": 0,
+          "web_fetch_requests": 0
+        },
+        "service_tier": "standard",
+        "cache_creation": {
+          "ephemeral_1h_input_tokens": 0,
+          "ephemeral_5m_input_tokens": 0
+        },
+        "cache_deleted_input_tokens": 0,
+        "inference_geo": "",
+        "iterations": [],
+        "speed": "standard"
+      },
+      "modelUsage": {
+        "gpt-5.5": {
+          "inputTokens": 726320,
+          "outputTokens": 11422,
+          "cacheReadInputTokens": 1004032,
+          "cacheCreationInputTokens": 0,
+          "webSearchRequests": 0,
+          "costUSD": 4.419166000000001,
+          "contextWindow": 196000,
+          "maxOutputTokens": 32000
+        }
+      },
+      "permission_denials": [],
+      "errors": [],
+      "token_metrics": {
+        "input_tokens": 726320,
+        "output_tokens": 11422,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 1004032,
+        "new_input_output_tokens": 737742,
+        "total_reported_tokens": 1741774,
+        "total_cost_usd": 4.419166000000001,
+        "duration_ms": 593624,
+        "duration_api_ms": 591037
+      },
+      "diff": "snapshots/session_1.diff",
+      "memory_snapshot": "snapshots/session_1_memory",
+      "memory_diff": null,
+      "files_changed": [
+        "EduGate_ScholarLink/Makefile",
+        "EduGate_ScholarLink/src/http_handler.c",
+        "EduGate_ScholarLink/src/main.c",
+        "EduGate_ScholarLink/src/rate_limiter.c"
+      ]
+    },
+    {
+      "session": 2,
+      "turns_file": "turns/session_2.jsonl",
+      "turn_count": 1,
+      "exit_code": 0,
+      "duration_sec": 600.7318312730058,
+      "stdout": "logs/session_2.stream.jsonl",
+      "stderr": "logs/session_2.stderr",
+      "stream_json_log": "logs/session_2.stream.jsonl",
+      "cli_result_json": "logs/session_2.result.json",
+      "subtype": "success",
+      "is_error": false,
+      "session_id": "285beb11-873c-4048-8986-2597d1e3d527",
+      "num_turns": 56,
+      "stop_reason": "end_turn",
+      "total_cost_usd": 4.171581,
+      "usage": {
+        "input_tokens": 610633,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 1656832,
+        "output_tokens": 11600,
+        "server_tool_use": {
+          "web_search_requests": 0,
+          "web_fetch_requests": 0
+        },
+        "service_tier": "standard",
+        "cache_creation": {
+          "ephemeral_1h_input_tokens": 0,
+          "ephemeral_5m_input_tokens": 0
+        },
+        "cache_deleted_input_tokens": 0,
+        "inference_geo": "",
+        "iterations": [],
+        "speed": "standard"
+      },
+      "modelUsage": {
+        "gpt-5.5": {
+          "inputTokens": 610633,
+          "outputTokens": 11600,
+          "cacheReadInputTokens": 1656832,
+          "cacheCreationInputTokens": 0,
+          "webSearchRequests": 0,
+          "costUSD": 4.171581,
+          "contextWindow": 196000,
+          "maxOutputTokens": 32000
+        }
+      },
+      "permission_denials": [],
+      "errors": [],
+      "token_metrics": {
+        "input_tokens": 610633,
+        "output_tokens": 11600,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 1656832,
+        "new_input_output_tokens": 622233,
+        "total_reported_tokens": 2279065,
+        "total_cost_usd": 4.171581,
+        "duration_ms": 599587,
+        "duration_api_ms": 595926
+      },
+      "diff": "snapshots/session_2.diff",
+      "memory_snapshot": "snapshots/session_2_memory",
+      "memory_diff": null,
+      "files_changed": [
+        "EduGate_ScholarLink/Makefile",
+        "EduGate_ScholarLink/config/gateway.conf",
+        "EduGate_ScholarLink/docs/API_GUIDE.md",
+        "EduGate_ScholarLink/src/http_handler.c",
+        "EduGate_ScholarLink/src/main.c",
+        "EduGate_ScholarLink/src/rate_limiter.h",
+        "EduGate_ScholarLink/src/rate_limiter.c"
+      ]
+    },
+    {
+      "session": 3,
+      "turns_file": "turns/session_3.jsonl",
+      "turn_count": 1,
+      "exit_code": 0,
+      "duration_sec": 767.9261518440326,
+      "stdout": "logs/session_3.stream.jsonl",
+      "stderr": "logs/session_3.stderr",
+      "stream_json_log": "logs/session_3.stream.jsonl",
+      "cli_result_json": "logs/session_3.result.json",
+      "subtype": "success",
+      "is_error": false,
+      "session_id": "5973db23-2556-4fb3-86a3-c7c3b5fb9737",
+      "num_turns": 60,
+      "stop_reason": "end_turn",
+      "total_cost_usd": 5.374284000000001,
+      "usage": {
+        "input_tokens": 794814,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 1993728,
+        "output_tokens": 16134,
+        "server_tool_use": {
+          "web_search_requests": 0,
+          "web_fetch_requests": 0
+        },
+        "service_tier": "standard",
+        "cache_creation": {
+          "ephemeral_1h_input_tokens": 0,
+          "ephemeral_5m_input_tokens": 0
+        },
+        "cache_deleted_input_tokens": 0,
+        "inference_geo": "",
+        "iterations": [],
+        "speed": "standard"
+      },
+      "modelUsage": {
+        "gpt-5.5": {
+          "inputTokens": 794814,
+          "outputTokens": 16134,
+          "cacheReadInputTokens": 1993728,
+          "cacheCreationInputTokens": 0,
+          "webSearchRequests": 0,
+          "costUSD": 5.374284000000001,
+          "contextWindow": 196000,
+          "maxOutputTokens": 32000
+        }
+      },
+      "permission_denials": [],
+      "errors": [],
+      "token_metrics": {
+        "input_tokens": 794814,
+        "output_tokens": 16134,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 1993728,
+        "new_input_output_tokens": 810948,
+        "total_reported_tokens": 2804676,
+        "total_cost_usd": 5.374284000000001,
+        "duration_ms": 767234,
+        "duration_api_ms": 763400
+      },
+      "diff": "snapshots/session_3.diff",
+      "memory_snapshot": "snapshots/session_3_memory",
+      "memory_diff": null,
+      "files_changed": [
+        "EduGate_ScholarLink/Makefile",
+        "EduGate_ScholarLink/config/gateway.conf",
+        "EduGate_ScholarLink/docs/API_GUIDE.md",
+        "EduGate_ScholarLink/src/http_handler.c",
+        "EduGate_ScholarLink/src/main.c",
+        "EduGate_ScholarLink/src/rate_limiter.h",
+        "EduGate_ScholarLink/src/rate_limiter.c",
+        "EduGate_ScholarLink/tests/test_rate_limiter_versions.c"
+      ]
+    }
+  ],
+  "final_diff": "snapshots/final.diff",
+  "final_memory_snapshot": "snapshots/final_memory",
+  "errors": []
+}

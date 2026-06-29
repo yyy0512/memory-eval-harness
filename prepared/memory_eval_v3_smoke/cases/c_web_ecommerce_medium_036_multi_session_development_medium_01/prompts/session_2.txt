@@ -1,0 +1,12 @@
+You are working in the repository at the current working directory. This is session 2 of a 3-session development task. The previous session has ended and conversation context is unavailable. Use the repository state and your persistent memory if available. Do not ask for previous conversation context. Complete only the requirements for this session. At the end, update memory with decisions and remaining work.
+
+You will implement this feature over three distinct development sessions.
+
+**Session 2: Core Logic Implementation**
+*Assume your plan from the previous session was approved.* Now, proceed with implementing the core rate-limiting logic. 
+1.  Create the new files you proposed, if any.
+2.  Write the primary rate-limiting function(s). This logic should use the client's IP address to create a unique key in Redis.
+3.  Use the Redis cache adapter to increment the request count and set an appropriate expiration time for the key (e.g., 60 seconds).
+4.  The function should determine if a given request is within the allowed limit.
+
+*Focus only on the self-contained logic. Do not integrate it into the request pipeline yet.*

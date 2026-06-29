@@ -1,0 +1,84 @@
+{
+  "scenario_id": "c_api_graphql_medium_043_multi_session_development_hard_01",
+  "case_id": "c_api_graphql_medium_043",
+  "variant": "memory_on",
+  "run_environment": {
+    "agent_bin": "codeagentcli",
+    "memory_mode": "on",
+    "home": "/home/yyy/projects/LoCoBench-Agent/.claude/worktrees/memory-eval-harness/runs/memory_eval_003/memory_on/c_api_graphql_medium_043/harness/home",
+    "xdg_config_home": "/home/yyy/projects/LoCoBench-Agent/.claude/worktrees/memory-eval-harness/runs/memory_eval_003/memory_on/c_api_graphql_medium_043/harness/xdg_config",
+    "xdg_cache_home": "/home/yyy/projects/LoCoBench-Agent/.claude/worktrees/memory-eval-harness/runs/memory_eval_003/memory_on/c_api_graphql_medium_043/harness/xdg_cache"
+  },
+  "sessions": [
+    {
+      "session": 1,
+      "turns_file": "turns/session_1.jsonl",
+      "turn_count": 1,
+      "exit_code": 0,
+      "duration_sec": 663.2994353650138,
+      "stdout": "logs/session_1.stream.jsonl",
+      "stderr": "logs/session_1.stderr",
+      "stream_json_log": "logs/session_1.stream.jsonl",
+      "cli_result_json": "logs/session_1.result.json",
+      "subtype": "success",
+      "is_error": false,
+      "session_id": "ae5c4cea-a1e2-435e-9b5b-7b6d87c7ad00",
+      "num_turns": 52,
+      "stop_reason": "end_turn",
+      "total_cost_usd": 4.9540120000000005,
+      "usage": {
+        "input_tokens": 753908,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 1682944,
+        "output_tokens": 13720,
+        "server_tool_use": {
+          "web_search_requests": 0,
+          "web_fetch_requests": 0
+        },
+        "service_tier": "standard",
+        "cache_creation": {
+          "ephemeral_1h_input_tokens": 0,
+          "ephemeral_5m_input_tokens": 0
+        },
+        "cache_deleted_input_tokens": 0,
+        "inference_geo": "",
+        "iterations": [],
+        "speed": "standard"
+      },
+      "modelUsage": {
+        "gpt-5.5": {
+          "inputTokens": 753908,
+          "outputTokens": 13720,
+          "cacheReadInputTokens": 1682944,
+          "cacheCreationInputTokens": 0,
+          "webSearchRequests": 0,
+          "costUSD": 4.9540120000000005,
+          "contextWindow": 196000,
+          "maxOutputTokens": 32000
+        }
+      },
+      "permission_denials": [],
+      "errors": [],
+      "token_metrics": {
+        "input_tokens": 753908,
+        "output_tokens": 13720,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 1682944,
+        "new_input_output_tokens": 767628,
+        "total_reported_tokens": 2450572,
+        "total_cost_usd": 4.9540120000000005,
+        "duration_ms": 662482,
+        "duration_api_ms": 659501
+      },
+      "diff": "snapshots/session_1.diff",
+      "memory_snapshot": "snapshots/session_1_memory",
+      "memory_diff": null,
+      "files_changed": [
+        "pulsestream_showtime_api/src/api/websocket_handler.c"
+      ]
+    }
+  ],
+  "final_diff": "snapshots/final.diff",
+  "final_memory_snapshot": "snapshots/final_memory",
+  "errors": []
+}

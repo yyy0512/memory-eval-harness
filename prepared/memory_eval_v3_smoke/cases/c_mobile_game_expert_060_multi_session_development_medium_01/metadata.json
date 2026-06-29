@@ -1,0 +1,55 @@
+{
+  "scenario_id": "c_mobile_game_expert_060_multi_session_development_medium_01",
+  "case_id": "c_mobile_game_expert_060",
+  "title": "Implement Task Completion Combo Bonus System",
+  "description": "As part of a new initiative to boost user engagement in 'TaskForge Quest', the product team wants to introduce a 'Combo Bonus' system. This system will reward players with bonus Experience Points (XP) for completing multiple tasks in quick succession. This feature requires state management that persists across app sessions and modification of the core game logic.",
+  "difficulty": "medium",
+  "project_spec": {
+    "unique_id": "c_mobile_game_expert_060",
+    "name": "TaskForge Quest: Productivity RPG",
+    "description": "TaskForge Quest merges classic RPG mechanics with a robust task-management workflow, turning day-to-day goals into engaging game quests. Written entirely in C as a single executable, the application lets users create \"forges\" (projects) and \"ingots\" (tasks) that earn XP, coins, and cosmetic upgrades when completed. Timers, Pomodoro rounds, location-based reminders, and calendar synchronization all feed into a leveling system, motivating users to stay productive while enjoying casual play sessions.\n\nThe monolithic core contains subsystems for UI, persistence, gamification, and hardware integration that communicate through well-defined internal service façades. A built-in analytics engine tracks usage patterns, offline progress, and crash events, which are later batch-synced when connectivity returns. Social sharing, push notifications, and in-app purchases (skins, productivity boosters, expansion story arcs) leverage shared models and resource pipelines, minimizing overhead and guaranteeing deterministic performance on low-power mobile devices. By consolidating every feature—responsive UI, biometric unlock, camera-based receipt scanning, and location services—into a single address space, TaskForge Quest ensures tight coupling of gameplay feedback loops with real-time productivity data, creating a seamless player–worker experience.",
+    "domain": "mobile_game",
+    "complexity": "expert",
+    "language": "c",
+    "architecture": "monolithic",
+    "theme": "productivity",
+    "target_file_count": 84,
+    "target_token_count": 521576,
+    "features": [
+      "responsive_ui",
+      "local_storage",
+      "social_sharing",
+      "offline_sync",
+      "biometric_auth",
+      "analytics",
+      "location_services",
+      "in_app_purchases",
+      "crash_reporting",
+      "camera_integration",
+      "push_notifications"
+    ],
+    "architecture_patterns": [
+      "Singleton",
+      "Factory_Pattern",
+      "MVVM",
+      "Adapter_Pattern",
+      "Repository_Pattern",
+      "Observer_Pattern"
+    ],
+    "dependencies": [
+      "SDL2 (graphics, audio, input abstraction)",
+      "SQLite3 (embedded local_storage, offline_sync)",
+      "mbedtls (TLS for secure API calls and crash_reporting uploads)",
+      "libcurl (networking, push_notifications, in_app_purchases)",
+      "OpenAL Soft (spatial audio cues for reminders)",
+      "cJSON (lightweight JSON parsing for config and analytics payloads)",
+      "zlib (asset compression/patch downloads)",
+      "OpenCV C bindings (camera_integration for document capture)",
+      "Google Firebase C REST wrapper (analytics, crash_reporting, push_notifications)",
+      "liblocation (platform-agnostic GPS abstraction)",
+      "Apple/Google platform-specific biometric C SDK headers",
+      "parson (fallback lightweight JSON if cJSON unavailable)"
+    ],
+    "seed": 318069
+  }
+}

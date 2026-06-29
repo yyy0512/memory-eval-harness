@@ -1,0 +1,38 @@
+{
+  "scenario_id": "c_mobile_game_hard_024_multi_session_development_medium_01",
+  "case_id": "c_mobile_game_hard_024",
+  "category": "extended_development_projects",
+  "original_task_category": "multi_session_development",
+  "project_source": "/home/yyy/projects/LoCoBench-Agent/.claude/worktrees/memory-eval-harness/data/generated/c_mobile_game_hard_024",
+  "project_name": "TycoonX: Franchise Empire Simulator",
+  "language": "c",
+  "complexity": "hard",
+  "session_count": 2,
+  "turns": [
+    {
+      "session": 1,
+      "file": "turns/session_1.jsonl",
+      "turn_count": 1
+    },
+    {
+      "session": 2,
+      "file": "turns/session_2.jsonl",
+      "turn_count": 1
+    }
+  ],
+  "prompts_for_review": [
+    {
+      "session": 1,
+      "file": "prompts/session_1.txt"
+    },
+    {
+      "session": 2,
+      "file": "prompts/session_2.txt"
+    }
+  ],
+  "hashes": {
+    "scenario_json_sha256": "480ac386e470fad80f8b40dd2389469f93b27ba6365e8db3e62a9154e5607f47",
+    "project_tree_sha256": "8f2fef1f3d052a2a8c0a37d4d9c888e46c46336c737b33568370581219e6de47",
+    "prepared_case_sha256": "30bd6d8bfba7ed37e953dc413656a69f630d9881eba73f0c175c95d099e6de66"
+  }
+}

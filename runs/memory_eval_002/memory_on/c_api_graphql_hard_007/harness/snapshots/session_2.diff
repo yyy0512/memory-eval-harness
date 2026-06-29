@@ -1,0 +1,22 @@
+diff --git a/chromacanvas_api_gateway/src/main.c b/chromacanvas_api_gateway/src/main.c
+index 03d54bc..603418a 100644
+--- a/chromacanvas_api_gateway/src/main.c
++++ b/chromacanvas_api_gateway/src/main.c
+@@ -29,6 +29,8 @@
+ #include <time.h>
+ #include <uthash.h>
+ 
++#include "core/logger.h"
++
+ /* ---------------------------------------------------------------------------
+  * Configuration
+  * --------------------------------------------------------------------------*/
+@@ -225,7 +227,7 @@ handle_graphql(struct MHD_Connection *conn,
+         return;
+     }
+ 
+-    LOG(LOG_LEVEL_INFO, "GraphQL query received: %.128s", query->valuestring);
++    CC_LOG_DEBUG("GraphQL query received: %.128s", query->valuestring);
+ 
+     /* Echo back stub response. */
+     const char *response =

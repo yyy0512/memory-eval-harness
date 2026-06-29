@@ -1,0 +1,11 @@
+You are working in the repository at the current working directory. This is session 3 of a 3-session development task. The previous session has ended and conversation context is unavailable. Use the repository state and your persistent memory if available. Do not ask for previous conversation context. Complete only the requirements for this session. At the end, update memory with decisions and remaining work.
+
+Your task is to implement a new 'Decision' node in the ChromaticFlow ETL Canvas over three separate sessions. You must retain context between sessions to build upon your previous work.
+
+**Session 3: Visualization and Documentation**
+In this final session, you will make the new feature visible to the user and document it.
+
+1.  **Modify `src/view.c`**: Update the canvas drawing logic to render the `NODE_TYPE_DECISION`. Draw it differently from other nodes, for example, as a diamond shape, to visually distinguish it.
+2.  **Modify `docs/API.md`**: Add a new section to the API documentation that describes the 'Decision' node. Explain its purpose, the JSON configuration structure, and the format of the `condition` string. Provide a clear example.
+
+*End of Session 3. The feature is now fully implemented, visible, and documented.*

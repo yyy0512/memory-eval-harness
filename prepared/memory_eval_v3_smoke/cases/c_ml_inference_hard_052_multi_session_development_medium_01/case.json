@@ -1,0 +1,47 @@
+{
+  "scenario_id": "c_ml_inference_hard_052_multi_session_development_medium_01",
+  "case_id": "c_ml_inference_hard_052",
+  "category": "extended_development_projects",
+  "original_task_category": "multi_session_development",
+  "project_source": "/home/yyy/projects/LoCoBench-Agent/.claude/worktrees/memory-eval-harness/data/generated/c_ml_inference_hard_052",
+  "project_name": "ChronoBoost Inference Factory",
+  "language": "c",
+  "complexity": "hard",
+  "session_count": 3,
+  "turns": [
+    {
+      "session": 1,
+      "file": "turns/session_1.jsonl",
+      "turn_count": 1
+    },
+    {
+      "session": 2,
+      "file": "turns/session_2.jsonl",
+      "turn_count": 1
+    },
+    {
+      "session": 3,
+      "file": "turns/session_3.jsonl",
+      "turn_count": 1
+    }
+  ],
+  "prompts_for_review": [
+    {
+      "session": 1,
+      "file": "prompts/session_1.txt"
+    },
+    {
+      "session": 2,
+      "file": "prompts/session_2.txt"
+    },
+    {
+      "session": 3,
+      "file": "prompts/session_3.txt"
+    }
+  ],
+  "hashes": {
+    "scenario_json_sha256": "3cf94130d89980c440af9516b3933735e8817d7ce121bc61ae985ca20d507ca2",
+    "project_tree_sha256": "47f7cebe8a9db8d1e54ed891de1c8a67a90b96b99ebcddad5d9f0573f9b43c00",
+    "prepared_case_sha256": "cbb2a8c13b1fd2c40055127e2e70de358037923ba11c19ee154539fefb1fb067"
+  }
+}

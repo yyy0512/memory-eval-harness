@@ -1,0 +1,56 @@
+{
+  "scenario_id": "c_system_security_expert_028_multi_session_development_hard_01",
+  "case_id": "c_system_security_expert_028",
+  "category": "extended_development_projects",
+  "original_task_category": "multi_session_development",
+  "project_source": "/home/yyy/projects/LoCoBench-Agent/.claude/worktrees/memory-eval-harness/data/generated/c_system_security_expert_028",
+  "project_name": "ProdSecure Orchestrator",
+  "language": "c",
+  "complexity": "expert",
+  "session_count": 4,
+  "turns": [
+    {
+      "session": 1,
+      "file": "turns/session_1.jsonl",
+      "turn_count": 1
+    },
+    {
+      "session": 2,
+      "file": "turns/session_2.jsonl",
+      "turn_count": 1
+    },
+    {
+      "session": 3,
+      "file": "turns/session_3.jsonl",
+      "turn_count": 1
+    },
+    {
+      "session": 4,
+      "file": "turns/session_4.jsonl",
+      "turn_count": 1
+    }
+  ],
+  "prompts_for_review": [
+    {
+      "session": 1,
+      "file": "prompts/session_1.txt"
+    },
+    {
+      "session": 2,
+      "file": "prompts/session_2.txt"
+    },
+    {
+      "session": 3,
+      "file": "prompts/session_3.txt"
+    },
+    {
+      "session": 4,
+      "file": "prompts/session_4.txt"
+    }
+  ],
+  "hashes": {
+    "scenario_json_sha256": "3b2a1262596762870f417cf6d615d603042684987204b5e8d44e21600c73f6c0",
+    "project_tree_sha256": "ce0c30330aab1204a7a7f3e6a23d783bb24e15bd52d4b09a29c45dac19990e8d",
+    "prepared_case_sha256": "c07673e05e004a13070142a4208b47e323ed7c576d5e19e6ad0dee548bab34cd"
+  }
+}

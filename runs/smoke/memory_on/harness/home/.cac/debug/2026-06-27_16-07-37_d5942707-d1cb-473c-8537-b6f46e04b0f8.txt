@@ -1,0 +1,97 @@
+2026-06-27T16:07:37.451+08:00 [DEBUG] [settings] MDM settings load completed in 1ms
+2026-06-27T16:07:37.464+08:00 [DEBUG] [ripgrep] initEmbeddedRipgrep start
+2026-06-27T16:07:37.478+08:00 [DEBUG] [ripgrep] embedded rg found: bin=rg, size=6590000, cacheDir=/tmp/codeagent-rg-uid-1000-x64-linux
+2026-06-27T16:07:37.478+08:00 [DEBUG] [ripgrep] cache hit: reusing existing rg at /tmp/codeagent-rg-uid-1000-x64-linux/rg
+2026-06-27T16:07:37.478+08:00 [DEBUG] [ripgrep] Extracted embedded rg to /tmp/codeagent-rg-uid-1000-x64-linux/rg
+2026-06-27T16:07:37.480+08:00 [DEBUG] [embeddedSeccomp] [seccomp] Extracted embedded seccomp assets to /tmp/innercc-seccomp-uid-1000-x64-linux/apply-seccomp and /tmp/innercc-seccomp-uid-1000-x64-linux/unix-block.bpf
+2026-06-27T16:07:37.607+08:00 [DEBUG] [settings] Broken symlink or missing file encountered for settings.json at path: /etc/codeagent/managed-settings.json
+2026-06-27T16:07:37.622+08:00 [DEBUG] [settings] Broken symlink or missing file encountered for settings.json at path: /home/yyy/projects/LoCoBench-Agent/.claude/worktrees/memory-eval-harness/runs/smoke/memory_on/agent_root/workspace/.cac/settings.local.json
+2026-06-27T16:07:37.622+08:00 [DEBUG] [settings] Broken symlink or missing file encountered for settings.json at path: /home/yyy/projects/LoCoBench-Agent/.claude/worktrees/memory-eval-harness/runs/smoke/memory_on/harness/home/.cac/settings.json
+2026-06-27T16:07:37.624+08:00 [DEBUG] [settings] Broken symlink or missing file encountered for settings.json at path: /home/yyy/projects/LoCoBench-Agent/.claude/worktrees/memory-eval-harness/runs/smoke/memory_on/agent_root/workspace/.cac/settings.json
+2026-06-27T16:07:37.625+08:00 [DEBUG] [caCertsConfig] CA certs: Config fallback - globalEnv keys: , settingsEnv keys: none
+2026-06-27T16:07:37.625+08:00 [DEBUG] [init] [init] configureGlobalMTLS starting
+2026-06-27T16:07:37.625+08:00 [DEBUG] [init] [init] configureGlobalMTLS complete
+2026-06-27T16:07:37.625+08:00 [DEBUG] [init] [init] configureGlobalAgents starting
+2026-06-27T16:07:37.625+08:00 [DEBUG] [caCerts] CA certs: useSystemCA=false, extraCertsPath=undefined
+2026-06-27T16:07:37.625+08:00 [DEBUG] [init] [init] configureGlobalAgents complete
+2026-06-27T16:07:37.626+08:00 [DEBUG] [init] [init] Setting up Windows shell
+2026-06-27T16:07:37.626+08:00 [DEBUG] [windowsPaths] [setShellIfWindows] Checking platform for shell setup
+2026-06-27T16:07:37.626+08:00 [DEBUG] [windowsPaths] [setShellIfWindows] Not on Windows, skipping shell setup
+2026-06-27T16:07:37.626+08:00 [DEBUG] [init] [init] Not on Windows or shell detection failed
+2026-06-27T16:07:37.645+08:00 [ERROR] [errorLogSink] Error: Error: Failed to read managed-settings.json: ENOENT: no such file or directory, open '/etc/codeagent/managed-settings.json'
+    at lAN (/$bunfs/root/codeagentcli:226:3506)
+    at u3W (/$bunfs/root/codeagentcli:226:3187)
+    at <anonymous> (/$bunfs/root/codeagentcli:226:1562)
+    at async VQ0 (/$bunfs/root/codeagentcli:226:2048)
+    at async kU5 (/$bunfs/root/codeagentcli:14847:17567)
+2026-06-27T16:07:37.645+08:00 [ERROR] [errorLogSink] Error: Error: Failed to read drop-in directory: ENOENT: no such file or directory, scandir '/etc/codeagent/managed-settings.d'
+    at lAN (/$bunfs/root/codeagentcli:226:3979)
+    at u3W (/$bunfs/root/codeagentcli:226:3187)
+    at <anonymous> (/$bunfs/root/codeagentcli:226:1562)
+    at async VQ0 (/$bunfs/root/codeagentcli:226:2048)
+    at async kU5 (/$bunfs/root/codeagentcli:14847:17567)
+2026-06-27T16:07:37.646+08:00 [DEBUG] [errorLogSink] Error log sink initialized
+2026-06-27T16:07:37.647+08:00 [DEBUG] [main] [STARTUP] Loading MCP configs...
+2026-06-27T16:07:37.651+08:00 [DEBUG] [shellToolUtils] [isPowerShellToolEnabled] Checking if PowerShellTool is enabled
+2026-06-27T16:07:37.651+08:00 [DEBUG] [shellToolUtils] [isPowerShellToolEnabled] Not on Windows, returning false
+2026-06-27T16:07:37.652+08:00 [DEBUG] [toolSearch] disabled by default. Set ENABLE_TOOL_SEARCH=true to enable.
+2026-06-27T16:07:37.652+08:00 [DEBUG] [main] [STARTUP] Running setup()...
+2026-06-27T16:07:37.653+08:00 [DEBUG] [loadSkillsDir] Loading skills from: managed=/etc/codeagent/.claude/skills, user=/home/yyy/projects/LoCoBench-Agent/.claude/worktrees/memory-eval-harness/runs/smoke/memory_on/harness/home/.cac/skills, project=[]
+2026-06-27T16:07:37.663+08:00 [DEBUG] [teammateModeSnapshot] Captured from config: auto
+2026-06-27T16:07:37.664+08:00 [DEBUG] [errorLogSink] Error log sink initialized
+2026-06-27T16:07:37.670+08:00 [DEBUG] [installedPluginsManager] Loaded 0 installed plugins from /home/yyy/projects/LoCoBench-Agent/.claude/worktrees/memory-eval-harness/runs/smoke/memory_on/harness/home/.cac/plugins/installed_plugins.json
+2026-06-27T16:07:37.670+08:00 [DEBUG] [pluginLoader] Found 12 plugins (0 enabled, 12 disabled)
+2026-06-27T16:07:37.670+08:00 [DEBUG] [loadPluginCommands] getPluginSkills: Processing 0 enabled plugins
+2026-06-27T16:07:37.670+08:00 [DEBUG] [loadPluginHooks] Registered 0 hooks from 0 plugins
+2026-06-27T16:07:37.671+08:00 [DEBUG] [loadPluginCommands] Total plugin skills loaded: 0
+2026-06-27T16:07:37.671+08:00 [DEBUG] [loadPluginCommands] Total plugin commands loaded: 0
+2026-06-27T16:07:37.672+08:00 [DEBUG] [main] [STARTUP] setup() completed in 20ms
+2026-06-27T16:07:37.672+08:00 [DEBUG] [caCerts] Cleared CA certificates cache
+2026-06-27T16:07:37.672+08:00 [DEBUG] [mtls] Cleared mTLS configuration cache
+2026-06-27T16:07:37.672+08:00 [DEBUG] [proxy] Cleared proxy agent cache
+2026-06-27T16:07:37.672+08:00 [DEBUG] [caCerts] CA certs: useSystemCA=false, extraCertsPath=undefined
+2026-06-27T16:07:37.672+08:00 [DEBUG] [main] [STARTUP] Loading commands and agents...
+2026-06-27T16:07:37.679+08:00 [DEBUG] [detectRepository] Git remote URL: null
+2026-06-27T16:07:37.679+08:00 [DEBUG] [detectRepository] No git remote URL found
+2026-06-27T16:07:37.707+08:00 [DEBUG] [ripgrep] Ripgrep first use test: PASSED (mode=builtin, path=/tmp/codeagent-rg-uid-1000-x64-linux/rg)
+2026-06-27T16:07:37.708+08:00 [DEBUG] [ripgrep] rg error (signal=null, code=2, stderr: rg: /etc/codeagent/.cac/commands: No such file or directory (os error 2)
+), 0 results
+2026-06-27T16:07:37.708+08:00 [DEBUG] [ripgrep] rg error (signal=null, code=2, stderr: rg: /home/yyy/projects/LoCoBench-Agent/.claude/worktrees/memory-eval-harness/runs/smoke/memory_on/harness/home/.cac/commands: No such file or directory (os error 2)
+), 0 results
+2026-06-27T16:07:37.708+08:00 [DEBUG] [ripgrep] rg error (signal=null, code=2, stderr: rg: /etc/codeagent/.cac/agents: No such file or directory (os error 2)
+), 0 results
+2026-06-27T16:07:37.709+08:00 [DEBUG] [ripgrep] rg error (signal=null, code=2, stderr: rg: /home/yyy/projects/LoCoBench-Agent/.claude/worktrees/memory-eval-harness/runs/smoke/memory_on/harness/home/.cac/agents: No such file or directory (os error 2)
+), 0 results
+2026-06-27T16:07:37.710+08:00 [DEBUG] [markdownConfigLoader] Failed to stat directory /etc/codeagent/.cac/commands: ENOENT: no such file or directory, statx '/etc/codeagent/.cac/commands'
+2026-06-27T16:07:37.710+08:00 [DEBUG] [markdownConfigLoader] Failed to stat directory /home/yyy/projects/LoCoBench-Agent/.claude/worktrees/memory-eval-harness/runs/smoke/memory_on/harness/home/.cac/commands: ENOENT: no such file or directory, statx '/home/yyy/projects/LoCoBench-Agent/.claude/worktrees/memory-eval-harness/runs/smoke/memory_on/harness/home/.cac/commands'
+2026-06-27T16:07:37.710+08:00 [DEBUG] [loadSkillsDir] Loaded 0 unique skills (0 unconditional, 0 conditional, cowork builtin: 0, managed: 0, user: 0, project: 0, additional: 0, legacy commands: 0)
+2026-06-27T16:07:37.710+08:00 [DEBUG] [commands] getSkills returning: 0 skill dir commands, 0 plugin skills, 7 bundled skills, 0 builtin plugin skills
+2026-06-27T16:07:37.711+08:00 [DEBUG] [markdownConfigLoader] Failed to stat directory /etc/codeagent/.cac/agents: ENOENT: no such file or directory, statx '/etc/codeagent/.cac/agents'
+2026-06-27T16:07:37.711+08:00 [DEBUG] [markdownConfigLoader] Failed to stat directory /home/yyy/projects/LoCoBench-Agent/.claude/worktrees/memory-eval-harness/runs/smoke/memory_on/harness/home/.cac/agents: ENOENT: no such file or directory, statx '/home/yyy/projects/LoCoBench-Agent/.claude/worktrees/memory-eval-harness/runs/smoke/memory_on/harness/home/.cac/agents'
+2026-06-27T16:07:37.712+08:00 [DEBUG] [loadPluginAgents] Total plugin agents loaded: 0
+2026-06-27T16:07:37.712+08:00 [DEBUG] [main] [STARTUP] Commands and agents loaded in 40ms
+2026-06-27T16:07:37.712+08:00 [DEBUG] [manager] [LSP MANAGER] initializeLspServerManager() called
+2026-06-27T16:07:37.712+08:00 [DEBUG] [manager] [LSP MANAGER] Created manager instance, state=pending
+2026-06-27T16:07:37.712+08:00 [DEBUG] [manager] [LSP MANAGER] Starting async initialization (generation 1)
+2026-06-27T16:07:37.712+08:00 [DEBUG] [main] Skipping startup prefetches, last ran 1782547658s ago
+2026-06-27T16:07:37.712+08:00 [DEBUG] [main] [STARTUP] MCP configs resolved in 24ms (awaited at +65ms)
+2026-06-27T16:07:37.713+08:00 [DEBUG] [shellToolUtils] [isPowerShellToolEnabled] Checking if PowerShellTool is enabled
+2026-06-27T16:07:37.713+08:00 [DEBUG] [shellToolUtils] [isPowerShellToolEnabled] Not on Windows, returning false
+2026-06-27T16:07:37.713+08:00 [DEBUG] [installedPluginsManager] Syncing installed_plugins.json with enabledPlugins from all settings.json files
+2026-06-27T16:07:37.713+08:00 [DEBUG] [config] Total LSP servers loaded: 0
+2026-06-27T16:07:37.714+08:00 [DEBUG] [installedPluginsManager] Initialized versioned plugins system with 0 plugins
+2026-06-27T16:07:37.714+08:00 [DEBUG] [LSPServerManager] [LSP SERVER MANAGER] getAllLspServers returned 0 server(s)
+2026-06-27T16:07:37.714+08:00 [DEBUG] [LSPServerManager] LSP manager initialized with 0 servers
+2026-06-27T16:07:37.714+08:00 [DEBUG] [caCerts] Cleared CA certificates cache
+2026-06-27T16:07:37.714+08:00 [DEBUG] [mtls] Cleared mTLS configuration cache
+2026-06-27T16:07:37.714+08:00 [DEBUG] [proxy] Cleared proxy agent cache
+2026-06-27T16:07:37.714+08:00 [DEBUG] [caCerts] CA certs: useSystemCA=false, extraCertsPath=undefined
+2026-06-27T16:07:37.714+08:00 [DEBUG] [manager] LSP server manager initialized successfully
+2026-06-27T16:07:37.714+08:00 [DEBUG] [passiveFeedback] LSP notification handlers registered successfully for all 0 server(s)
+2026-06-27T16:07:37.720+08:00 [DEBUG] [instrumentation] [CAC OTEL CONFIG] bootstrap: {"enabled":false,"defaultEnabled":"0","defaultEndpoint":"http://127.0.0.1:4318","endpoint":"http://127.0.0.1:4318","protocol":"http/json","metricsExporter":"otlp","logsExporter":"otlp","tracesExporter":"otlp","metricsUrl":"http://127.0.0.1:4318/v1/metrics","logsUrl":"http://127.0.0.1:4318/v1/logs","tracesUrl":"http://127.0.0.1:4318/v1/traces","metricsExportIntervalMs":60000,"logsExportIntervalMs":5000,"tracesExportIntervalMs":5000,"envEndpoint":"http://127.0.0.1:4318"}
+2026-06-27T16:07:37.721+08:00 [DEBUG] [perfettoTracing] [Perfetto] initializePerfettoTracing called, env value: undefined
+2026-06-27T16:07:37.721+08:00 [DEBUG] [instrumentation] [3P telemetry] isTelemetryEnabled=false (CODEAGENT3_ENABLE_TELEMETRY=undefined)
+2026-06-27T16:07:37.828+08:00 [DEBUG] [cronScheduler] scheduler start() — enabled=false, hasTasks=false
+2026-06-27T16:07:37.830+08:00 [DEBUG] [headlessPluginInstall] installPluginsForHeadless: starting
+2026-06-27T16:07:37.831+08:00 [DEBUG] [headlessPluginInstall] installPluginsForHeadless: no marketplaces declared
+2026-06-27T16:07:37.832+08:00 [DEBUG] [manager] LSP server manager shut down successfully

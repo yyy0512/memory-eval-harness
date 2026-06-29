@@ -1,0 +1,394 @@
+diff --git a/EduGate_ScholarLink/Makefile b/EduGate_ScholarLink/Makefile
+index 7f07044..ab50eba 100644
+--- a/EduGate_ScholarLink/Makefile
++++ b/EduGate_ScholarLink/Makefile
+@@ -83,6 +83,7 @@ endif
+ # ---------------------------------------------------------------------------
+ SRC_CORE        := \
+     src/main.c \
++    src/rate_limiter.c \
+     src/router/router.c \
+     src/validator/validator.c \
+     src/graphql/schema_registry.c \
+@@ -146,16 +147,19 @@ build/%.o: %.c
+ # Unit tests
+ # ---------------------------------------------------------------------------
+ TEST_DIR        := tests
+-TEST_BIN        := build/tests_runner
++TEST_RATE_LIMITER_BIN := build/test_rate_limiter_versions
+ 
+-.PHONY: test
+-test: $(TEST_BIN)
++.PHONY: test test-rate-limiter
++test: test-rate-limiter
++
++test-rate-limiter: $(TEST_RATE_LIMITER_BIN)
+ 	@echo "  RUN     $<"
+-	@$(TEST_BIN)
++	@$<
+ 
+-$(TEST_BIN): $(STATIC_LIB) $(wildcard $(TEST_DIR)/*.c)
+-	@echo "  CC      $(TEST_DIR)/*.c"
+-	@$(CC) $(CFLAGS) $(TEST_DIR)/*.c -o $@ $(LIBS_INTERNAL) $(LIBS_EXTERNAL)
++$(TEST_RATE_LIMITER_BIN): $(TEST_DIR)/test_rate_limiter_versions.c src/rate_limiter.c src/rate_limiter.h
++	@echo "  CC      $@"
++	@$(MKDIR_P) $(dir $@)
++	@$(CC) $(CFLAGS) $(TEST_DIR)/test_rate_limiter_versions.c src/rate_limiter.c -o $@ -lpthread
+ 
+ # ---------------------------------------------------------------------------
+ # Code coverage
+diff --git a/EduGate_ScholarLink/config/gateway.conf b/EduGate_ScholarLink/config/gateway.conf
+index 8e559fc..42d8a84 100644
+--- a/EduGate_ScholarLink/config/gateway.conf
++++ b/EduGate_ScholarLink/config/gateway.conf
+@@ -21,6 +21,7 @@
+ #define EDUGATE_SCHOLARLINK_GATEWAY_CONF
+ 
+ /* ---- Standard Library ---------------------------------------------------- */
++#include <stdbool.h>
+ #include <stddef.h>
+ 
+ /* ---- Gateway Core Abstractions ------------------------------------------ */
+@@ -42,6 +43,12 @@ typedef struct {
+     unsigned int window_sec;   /* Sliding-window in seconds         */
+ } rate_limit_t;
+ 
++typedef struct {
++    const char *api_version;     /* e.g. "v1", "v2"                  */
++    unsigned int quota;          /* Max # requests per window          */
++    unsigned int window_sec;     /* Window length in seconds           */
++} version_rate_limit_t;
++
+ typedef enum {
+     VAL_POLICY_NONE,
+     VAL_POLICY_JSON_SCHEMA,
+@@ -80,6 +87,15 @@ typedef struct {
+     /* Monitoring */
+     unsigned metrics_push_interval_sec;
+     unsigned circuit_breaker_half_life_sec;
++
++    /* Global/default request rate limiting */
++    bool rate_limit_enabled;
++    unsigned rate_limit_requests;
++    unsigned rate_limit_window_seconds;
++
++    /* Version-specific request rate limiting */
++    size_t num_version_rate_limits;
++    const version_rate_limit_t *version_rate_limits;
+ } gateway_conf_t;
+ 
+ /* ------------------------------------------------------------------------- */
+@@ -114,7 +130,16 @@ static const upstream_service_t G_UPSTREAM_SERVICES[] = {
+ 
+ /* Convenience macro for rate-limit units:
+  * “requests per enrolled student” → multiply by N at runtime. */
+-#define RL(r, w)  (rate_limit_t){ .quota = (r), .window_sec = (w) }
++#define RL(r, w)  { .quota = (r), .window_sec = (w) }
++#define VERSION_RL(v, r, w) { .api_version = (v), .quota = (r), .window_sec = (w) }
++
++/* ------------------------------------------------------------------------- */
++/*  API Version Rate Limits                                                  */
++/* ------------------------------------------------------------------------- */
++static const version_rate_limit_t G_VERSION_RATE_LIMITS[] = {
++    VERSION_RL("v1", 60, 60),
++    VERSION_RL("v2", 500, 60)
++};
+ 
+ /* ------------------------------------------------------------------------- */
+ /*  Route Table                                                              */
+@@ -199,7 +224,12 @@ static const gateway_conf_t G_GATEWAY_CONF = {
+     .services                        = G_UPSTREAM_SERVICES,
+     .routes                          = G_ROUTES,
+     .metrics_push_interval_sec       = 10,   /* Push metrics every 10 s   */
+-    .circuit_breaker_half_life_sec   = 30    /* Half-open after 30 s      */
++    .circuit_breaker_half_life_sec   = 30,   /* Half-open after 30 s      */
++    .rate_limit_enabled              = true,
++    .rate_limit_requests             = 100,
++    .rate_limit_window_seconds       = 60,
++    .num_version_rate_limits         = sizeof(G_VERSION_RATE_LIMITS) / sizeof(G_VERSION_RATE_LIMITS[0]),
++    .version_rate_limits             = G_VERSION_RATE_LIMITS
+ };
+ 
+ /* ------------------------------------------------------------------------- */
+diff --git a/EduGate_ScholarLink/docs/API_GUIDE.md b/EduGate_ScholarLink/docs/API_GUIDE.md
+index dcbd0ad..da8baa3 100644
+--- a/EduGate_ScholarLink/docs/API_GUIDE.md
++++ b/EduGate_ScholarLink/docs/API_GUIDE.md
+@@ -11,19 +11,20 @@ EDD-compliant learning applications, CLI utilities, or embedded devices.
+ 
+ ## Table of Contents
+ 1. Quick‐Start
+-2. Versioning Model
+-3. Authentication & Authorization
+-4. REST Endpoints
++2. Rate Limiting Configuration
++3. Versioning Model
++4. Authentication & Authorization
++5. REST Endpoints
+    1. Course Catalog
+    2. Student Profiles
+    3. Assessments
+    4. Analytics
+-5. GraphQL Endpoint
+-6. Request Validation
+-7. Error Handling
+-8. Monitoring & Metrics
+-9. Code Examples (libcurl / POSIX)
+-10. Appendix – JSON Schemas & GraphQL SDL
++6. GraphQL Endpoint
++7. Request Validation
++8. Error Handling
++9. Monitoring & Metrics
++10. Code Examples (libcurl / POSIX)
++11. Appendix – JSON Schemas & GraphQL SDL
+ 
+ ---
+ 
+@@ -46,7 +47,45 @@ The gateway will start listening on `127.0.0.1:8080` (REST) and
+ 
+ ---
+ 
+-## 2. Versioning Model
++## 2. Rate Limiting Configuration
++
++The gateway reads rate limiting settings from `config/gateway.conf` at startup. Edit the `G_GATEWAY_CONF` values and rebuild the gateway for changes to take effect. Global settings are the default for API versions that do not have an explicit policy.
++
++```c
++.rate_limit_enabled        = true,
++.rate_limit_requests       = 100,
++.rate_limit_window_seconds = 60
++```
++
++Version-specific policies are configured in `G_VERSION_RATE_LIMITS`:
++
++```c
++VERSION_RL("v1", 60, 60),
++VERSION_RL("v2", 500, 60)
++```
++
++These correspond to:
++
++```ini
++rate_limit_v1 = 60:60
++rate_limit_v2 = 500:60
++```
++
++| Key | Type | Description |
++|-----|------|-------------|
++| `rate_limit_enabled` | `true` / `false` | Enables or disables request throttling. When disabled, all requests bypass the limiter. |
++| `rate_limit_requests` | integer | Default maximum number of requests allowed per client IP in one window. |
++| `rate_limit_window_seconds` | integer | Default length of the rate-limit window in seconds. |
++
++When a client exceeds the configured quota, the gateway returns **429 Too Many Requests** with:
++
++```json
++{ "error": "Rate limit exceeded" }
++```
++
++---
++
++## 3. Versioning Model
+ 
+ • Semantic segments map to academic cycles:  
+   `v<YEAR>_<TERM>` → `v2024_Spring`, `v2024_Fall`, etc.  
+@@ -66,7 +105,7 @@ header wins when both supplied.
+ 
+ ---
+ 
+-## 3. Authentication & Authorization
++## 4. Authentication & Authorization
+ 
+ | Mechanism  | Transport | Scope            | Comment                       |
+ |------------|-----------|------------------|------------------------------|
+@@ -93,7 +132,7 @@ Authorization: Bearer <jwt>
+ 
+ ---
+ 
+-## 4. REST Endpoints (excerpt)
++## 5. REST Endpoints (excerpt)
+ 
+ ### 4.1 Course Catalog
+ 
+@@ -135,7 +174,7 @@ Admin-only; requires `role=admin` in JWT.
+ 
+ ---
+ 
+-## 5. GraphQL Endpoint
++## 6. GraphQL Endpoint
+ 
+ ```
+ POST /graphql
+@@ -163,7 +202,7 @@ in non-prod.
+ 
+ ---
+ 
+-## 6. Request Validation
++## 7. Request Validation
+ 
+ Every incoming request is checked against pre-registered JSON Schemas or
+ GraphQL SDL constraints.
+@@ -180,7 +219,7 @@ Validation failure returns **422 Unprocessable Entity**.
+ 
+ ---
+ 
+-## 7. Error Handling
++## 8. Error Handling
+ 
+ | HTTP | Code | Title                      | Description                              |
+ |------|------|---------------------------|------------------------------------------|
+@@ -212,7 +251,7 @@ Error format (JSON):
+ 
+ ---
+ 
+-## 8. Monitoring & Metrics
++## 9. Monitoring & Metrics
+ 
+ Prometheus endpoint: `GET /metrics` (text/plain, port `:9090` by default)
+ 
+@@ -228,7 +267,7 @@ Grafana dashboards located under `./ops/grafana/*`.
+ 
+ ---
+ 
+-## 9. Code Examples (libcurl, POSIX)
++## 10. Code Examples (libcurl, POSIX)
+ 
+ The following C snippet performs a secure enrollment
+ (`POST /courses/{id}/enroll`) while handling gateway-specific throttling and
+@@ -320,7 +359,7 @@ int main(int argc, char **argv)
+ 
+ ---
+ 
+-## 10. Appendix
++## 11. Appendix
+ 
+ ### 10.1 Student Profile JSON Schema `student_v1.schema.json`
+ 
+diff --git a/EduGate_ScholarLink/src/main.c b/EduGate_ScholarLink/src/main.c
+index d3ba2b2..f5413c6 100644
+--- a/EduGate_ScholarLink/src/main.c
++++ b/EduGate_ScholarLink/src/main.c
+@@ -23,6 +23,10 @@
+ 
+ #include <microhttpd.h>
+ 
++#include <arpa/inet.h>
++#include <netinet/in.h>
++#include <sys/socket.h>
++
+ #include <stdatomic.h>
+ #include <stdbool.h>
+ #include <stdint.h>
+@@ -33,6 +37,9 @@
+ #include <time.h>
+ #include <unistd.h>
+ 
++#include "rate_limiter.h"
++#include "../config/gateway.conf"
++
+ /* ------------------------------------------------------------------------- */
+ /* Compile-time / run-time configuration                                     */
+ /* ------------------------------------------------------------------------- */
+@@ -160,6 +167,53 @@ respond_text(struct MHD_Connection *conn, unsigned int code,
+     return respond(conn, code, TEXT_CONTENT_TYPE, text);
+ }
+ 
++static const char *
++get_client_ip(struct MHD_Connection *conn)
++{
++    const union MHD_ConnectionInfo *info =
++        MHD_get_connection_info(conn, MHD_CONNECTION_INFO_CLIENT_ADDRESS);
++
++    if (!info || !info->client_addr)
++        return "unknown";
++
++    const struct sockaddr *addr = info->client_addr;
++    if (addr->sa_family == AF_INET) {
++        static _Thread_local char ip[INET_ADDRSTRLEN];
++        const struct sockaddr_in *in = (const struct sockaddr_in *)addr;
++        return inet_ntop(AF_INET, &in->sin_addr, ip, sizeof(ip)) ? ip : "unknown";
++    }
++
++    if (addr->sa_family == AF_INET6) {
++        static _Thread_local char ip[INET6_ADDRSTRLEN];
++        const struct sockaddr_in6 *in6 = (const struct sockaddr_in6 *)addr;
++        return inet_ntop(AF_INET6, &in6->sin6_addr, ip, sizeof(ip)) ? ip : "unknown";
++    }
++
++    return "unknown";
++}
++
++static const char *
++get_api_version_from_url(const char *url)
++{
++    static _Thread_local char version[32];
++
++    if (!url || url[0] != '/') {
++        return NULL;
++    }
++
++    const char *start = url + 1;
++    const char *end = strchr(start, '/');
++    size_t len = end ? (size_t)(end - start) : strlen(start);
++
++    if (len == 0 || len >= sizeof(version) || start[0] != 'v') {
++        return NULL;
++    }
++
++    memcpy(version, start, len);
++    version[len] = '\0';
++    return version;
++}
++
+ /* ------------------------------------------------------------------------- */
+ /* URI Handlers                                                              */
+ /* ------------------------------------------------------------------------- */
+@@ -295,6 +349,14 @@ ahc_router_cb(void *cls,
+      */
+     bool consumed_upload = (*con_cls != NULL);
+ 
++    if (*upload_data_size == 0 &&
++        !rate_limiter_allow_version(get_client_ip(conn), get_api_version_from_url(url))) {
++        atomic_fetch_add_explicit(&g_total_requests, 1, memory_order_relaxed);
++        atomic_fetch_add_explicit(&g_failed_requests, 1, memory_order_relaxed);
++        return respond_json(conn, MHD_HTTP_TOO_MANY_REQUESTS,
++                            "{ \"error\": \"Rate limit exceeded\" }");
++    }
++
+     /* Dispatch to appropriate route */
+     for (size_t i = 0; i < g_route_count; ++i) {
+         if (strcmp(url, g_routes[i].path) == 0) {
+@@ -367,6 +429,16 @@ main(void)
+     uint16_t listen_port = (uint16_t)(port_env ? atoi(port_env)
+                                               : DEFAULT_LISTEN_PORT);
+ 
++    const gateway_conf_t *gateway_conf = gateway_conf_get();
++    rate_limiter_configure(gateway_conf->rate_limit_enabled,
++                           gateway_conf->rate_limit_requests,
++                           gateway_conf->rate_limit_window_seconds);
++    for (size_t i = 0; i < gateway_conf->num_version_rate_limits; ++i) {
++        const version_rate_limit_t *limit = &gateway_conf->version_rate_limits[i];
++        rate_limiter_configure_version(limit->api_version, limit->quota,
++                                       limit->window_sec);
++    }
++
+     char logbuf[128];
+     snprintf(logbuf, sizeof(logbuf),
+              "Starting EduGate ScholarLink (%s) on port %u",
+diff --git a/EduGate_ScholarLink/src/rate_limiter.h b/EduGate_ScholarLink/src/rate_limiter.h
+index f83ae5f..1a354be 100644
+--- a/EduGate_ScholarLink/src/rate_limiter.h
++++ b/EduGate_ScholarLink/src/rate_limiter.h
+@@ -3,7 +3,13 @@
+ 
+ #include <stdbool.h>
+ 
++void rate_limiter_configure(bool enabled, unsigned int max_requests,
++                            unsigned int window_seconds);
++void rate_limiter_configure_version(const char *api_version,
++                                    unsigned int max_requests,
++                                    unsigned int window_seconds);
+ bool rate_limiter_allow(const char *client_ip);
++bool rate_limiter_allow_version(const char *client_ip, const char *api_version);
+ void rate_limiter_reset(void);
+ 
+ #endif /* EDUGATE_RATE_LIMITER_H */

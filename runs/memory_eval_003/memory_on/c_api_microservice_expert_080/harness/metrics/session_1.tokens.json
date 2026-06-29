@@ -1,0 +1,11 @@
+{
+  "input_tokens": 388933,
+  "output_tokens": 4848,
+  "cache_creation_input_tokens": 0,
+  "cache_read_input_tokens": 367616,
+  "new_input_output_tokens": 393781,
+  "total_reported_tokens": 761397,
+  "total_cost_usd": 2.249673,
+  "duration_ms": 224181,
+  "duration_api_ms": 223479
+}

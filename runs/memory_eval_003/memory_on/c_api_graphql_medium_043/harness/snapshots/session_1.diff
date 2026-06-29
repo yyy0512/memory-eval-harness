@@ -1,0 +1,368 @@
+diff --git a/pulsestream_showtime_api/src/api/websocket_handler.c b/pulsestream_showtime_api/src/api/websocket_handler.c
+index 02bfd1e..f83e39a 100644
+--- a/pulsestream_showtime_api/src/api/websocket_handler.c
++++ b/pulsestream_showtime_api/src/api/websocket_handler.c
+@@ -25,8 +25,12 @@
+ #include <signal.h>
+ #include <time.h>
+ #include <errno.h>
++#include <stdbool.h>
++#include <stdio.h>
+ 
+ #include <libwebsockets.h>
++#include <jansson.h>
++#include "uthash.h"
+ 
+ #include "logger.h"         /* Project-internal structured logging API      */
+ #include "jwt.h"            /* Small wrapper around libjwt                  */
+@@ -65,10 +69,80 @@ typedef struct
+ 
+     rate_limiter_t rl;                /* simple token bucket                   */
+ 
++    char          connection_id[32];  /* stable id for subscription ownership  */
+     bool          closed;             /* connection already closed?            */
+ } pstream_ws_client_t;
+ 
+ 
++typedef struct pstream_subscription
++{
++    char                    *subscription_id; /* client message id / hash fallback     */
++    char                    *connection_id;   /* owning WebSocket connection id        */
++    char                    *query;           /* parsed GraphQL subscription document  */
++    char                    *operation_name;  /* optional operation name               */
++    char                    *variables_json;  /* optional variables payload            */
++    pstream_ws_client_t     *client;          /* non-owning connection pointer         */
++    UT_hash_handle           hh;
++} pstream_subscription_t;
++
++
++typedef enum
++{
++    GQL_VALUE_NULL,
++    GQL_VALUE_INT,
++    GQL_VALUE_STRING,
++    GQL_VALUE_BOOL
++} gql_value_kind_t;
++
++typedef struct {
++    gql_value_kind_t kind;
++    union {
++        int64_t   int_v;
++        bool      bool_v;
++        char     *str_v;
++    };
++} gql_value_t;
++
++typedef struct gql_argument {
++    char       *name;
++    gql_value_t value;
++} gql_argument_t;
++
++typedef struct gql_field gql_field_t;
++
++struct gql_field {
++    char            *name;
++    gql_argument_t  *args;
++    size_t           arg_cnt;
++    gql_field_t     *children;
++    size_t           child_cnt;
++};
++
++typedef enum {
++    GQL_OP_QUERY,
++    GQL_OP_MUTATION,
++    GQL_OP_SUBSCRIPTION
++} gql_operation_kind_t;
++
++typedef struct {
++    gql_operation_kind_t kind;
++    char                *name;
++    gql_field_t         *selection_set;
++    size_t               selection_cnt;
++} gql_operation_t;
++
++typedef struct {
++    gql_operation_t *operations;
++    size_t           op_cnt;
++} gql_document_t;
++
++int graphql_parse_document(const char *src,
++                           gql_document_t *out,
++                           char *errbuf,
++                           size_t errcap);
++void graphql_free_document(gql_document_t *doc);
++
++
+ /*
+  * Module globals
+  * (wrapped with a mutex for thread-safety because libwebsockets core can run
+@@ -76,8 +150,10 @@ typedef struct
+  */
+ static struct
+ {
+-    struct lws_context *ctx;
+-    pthread_mutex_t     lock;
++    struct lws_context       *ctx;
++    pthread_mutex_t           lock;
++    pstream_subscription_t   *subscriptions;
++    uint64_t                  next_connection_id;
+ 
+     /* mapping announcement => ring broadcast list would live here in a real
+      * production system. For simplicity we broadcast to every open socket. */
+@@ -92,6 +168,14 @@ static int  ws_callback(struct lws *wsi, enum lws_callback_reasons reason,
+                         void *user, void *in, size_t len);
+ static int  authenticate_client(struct lws *wsi, pstream_ws_client_t *client);
+ static void schedule_ping(pstream_ws_client_t *client, unsigned int sec);
++static int  process_graphql_ws_message(pstream_ws_client_t *client,
++                                       const char *payload, size_t len);
++static int  handle_subscription_operation(pstream_ws_client_t *client,
++                                          const char *message_id,
++                                          const char *query,
++                                          const char *operation_name,
++                                          json_t *variables);
++static void remove_client_subscriptions(pstream_ws_client_t *client);
+ static void event_bus_listener(const char *topic,
+                                const uint8_t *payload, size_t len,
+                                void *user_data);
+@@ -143,10 +227,189 @@ queue_outbound_json(pstream_ws_client_t *client,
+ }
+ 
+ /* ────────────────────────────────────────────────────────────────────────── */
++/* Helper: GraphQL WebSocket message processing                              */
++
++static char *
++json_dump_compact_or_empty(json_t *value)
++{
++    if (!value)
++        return strdup("");
++
++    char *dumped = json_dumps(value, JSON_COMPACT);
++    if (dumped)
++        return dumped;
++
++    return strdup("");
++}
++
++static const char *
++operation_kind_name(gql_operation_kind_t kind)
++{
++    switch (kind) {
++    case GQL_OP_QUERY:
++        return "query";
++    case GQL_OP_MUTATION:
++        return "mutation";
++    case GQL_OP_SUBSCRIPTION:
++        return "subscription";
++    default:
++        return "unknown";
++    }
++}
++
++static void
++free_subscription(pstream_subscription_t *sub)
++{
++    if (!sub)
++        return;
++
++    free(sub->subscription_id);
++    free(sub->connection_id);
++    free(sub->query);
++    free(sub->operation_name);
++    free(sub->variables_json);
++    free(sub);
++}
++
++static void
++remove_client_subscriptions(pstream_ws_client_t *client)
++{
++    pstream_subscription_t *sub, *tmp;
++
++    pthread_mutex_lock(&g_ws.lock);
++    HASH_ITER(hh, g_ws.subscriptions, sub, tmp) {
++        if (sub->client == client) {
++            HASH_DEL(g_ws.subscriptions, sub);
++            free_subscription(sub);
++        }
++    }
++    pthread_mutex_unlock(&g_ws.lock);
++}
++
++static int
++store_subscription(pstream_subscription_t *sub)
++{
++    pthread_mutex_lock(&g_ws.lock);
++
++    pstream_subscription_t *existing = NULL;
++    HASH_FIND_STR(g_ws.subscriptions, sub->subscription_id, existing);
++    if (existing) {
++        HASH_DEL(g_ws.subscriptions, existing);
++        free_subscription(existing);
++    }
++
++    HASH_ADD_KEYPTR(hh, g_ws.subscriptions, sub->subscription_id,
++                    strlen(sub->subscription_id), sub);
++
++    pthread_mutex_unlock(&g_ws.lock);
++    return 0;
++}
++
++static int
++handle_subscription_operation(pstream_ws_client_t *client,
++                              const char *message_id,
++                              const char *query,
++                              const char *operation_name,
++                              json_t *variables)
++{
++    pstream_subscription_t *sub = calloc(1, sizeof(*sub));
++    if (!sub)
++        return -ENOMEM;
++
++    char fallback_id[64];
++    snprintf(fallback_id, sizeof(fallback_id), "%s:%p",
++             client->connection_id, (const void *)sub);
++
++    const char *subscription_id = message_id && *message_id ? message_id : fallback_id;
++    sub->subscription_id = strdup(subscription_id);
++    sub->connection_id = strdup(client->connection_id);
++    sub->query = strdup(query);
++    sub->operation_name = strdup(operation_name ? operation_name : "");
++    sub->variables_json = json_dump_compact_or_empty(variables);
++    sub->client = client;
++
++    if (!sub->subscription_id || !sub->connection_id || !sub->query ||
++        !sub->operation_name || !sub->variables_json) {
++        free_subscription(sub);
++        return -ENOMEM;
++    }
++
++    store_subscription(sub);
++
++    log_info("websocket: registered subscription id=%s conn=%s uid=%"PRIu64,
++             sub->subscription_id, sub->connection_id, client->claims.user_id);
++    return 0;
++}
++
++static int
++process_graphql_ws_message(pstream_ws_client_t *client, const char *payload, size_t len)
++{
++    char *json_text = malloc(len + 1);
++    if (!json_text)
++        return -ENOMEM;
++
++    memcpy(json_text, payload, len);
++    json_text[len] = '\0';
++
++    json_error_t jerr;
++    json_t *root = json_loads(json_text, 0, &jerr);
++    free(json_text);
++
++    if (!root) {
++        log_warn("websocket: malformed JSON frame at line %d: %s",
++                 jerr.line, jerr.text);
++        return -EINVAL;
++    }
++
++    const char *message_id = json_string_value(json_object_get(root, "id"));
++    json_t *message_payload = json_object_get(root, "payload");
++    json_t *request = json_is_object(message_payload) ? message_payload : root;
++
++    const char *query = json_string_value(json_object_get(request, "query"));
++    const char *operation_name =
++        json_string_value(json_object_get(request, "operationName"));
++    json_t *variables = json_object_get(request, "variables");
++
++    if (!query) {
++        json_decref(root);
++        log_warn("websocket: GraphQL frame missing query");
++        return -EINVAL;
++    }
++
++    gql_document_t doc;
++    char errbuf[256];
++    if (graphql_parse_document(query, &doc, errbuf, sizeof(errbuf)) != 0) {
++        json_decref(root);
++        log_warn("websocket: GraphQL parse failed: %s", errbuf);
++        return -EINVAL;
++    }
++
++    if (doc.op_cnt == 0) {
++        graphql_free_document(&doc);
++        json_decref(root);
++        log_warn("websocket: GraphQL frame contained no operations");
++        return -EINVAL;
++    }
++
++    gql_operation_t *op = &doc.operations[0];
++    log_debug("websocket: received %s operation from uid=%"PRIu64,
++              operation_kind_name(op->kind), client->claims.user_id);
++
++    int rc = 0;
++    if (op->kind == GQL_OP_SUBSCRIPTION) {
++        rc = handle_subscription_operation(client, message_id, query,
++                                           operation_name, variables);
++    } else {
++        log_debug("websocket: leaving %s operation on existing execution path",
++                  operation_kind_name(op->kind));
++    }
++
++    graphql_free_document(&doc);
++    json_decref(root);
++    return rc;
++}
++
+ 
+-/*
+- * WebSocket callbacks
+- */
+ static int
+ ws_callback(struct lws            *wsi,
+             enum lws_callback_reasons reason,
+@@ -162,6 +425,12 @@ ws_callback(struct lws            *wsi,
+         /* Initialise per-connection fields */
+         memset(client, 0, sizeof(*client));
+         client->wsi  = wsi;
++
++        pthread_mutex_lock(&g_ws.lock);
++        snprintf(client->connection_id, sizeof(client->connection_id), "ws-%"PRIu64,
++                 ++g_ws.next_connection_id);
++        pthread_mutex_unlock(&g_ws.lock);
++
+         client->ring = lws_ring_create(sizeof(uint8_t), WS_RING_BUFFER_COUNT,
+                                        NULL); /* use default copy/destroy */
+         if (!client->ring) {
+@@ -223,8 +492,10 @@ ws_callback(struct lws            *wsi,
+             return -1;
+         }
+ 
+-        /* TODO: parse GraphQL WS message and register/unregister subscription
+-         * For brevity we only log */
++        if (process_graphql_ws_message(client, (const char *)in, len) != 0)
++            log_warn("websocket: failed to process frame from uid=%"PRIu64,
++                     client->claims.user_id);
++
+         log_debug("websocket: received %zu bytes from uid=%"PRIu64,
+                   len, client->claims.user_id);
+         break;
+@@ -233,6 +504,7 @@ ws_callback(struct lws            *wsi,
+     case LWS_CALLBACK_CLOSED:
+     case LWS_CALLBACK_CLIENT_CONNECTION_ERROR: {
+         client->closed = true;
++        remove_client_subscriptions(client);
+         rate_limiter_destroy(&client->rl);
+ 
+         if (client->ring)
+@@ -405,6 +677,14 @@ websocket_handler_shutdown(void)
+ {
+     event_bus_unsubscribe("stream.*", event_bus_listener, NULL);
+ 
++    pstream_subscription_t *sub, *tmp;
++    pthread_mutex_lock(&g_ws.lock);
++    HASH_ITER(hh, g_ws.subscriptions, sub, tmp) {
++        HASH_DEL(g_ws.subscriptions, sub);
++        free_subscription(sub);
++    }
++    pthread_mutex_unlock(&g_ws.lock);
++
+     lws_context_destroy(g_ws.ctx);
+     pthread_mutex_destroy(&g_ws.lock);
+ 

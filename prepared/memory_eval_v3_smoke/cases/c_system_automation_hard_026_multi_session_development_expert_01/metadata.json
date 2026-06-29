@@ -1,0 +1,53 @@
+{
+  "scenario_id": "c_system_automation_hard_026_multi_session_development_expert_01",
+  "case_id": "c_system_automation_hard_026",
+  "title": "Implement System Quarantine and Remediation Feature",
+  "description": "The VitalOps Orchestrator is responsible for managing critical clinical IT systems. A new security requirement has been mandated: the ability to 'quarantine' a system if a high-severity security vulnerability is detected or if it exhibits anomalous behavior. Quarantining involves applying a strict network policy to isolate the system from the network, preventing potential lateral movement of threats, and simultaneously issuing a high-priority alert to the operations team. This task requires implementing this feature end-to-end, touching the core domain logic, the remediation engine, and the infrastructure-facing adapters. The work will be broken down into three distinct development sessions to simulate a realistic, multi-day implementation process.",
+  "difficulty": "expert",
+  "project_spec": {
+    "unique_id": "c_system_automation_hard_026",
+    "name": "VitalOps Orchestrator",
+    "description": "VitalOps Orchestrator is a high-assurance system-automation platform written in C that automates the lifecycle of critical healthcare infrastructure— from hospital information systems to bedside IoT devices— while enforcing clinical-grade reliability and compliance. Built on a strict hexagonal architecture, the core clinical-logic engine (the \"domain hexagon\") remains completely isolated from technology concerns, allowing hospital administrators to add or swap providers for configuration management, alert routing, backup media, or security scanners without touching safety-critical code.\n\nInside the hexagon, commands such as “Deploy PACS node,” “Fail-over ICU gateway,” or “Rotate EHR secrets” are modeled as value-rich domain commands. Ports expose these commands to adapters that implement Chain-of-Responsibility pipelines (e.g., multi-stage security scanning → deployment scheduling → post-deployment validation) and Observer-pattern alert streams that publish HL7/FHIR-encoded events onto an event bus. An internal service mesh of lightweight agents ensures load-balanced execution across clusters of on-prem and cloud nodes, while the event-driven core continuously evaluates performance metrics and backup health to trigger pre-emptive remediation.\n\nThe result is a distinctly healthcare-focused automation fabric capable of orchestrating thousands of clinical workloads, automatically enforcing HIPAA-grade auditing, and delivering zero-downtime upgrades for life-critical services like medication dispensing or telemetry feeds.",
+    "domain": "system_automation",
+    "complexity": "hard",
+    "language": "c",
+    "architecture": "hexagonal",
+    "theme": "healthcare",
+    "target_file_count": 64,
+    "target_token_count": 491633,
+    "features": [
+      "configuration_management",
+      "alerting",
+      "deployment_automation",
+      "security_scanning",
+      "performance_metrics",
+      "backup_recovery",
+      "log_aggregation",
+      "load_balancing"
+    ],
+    "architecture_patterns": [
+      "Chain_of_Responsibility",
+      "Observer_Pattern",
+      "Event_Driven",
+      "Command_Pattern",
+      "Service_Mesh"
+    ],
+    "dependencies": [
+      "libuv (async I/O to power event-driven adapters)",
+      "protobuf-c (portable serialization for HL7/FHIR message adapters)",
+      "ZeroMQ (high-throughput messaging backbone for service mesh)",
+      "cJSON (lightweight JSON parsing for configuration manifests)",
+      "libyaml (configuration management DSL parsing)",
+      "OpenSSL (TLS, certificate rotation, security scanning hooks)",
+      "libcurl (pull container images & call external scanning APIs)",
+      "prometheus-c-client (export performance metrics)",
+      "zlog (structured log aggregation)",
+      "SQLite (embedded checkpoint store for backup/restore metadata)",
+      "jansson (JSON schema validation for deployment plans)",
+      "uthash (in-memory registries for load-balancer state)",
+      "cmocka (unit testing of domain hexagon)",
+      "Docker SDK for C / containerd-c (deployment automation targets)"
+    ],
+    "seed": 98662
+  }
+}

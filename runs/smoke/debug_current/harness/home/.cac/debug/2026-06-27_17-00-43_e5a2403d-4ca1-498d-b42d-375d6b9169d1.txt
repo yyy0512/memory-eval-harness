@@ -1,0 +1,185 @@
+2026-06-27T17:00:43.219+08:00 [DEBUG] [settings] MDM settings load completed in 7ms
+2026-06-27T17:00:43.302+08:00 [DEBUG] [ripgrep] initEmbeddedRipgrep start
+2026-06-27T17:00:43.455+08:00 [DEBUG] [ripgrep] embedded rg found: bin=rg, size=6590000, cacheDir=/tmp/codeagent-rg-uid-1000-x64-linux
+2026-06-27T17:00:43.456+08:00 [DEBUG] [ripgrep] cache hit: reusing existing rg at /tmp/codeagent-rg-uid-1000-x64-linux/rg
+2026-06-27T17:00:43.457+08:00 [DEBUG] [ripgrep] Extracted embedded rg to /tmp/codeagent-rg-uid-1000-x64-linux/rg
+2026-06-27T17:00:43.477+08:00 [DEBUG] [embeddedSeccomp] [seccomp] Extracted embedded seccomp assets to /tmp/innercc-seccomp-uid-1000-x64-linux/apply-seccomp and /tmp/innercc-seccomp-uid-1000-x64-linux/unix-block.bpf
+2026-06-27T17:00:44.232+08:00 [DEBUG] [settings] Broken symlink or missing file encountered for settings.json at path: /etc/codeagent/managed-settings.json
+2026-06-27T17:00:44.284+08:00 [DEBUG] [settings] Broken symlink or missing file encountered for settings.json at path: /home/yyy/projects/LoCoBench-Agent/.claude/worktrees/memory-eval-harness/runs/smoke/debug_current/agent_root/workspace/.cac/settings.local.json
+2026-06-27T17:00:44.284+08:00 [DEBUG] [settings] Broken symlink or missing file encountered for settings.json at path: /home/yyy/projects/LoCoBench-Agent/.claude/worktrees/memory-eval-harness/runs/smoke/debug_current/harness/home/.cac/settings.json
+2026-06-27T17:00:44.295+08:00 [DEBUG] [settings] Broken symlink or missing file encountered for settings.json at path: /home/yyy/projects/LoCoBench-Agent/.claude/worktrees/memory-eval-harness/runs/smoke/debug_current/agent_root/workspace/.cac/settings.json
+2026-06-27T17:00:44.296+08:00 [DEBUG] [caCertsConfig] CA certs: Config fallback - globalEnv keys: , settingsEnv keys: none
+2026-06-27T17:00:44.305+08:00 [ERROR] [config] Failed to save config with lock: Error: ENOENT: no such file or directory, lstat '/home/yyy/projects/LoCoBench-Agent/.claude/worktrees/memory-eval-harness/runs/smoke/debug_current/harness/home/.cac.json'
+2026-06-27T17:00:44.309+08:00 [DEBUG] [file] Setting permissions for new file: 600
+2026-06-27T17:00:44.309+08:00 [DEBUG] [file] Writing to temp file: /home/yyy/projects/LoCoBench-Agent/.claude/worktrees/memory-eval-harness/runs/smoke/debug_current/harness/home/.cac.json.tmp.332291.1782550844308
+2026-06-27T17:00:44.315+08:00 [DEBUG] [file] Temp file written successfully, size: 50 bytes
+2026-06-27T17:00:44.315+08:00 [DEBUG] [file] Renaming /home/yyy/projects/LoCoBench-Agent/.claude/worktrees/memory-eval-harness/runs/smoke/debug_current/harness/home/.cac.json.tmp.332291.1782550844308 to /home/yyy/projects/LoCoBench-Agent/.claude/worktrees/memory-eval-harness/runs/smoke/debug_current/harness/home/.cac.json
+2026-06-27T17:00:44.316+08:00 [DEBUG] [file] File /home/yyy/projects/LoCoBench-Agent/.claude/worktrees/memory-eval-harness/runs/smoke/debug_current/harness/home/.cac.json written atomically
+2026-06-27T17:00:44.316+08:00 [DEBUG] [init] [init] configureGlobalMTLS starting
+2026-06-27T17:00:44.316+08:00 [DEBUG] [init] [init] configureGlobalMTLS complete
+2026-06-27T17:00:44.316+08:00 [DEBUG] [init] [init] configureGlobalAgents starting
+2026-06-27T17:00:44.317+08:00 [DEBUG] [caCerts] CA certs: useSystemCA=false, extraCertsPath=undefined
+2026-06-27T17:00:44.318+08:00 [DEBUG] [init] [init] configureGlobalAgents complete
+2026-06-27T17:00:44.318+08:00 [DEBUG] [init] [init] Setting up Windows shell
+2026-06-27T17:00:44.318+08:00 [DEBUG] [windowsPaths] [setShellIfWindows] Checking platform for shell setup
+2026-06-27T17:00:44.318+08:00 [DEBUG] [windowsPaths] [setShellIfWindows] Not on Windows, skipping shell setup
+2026-06-27T17:00:44.318+08:00 [DEBUG] [init] [init] Not on Windows or shell detection failed
+2026-06-27T17:00:44.364+08:00 [ERROR] [errorLogSink] Error: Error: Failed to read managed-settings.json: ENOENT: no such file or directory, open '/etc/codeagent/managed-settings.json'
+    at lAN (/$bunfs/root/codeagentcli:226:3506)
+    at u3W (/$bunfs/root/codeagentcli:226:3187)
+    at <anonymous> (/$bunfs/root/codeagentcli:226:1562)
+    at async VQ0 (/$bunfs/root/codeagentcli:226:2048)
+    at async kU5 (/$bunfs/root/codeagentcli:14847:17567)
+2026-06-27T17:00:44.364+08:00 [ERROR] [errorLogSink] Error: Error: Failed to read drop-in directory: ENOENT: no such file or directory, scandir '/etc/codeagent/managed-settings.d'
+    at lAN (/$bunfs/root/codeagentcli:226:3979)
+    at u3W (/$bunfs/root/codeagentcli:226:3187)
+    at <anonymous> (/$bunfs/root/codeagentcli:226:1562)
+    at async VQ0 (/$bunfs/root/codeagentcli:226:2048)
+    at async kU5 (/$bunfs/root/codeagentcli:14847:17567)
+2026-06-27T17:00:44.364+08:00 [ERROR] [errorLogSink] Error: Error: Failed to read new backup directory: dir=/home/yyy/projects/LoCoBench-Agent/.claude/worktrees/memory-eval-harness/runs/smoke/debug_current/harness/home/.cac/backups, error=ENOENT: no such file or directory, scandir '/home/yyy/projects/LoCoBench-Agent/.claude/worktrees/memory-eval-harness/runs/smoke/debug_current/harness/home/.cac/backups'
+    at I2A (/$bunfs/root/codeagentcli:498:7521)
+    at r$I (/$bunfs/root/codeagentcli:498:8269)
+    at hJI (/$bunfs/root/codeagentcli:498:7231)
+    at <anonymous> (/$bunfs/root/codeagentcli:13366:13197)
+    at Z (/$bunfs/root/codeagentcli:2:8065)
+    at <anonymous> (/$bunfs/root/codeagentcli:14797:466)
+2026-06-27T17:00:44.364+08:00 [ERROR] [errorLogSink] Error: Error: Failed to read new backup directory: dir=/home/yyy/projects/LoCoBench-Agent/.claude/worktrees/memory-eval-harness/runs/smoke/debug_current/harness/home/.cac/backups, error=ENOENT: no such file or directory, scandir '/home/yyy/projects/LoCoBench-Agent/.claude/worktrees/memory-eval-harness/runs/smoke/debug_current/harness/home/.cac/backups'
+    at I2A (/$bunfs/root/codeagentcli:498:7521)
+    at r$I (/$bunfs/root/codeagentcli:498:8269)
+    at xZ (/$bunfs/root/codeagentcli:498:4797)
+    at qCG (/$bunfs/root/codeagentcli:10534:16606)
+    at <anonymous> (/$bunfs/root/codeagentcli:13366:13311)
+    at Z (/$bunfs/root/codeagentcli:2:8065)
+    at <anonymous> (/$bunfs/root/codeagentcli:14797:466)
+2026-06-27T17:00:44.364+08:00 [ERROR] [errorLogSink] Error: Error: Failed to read new backup directory: dir=/home/yyy/projects/LoCoBench-Agent/.claude/worktrees/memory-eval-harness/runs/smoke/debug_current/harness/home/.cac/backups, error=ENOENT: no such file or directory, scandir '/home/yyy/projects/LoCoBench-Agent/.claude/worktrees/memory-eval-harness/runs/smoke/debug_current/harness/home/.cac/backups'
+    at I2A (/$bunfs/root/codeagentcli:498:7521)
+    at r$I (/$bunfs/root/codeagentcli:498:8269)
+    at QW (/$bunfs/root/codeagentcli:498:3193)
+    at gMZ (/$bunfs/root/codeagentcli:511:1217)
+    at <anonymous> (/$bunfs/root/codeagentcli:13366:13626)
+    at Z (/$bunfs/root/codeagentcli:2:8065)
+    at <anonymous> (/$bunfs/root/codeagentcli:14797:466)
+2026-06-27T17:00:44.364+08:00 [DEBUG] [errorLogSink] Error log sink initialized
+2026-06-27T17:00:44.372+08:00 [DEBUG] [file] Preserving file permissions: 100600
+2026-06-27T17:00:44.372+08:00 [DEBUG] [file] Writing to temp file: /home/yyy/projects/LoCoBench-Agent/.claude/worktrees/memory-eval-harness/runs/smoke/debug_current/harness/home/.cac.json.tmp.332291.1782550844372
+2026-06-27T17:00:44.376+08:00 [DEBUG] [file] Temp file written successfully, size: 86 bytes
+2026-06-27T17:00:44.377+08:00 [DEBUG] [file] Applied original permissions to temp file
+2026-06-27T17:00:44.377+08:00 [DEBUG] [file] Renaming /home/yyy/projects/LoCoBench-Agent/.claude/worktrees/memory-eval-harness/runs/smoke/debug_current/harness/home/.cac.json.tmp.332291.1782550844372 to /home/yyy/projects/LoCoBench-Agent/.claude/worktrees/memory-eval-harness/runs/smoke/debug_current/harness/home/.cac.json
+2026-06-27T17:00:44.377+08:00 [DEBUG] [file] File /home/yyy/projects/LoCoBench-Agent/.claude/worktrees/memory-eval-harness/runs/smoke/debug_current/harness/home/.cac.json written atomically
+2026-06-27T17:00:44.379+08:00 [DEBUG] [file] Preserving file permissions: 100600
+2026-06-27T17:00:44.379+08:00 [DEBUG] [file] Writing to temp file: /home/yyy/projects/LoCoBench-Agent/.claude/worktrees/memory-eval-harness/runs/smoke/debug_current/harness/home/.cac.json.tmp.332291.1782550844379
+2026-06-27T17:00:44.384+08:00 [DEBUG] [file] Temp file written successfully, size: 125 bytes
+2026-06-27T17:00:44.384+08:00 [DEBUG] [file] Applied original permissions to temp file
+2026-06-27T17:00:44.384+08:00 [DEBUG] [file] Renaming /home/yyy/projects/LoCoBench-Agent/.claude/worktrees/memory-eval-harness/runs/smoke/debug_current/harness/home/.cac.json.tmp.332291.1782550844379 to /home/yyy/projects/LoCoBench-Agent/.claude/worktrees/memory-eval-harness/runs/smoke/debug_current/harness/home/.cac.json
+2026-06-27T17:00:44.384+08:00 [DEBUG] [file] File /home/yyy/projects/LoCoBench-Agent/.claude/worktrees/memory-eval-harness/runs/smoke/debug_current/harness/home/.cac.json written atomically
+2026-06-27T17:00:44.388+08:00 [DEBUG] [file] Preserving file permissions: 100600
+2026-06-27T17:00:44.388+08:00 [DEBUG] [file] Writing to temp file: /home/yyy/projects/LoCoBench-Agent/.claude/worktrees/memory-eval-harness/runs/smoke/debug_current/harness/home/.cac.json.tmp.332291.1782550844388
+2026-06-27T17:00:44.392+08:00 [DEBUG] [file] Temp file written successfully, size: 359 bytes
+2026-06-27T17:00:44.392+08:00 [DEBUG] [file] Applied original permissions to temp file
+2026-06-27T17:00:44.392+08:00 [DEBUG] [file] Renaming /home/yyy/projects/LoCoBench-Agent/.claude/worktrees/memory-eval-harness/runs/smoke/debug_current/harness/home/.cac.json.tmp.332291.1782550844388 to /home/yyy/projects/LoCoBench-Agent/.claude/worktrees/memory-eval-harness/runs/smoke/debug_current/harness/home/.cac.json
+2026-06-27T17:00:44.392+08:00 [DEBUG] [file] File /home/yyy/projects/LoCoBench-Agent/.claude/worktrees/memory-eval-harness/runs/smoke/debug_current/harness/home/.cac.json written atomically
+2026-06-27T17:00:44.394+08:00 [DEBUG] [file] Preserving file permissions: 100600
+2026-06-27T17:00:44.394+08:00 [DEBUG] [file] Writing to temp file: /home/yyy/projects/LoCoBench-Agent/.claude/worktrees/memory-eval-harness/runs/smoke/debug_current/harness/home/.cac.json.tmp.332291.1782550844394
+2026-06-27T17:00:44.398+08:00 [DEBUG] [file] Temp file written successfully, size: 385 bytes
+2026-06-27T17:00:44.398+08:00 [DEBUG] [file] Applied original permissions to temp file
+2026-06-27T17:00:44.398+08:00 [DEBUG] [file] Renaming /home/yyy/projects/LoCoBench-Agent/.claude/worktrees/memory-eval-harness/runs/smoke/debug_current/harness/home/.cac.json.tmp.332291.1782550844394 to /home/yyy/projects/LoCoBench-Agent/.claude/worktrees/memory-eval-harness/runs/smoke/debug_current/harness/home/.cac.json
+2026-06-27T17:00:44.398+08:00 [DEBUG] [file] File /home/yyy/projects/LoCoBench-Agent/.claude/worktrees/memory-eval-harness/runs/smoke/debug_current/harness/home/.cac.json written atomically
+2026-06-27T17:00:44.406+08:00 [DEBUG] [main] [STARTUP] Loading MCP configs...
+2026-06-27T17:00:44.419+08:00 [DEBUG] [shellToolUtils] [isPowerShellToolEnabled] Checking if PowerShellTool is enabled
+2026-06-27T17:00:44.419+08:00 [DEBUG] [shellToolUtils] [isPowerShellToolEnabled] Not on Windows, returning false
+2026-06-27T17:00:44.419+08:00 [DEBUG] [toolSearch] disabled by default. Set ENABLE_TOOL_SEARCH=true to enable.
+2026-06-27T17:00:44.420+08:00 [DEBUG] [main] [STARTUP] Running setup()...
+2026-06-27T17:00:44.423+08:00 [DEBUG] [loadSkillsDir] Loading skills from: managed=/etc/codeagent/.claude/skills, user=/home/yyy/projects/LoCoBench-Agent/.claude/worktrees/memory-eval-harness/runs/smoke/debug_current/harness/home/.cac/skills, project=[]
+2026-06-27T17:00:44.465+08:00 [DEBUG] [teammateModeSnapshot] Captured from config: auto
+2026-06-27T17:00:44.466+08:00 [DEBUG] [errorLogSink] Error log sink initialized
+2026-06-27T17:00:44.472+08:00 [DEBUG] [installedPluginsManager] installed_plugins.json doesn't exist, returning empty V2 object
+2026-06-27T17:00:44.473+08:00 [DEBUG] [pluginLoader] Found 12 plugins (0 enabled, 12 disabled)
+2026-06-27T17:00:44.474+08:00 [DEBUG] [loadPluginCommands] getPluginSkills: Processing 0 enabled plugins
+2026-06-27T17:00:44.474+08:00 [DEBUG] [loadPluginHooks] Registered 0 hooks from 0 plugins
+2026-06-27T17:00:44.474+08:00 [DEBUG] [loadPluginCommands] Total plugin skills loaded: 0
+2026-06-27T17:00:44.474+08:00 [DEBUG] [loadPluginCommands] Total plugin commands loaded: 0
+2026-06-27T17:00:44.482+08:00 [DEBUG] [main] [STARTUP] setup() completed in 61ms
+2026-06-27T17:00:44.482+08:00 [DEBUG] [caCerts] Cleared CA certificates cache
+2026-06-27T17:00:44.482+08:00 [DEBUG] [mtls] Cleared mTLS configuration cache
+2026-06-27T17:00:44.482+08:00 [DEBUG] [proxy] Cleared proxy agent cache
+2026-06-27T17:00:44.482+08:00 [DEBUG] [caCerts] CA certs: useSystemCA=false, extraCertsPath=undefined
+2026-06-27T17:00:44.484+08:00 [DEBUG] [main] [STARTUP] Loading commands and agents...
+2026-06-27T17:00:44.508+08:00 [DEBUG] [detectRepository] Git remote URL: null
+2026-06-27T17:00:44.508+08:00 [DEBUG] [detectRepository] No git remote URL found
+2026-06-27T17:00:44.603+08:00 [DEBUG] [ripgrep] Ripgrep first use test: PASSED (mode=builtin, path=/tmp/codeagent-rg-uid-1000-x64-linux/rg)
+2026-06-27T17:00:44.606+08:00 [DEBUG] [ripgrep] rg error (signal=null, code=2, stderr: rg: /home/yyy/projects/LoCoBench-Agent/.claude/worktrees/memory-eval-harness/runs/smoke/debug_current/harness/home/.cac/commands: No such file or directory (os error 2)
+), 0 results
+2026-06-27T17:00:44.607+08:00 [DEBUG] [ripgrep] rg error (signal=null, code=2, stderr: rg: /home/yyy/projects/LoCoBench-Agent/.claude/worktrees/memory-eval-harness/runs/smoke/debug_current/harness/home/.cac/agents: No such file or directory (os error 2)
+), 0 results
+2026-06-27T17:00:44.609+08:00 [DEBUG] [ripgrep] rg error (signal=null, code=2, stderr: rg: /etc/codeagent/.cac/agents: No such file or directory (os error 2)
+), 0 results
+2026-06-27T17:00:44.609+08:00 [DEBUG] [ripgrep] rg error (signal=null, code=2, stderr: rg: /etc/codeagent/.cac/commands: No such file or directory (os error 2)
+), 0 results
+2026-06-27T17:00:44.618+08:00 [DEBUG] [markdownConfigLoader] Failed to stat directory /home/yyy/projects/LoCoBench-Agent/.claude/worktrees/memory-eval-harness/runs/smoke/debug_current/harness/home/.cac/commands: ENOENT: no such file or directory, statx '/home/yyy/projects/LoCoBench-Agent/.claude/worktrees/memory-eval-harness/runs/smoke/debug_current/harness/home/.cac/commands'
+2026-06-27T17:00:44.618+08:00 [DEBUG] [markdownConfigLoader] Failed to stat directory /home/yyy/projects/LoCoBench-Agent/.claude/worktrees/memory-eval-harness/runs/smoke/debug_current/harness/home/.cac/agents: ENOENT: no such file or directory, statx '/home/yyy/projects/LoCoBench-Agent/.claude/worktrees/memory-eval-harness/runs/smoke/debug_current/harness/home/.cac/agents'
+2026-06-27T17:00:44.618+08:00 [DEBUG] [markdownConfigLoader] Failed to stat directory /etc/codeagent/.cac/agents: ENOENT: no such file or directory, statx '/etc/codeagent/.cac/agents'
+2026-06-27T17:00:44.619+08:00 [DEBUG] [loadPluginAgents] Total plugin agents loaded: 0
+2026-06-27T17:00:44.619+08:00 [DEBUG] [markdownConfigLoader] Failed to stat directory /etc/codeagent/.cac/commands: ENOENT: no such file or directory, statx '/etc/codeagent/.cac/commands'
+2026-06-27T17:00:44.620+08:00 [DEBUG] [loadSkillsDir] Loaded 0 unique skills (0 unconditional, 0 conditional, cowork builtin: 0, managed: 0, user: 0, project: 0, additional: 0, legacy commands: 0)
+2026-06-27T17:00:44.620+08:00 [DEBUG] [commands] getSkills returning: 0 skill dir commands, 0 plugin skills, 7 bundled skills, 0 builtin plugin skills
+2026-06-27T17:00:44.625+08:00 [DEBUG] [main] [STARTUP] Commands and agents loaded in 141ms
+2026-06-27T17:00:44.626+08:00 [DEBUG] [manager] [LSP MANAGER] initializeLspServerManager() called
+2026-06-27T17:00:44.627+08:00 [DEBUG] [manager] [LSP MANAGER] Created manager instance, state=pending
+2026-06-27T17:00:44.627+08:00 [DEBUG] [manager] [LSP MANAGER] Starting async initialization (generation 1)
+2026-06-27T17:00:44.627+08:00 [DEBUG] [main] Skipping startup prefetches, last ran 1782550845s ago
+2026-06-27T17:00:44.627+08:00 [DEBUG] [main] [STARTUP] MCP configs resolved in 69ms (awaited at +221ms)
+2026-06-27T17:00:44.628+08:00 [DEBUG] [shellToolUtils] [isPowerShellToolEnabled] Checking if PowerShellTool is enabled
+2026-06-27T17:00:44.628+08:00 [DEBUG] [shellToolUtils] [isPowerShellToolEnabled] Not on Windows, returning false
+2026-06-27T17:00:44.630+08:00 [DEBUG] [installedPluginsManager] Creating installed_plugins.json from settings.json files
+2026-06-27T17:00:44.635+08:00 [DEBUG] [installedPluginsManager] Saved 0 installed plugins to /home/yyy/projects/LoCoBench-Agent/.claude/worktrees/memory-eval-harness/runs/smoke/debug_current/harness/home/.cac/plugins/installed_plugins.json
+2026-06-27T17:00:44.635+08:00 [DEBUG] [installedPluginsManager] Sync completed: 0 added, 0 updated in installed_plugins.json
+2026-06-27T17:00:44.635+08:00 [DEBUG] [config] Total LSP servers loaded: 0
+2026-06-27T17:00:44.635+08:00 [DEBUG] [installedPluginsManager] Initialized versioned plugins system with 0 plugins
+2026-06-27T17:00:44.635+08:00 [DEBUG] [LSPServerManager] [LSP SERVER MANAGER] getAllLspServers returned 0 server(s)
+2026-06-27T17:00:44.635+08:00 [DEBUG] [LSPServerManager] LSP manager initialized with 0 servers
+2026-06-27T17:00:44.638+08:00 [DEBUG] [caCerts] Cleared CA certificates cache
+2026-06-27T17:00:44.638+08:00 [DEBUG] [mtls] Cleared mTLS configuration cache
+2026-06-27T17:00:44.638+08:00 [DEBUG] [proxy] Cleared proxy agent cache
+2026-06-27T17:00:44.638+08:00 [DEBUG] [caCerts] CA certs: useSystemCA=false, extraCertsPath=undefined
+2026-06-27T17:00:44.640+08:00 [DEBUG] [manager] LSP server manager initialized successfully
+2026-06-27T17:00:44.640+08:00 [DEBUG] [passiveFeedback] LSP notification handlers registered successfully for all 0 server(s)
+2026-06-27T17:00:44.661+08:00 [DEBUG] [instrumentation] [CAC OTEL CONFIG] bootstrap: {"enabled":false,"defaultEnabled":"0","defaultEndpoint":"http://127.0.0.1:4318","endpoint":"http://127.0.0.1:4318","protocol":"http/json","metricsExporter":"otlp","logsExporter":"otlp","tracesExporter":"otlp","metricsUrl":"http://127.0.0.1:4318/v1/metrics","logsUrl":"http://127.0.0.1:4318/v1/logs","tracesUrl":"http://127.0.0.1:4318/v1/traces","metricsExportIntervalMs":60000,"logsExportIntervalMs":5000,"tracesExportIntervalMs":5000,"envEndpoint":"http://127.0.0.1:4318"}
+2026-06-27T17:00:44.662+08:00 [DEBUG] [perfettoTracing] [Perfetto] initializePerfettoTracing called, env value: undefined
+2026-06-27T17:00:44.662+08:00 [DEBUG] [instrumentation] [3P telemetry] isTelemetryEnabled=false (CODEAGENT3_ENABLE_TELEMETRY=undefined)
+2026-06-27T17:00:45.100+08:00 [DEBUG] [cronScheduler] scheduler start() — enabled=false, hasTasks=false
+2026-06-27T17:00:45.114+08:00 [DEBUG] [headlessPluginInstall] installPluginsForHeadless: starting
+2026-06-27T17:00:45.115+08:00 [DEBUG] [headlessPluginInstall] installPluginsForHeadless: no marketplaces declared
+2026-06-27T17:00:45.121+08:00 [DEBUG] [sessionStartLogger] Logged session start: e5a2403d-4ca1-498d-b42d-375d6b9169d1
+2026-06-27T17:00:45.130+08:00 [DEBUG] [shellToolUtils] [isPowerShellToolEnabled] Checking if PowerShellTool is enabled
+2026-06-27T17:00:45.130+08:00 [DEBUG] [shellToolUtils] [isPowerShellToolEnabled] Not on Windows, returning false
+2026-06-27T17:00:45.148+08:00 [DEBUG] [shellToolUtils] [isPowerShellToolEnabled] Checking if PowerShellTool is enabled
+2026-06-27T17:00:45.149+08:00 [DEBUG] [shellToolUtils] [isPowerShellToolEnabled] Not on Windows, returning false
+2026-06-27T17:00:45.158+08:00 [DEBUG] [attachments] LSP Diagnostics: getLSPDiagnosticAttachments called
+2026-06-27T17:00:45.159+08:00 [DEBUG] [LSPDiagnosticRegistry] LSP Diagnostics: Checking registry - 0 pending
+2026-06-27T17:00:45.159+08:00 [DEBUG] [AsyncHookRegistry] Hooks: Found 0 total hooks in registry
+2026-06-27T17:00:45.160+08:00 [DEBUG] [attachments] Sending 4 skills via attachment (initial, 4 total sent)
+2026-06-27T17:00:45.162+08:00 [DEBUG] [AsyncHookRegistry] Hooks: checkForNewResponses returning 0 responses
+2026-06-27T17:00:45.190+08:00 [DEBUG] [shellToolUtils] [isPowerShellToolEnabled] Checking if PowerShellTool is enabled
+2026-06-27T17:00:45.190+08:00 [DEBUG] [shellToolUtils] [isPowerShellToolEnabled] Not on Windows, returning false
+2026-06-27T17:00:45.203+08:00 [DEBUG] "[ripgrep] rg error (signal=null, code=2, stderr: rg: /home/yyy/projects/LoCoBench-Agent/.claude/worktrees/memory-eval-harness/runs/smoke/debug_current/harness/home/.cac/plugins/cache: No such file or directory (os error 2)\n), 0 results"
+2026-06-27T17:00:45.203+08:00 [DEBUG] "[ripgrep] rg error (signal=null, code=2, stderr: rg: /etc/codeagent/.cac/output-styles: No such file or directory (os error 2)\n), 0 results"
+2026-06-27T17:00:45.205+08:00 [DEBUG] [markdownConfigLoader] Failed to stat directory /etc/codeagent/.cac/output-styles: ENOENT: no such file or directory, statx '/etc/codeagent/.cac/output-styles'
+2026-06-27T17:00:45.216+08:00 [DEBUG] "[ripgrep] rg error (signal=null, code=2, stderr: rg: /home/yyy/projects/LoCoBench-Agent/.claude/worktrees/memory-eval-harness/runs/smoke/debug_current/harness/home/.cac/output-styles: No such file or directory (os error 2)\n), 0 results"
+2026-06-27T17:00:45.217+08:00 [DEBUG] [markdownConfigLoader] Failed to stat directory /home/yyy/projects/LoCoBench-Agent/.claude/worktrees/memory-eval-harness/runs/smoke/debug_current/harness/home/.cac/output-styles: ENOENT: no such file or directory, statx '/home/yyy/projects/LoCoBench-Agent/.claude/worktrees/memory-eval-harness/runs/smoke/debug_current/harness/home/.cac/output-styles'
+2026-06-27T17:00:45.217+08:00 [DEBUG] [loadPluginOutputStyles] Total plugin output styles loaded: 0
+2026-06-27T17:00:45.264+08:00 [DEBUG] [autoCompact] autocompact: tokens=488 threshold=137600 effectiveWindow=172000
+2026-06-27T17:00:45.271+08:00 [DEBUG] [toolSearch] Tool search disabled: ToolSearchTool is not available (may have been disallowed via disallowedTools).
+2026-06-27T17:00:45.271+08:00 [DEBUG] [agent] Cached MC gate: enabled=false modelSupported=false model=gpt-5.5 supportedModels=["agent-opus-4-6","agent-sonnet-4-6"]
+2026-06-27T17:00:45.329+08:00 [DEBUG] [system] attribution header x-anthropic-billing-header: cc_version=1.2605.00.821; cc_entrypoint=sdk-cli; cch=00000;
+2026-06-27T17:00:45.343+08:00 [DEBUG] [file] Preserving file permissions: 100600
+2026-06-27T17:00:45.343+08:00 [DEBUG] [file] Writing to temp file: /home/yyy/projects/LoCoBench-Agent/.claude/worktrees/memory-eval-harness/runs/smoke/debug_current/harness/home/.cac.json.tmp.332291.1782550845343
+2026-06-27T17:00:45.353+08:00 [DEBUG] [file] Temp file written successfully, size: 465 bytes
+2026-06-27T17:00:45.354+08:00 [DEBUG] [file] Applied original permissions to temp file
+2026-06-27T17:00:45.354+08:00 [DEBUG] [file] Renaming /home/yyy/projects/LoCoBench-Agent/.claude/worktrees/memory-eval-harness/runs/smoke/debug_current/harness/home/.cac.json.tmp.332291.1782550845343 to /home/yyy/projects/LoCoBench-Agent/.claude/worktrees/memory-eval-harness/runs/smoke/debug_current/harness/home/.cac.json
+2026-06-27T17:00:45.354+08:00 [DEBUG] [file] File /home/yyy/projects/LoCoBench-Agent/.claude/worktrees/memory-eval-harness/runs/smoke/debug_current/harness/home/.cac.json written atomically
+2026-06-27T17:00:45.357+08:00 [DEBUG] [client] [API:request] Creating client, ANTHROPIC_CUSTOM_HEADERS present: false, has Authorization header: false
+2026-06-27T17:00:45.359+08:00 [ERROR] [withRetry] API error (attempt 1/11): Please configure the API base URL and API key, then try again. Set ENTERPRISE_API_BASE_URL and ENTERPRISE_API_KEY, or add this to settings.json: {"enterprise":{"provider":"openai","protocol":"openai","apiBaseUrl":"https://your-api-base-url/v1","apiKey":"your-api-key","mainModel":"your-model-name"}}.
+2026-06-27T17:00:45.366+08:00 [ERROR] [agent] Error in API request: Please configure the API base URL and API key, then try again. Set ENTERPRISE_API_BASE_URL and ENTERPRISE_API_KEY, or add this to settings.json: {"enterprise":{"provider":"openai","protocol":"openai","apiBaseUrl":"https://your-api-base-url/v1","apiKey":"your-api-key","mainModel":"your-model-name"}}.
+2026-06-27T17:00:45.367+08:00 [ERROR] "[errorLogSink] Error: Error: Please configure the API base URL and API key, then try again. Set ENTERPRISE_API_BASE_URL and ENTERPRISE_API_KEY, or add this to settings.json: {\"enterprise\":{\"provider\":\"openai\",\"protocol\":\"openai\",\"apiBaseUrl\":\"https://your-api-base-url/v1\",\"apiKey\":\"your-api-key\",\"mainModel\":\"your-model-name\"}}.\n    at CAG (/$bunfs/root/codeagentcli:791:20254)\n    at processTicksAndRejections (native:7:39)"
+2026-06-27T17:00:45.395+08:00 [DEBUG] [manager] LSP server manager shut down successfully
+2026-06-27T17:00:45.395+08:00 [ERROR] "[errorLogSink] Error: Error: Session async write failed, retrying with mkdir: path=/home/yyy/projects/LoCoBench-Agent/.claude/worktrees/memory-eval-harness/runs/smoke/debug_current/harness/home/.cac/projects/-home-yyy-projects-LoCoBench-Agent--claude-worktrees-memory-eval-harness-runs-smoke-debug-current-agent-root-workspace/e5a2403d-4ca1-498d-b42d-375d6b9169d1.jsonl, error=ENOENT: no such file or directory, open\n    at appendToFile (/$bunfs/root/codeagentcli:9713:13459)\n    at processTicksAndRejections (native:7:39)"

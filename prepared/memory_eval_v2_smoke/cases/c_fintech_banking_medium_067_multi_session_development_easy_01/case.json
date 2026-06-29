@@ -1,0 +1,38 @@
+{
+  "scenario_id": "c_fintech_banking_medium_067_multi_session_development_easy_01",
+  "case_id": "c_fintech_banking_medium_067",
+  "category": "extended_development_projects",
+  "original_task_category": "multi_session_development",
+  "project_source": "/home/yyy/projects/LoCoBench-Agent/.claude/worktrees/memory-eval-harness/data/generated/c_fintech_banking_medium_067",
+  "project_name": "ShowTime PayHub",
+  "language": "c",
+  "complexity": "medium",
+  "session_count": 2,
+  "turns": [
+    {
+      "session": 1,
+      "file": "turns/session_1.jsonl",
+      "turn_count": 1
+    },
+    {
+      "session": 2,
+      "file": "turns/session_2.jsonl",
+      "turn_count": 1
+    }
+  ],
+  "prompts_for_review": [
+    {
+      "session": 1,
+      "file": "prompts/session_1.txt"
+    },
+    {
+      "session": 2,
+      "file": "prompts/session_2.txt"
+    }
+  ],
+  "hashes": {
+    "scenario_json_sha256": "95396d30dcd1b4eafab066b5efb0c1bc5c1c191d8c9808314ecf2c71bdb5964f",
+    "project_tree_sha256": "3da04a41736976b12caabac8ff4e8d83b9e733bfb014f857b2abee2815a390a4",
+    "prepared_case_sha256": "f7d8f58689db46531cca821f7347c809b77cb3eddf45385afd873ff05b99421d"
+  }
+}

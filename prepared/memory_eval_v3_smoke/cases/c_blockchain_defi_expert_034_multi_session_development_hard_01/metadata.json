@@ -1,0 +1,52 @@
+{
+  "scenario_id": "c_blockchain_defi_expert_034_multi_session_development_hard_01",
+  "case_id": "c_blockchain_defi_expert_034",
+  "title": "Implement and Generalize a Reentrancy Guard for the Staking Protocol",
+  "description": "The MediLedger DeFi Suite's staking protocol allows users to stake MediTokens to earn rewards. A recent internal audit has raised concerns about a potential reentrancy vulnerability. If a user unstakes their tokens and the protocol interacts with an external, potentially malicious, smart contract (via the MediVM) as part of the process, that contract could call back into the unstaking function before the user's balance is updated. This would allow the attacker to drain funds from the staking pool by repeatedly withdrawing their initial stake. This task requires the agent to incrementally address this critical security flaw over three development sessions, evolving the solution from a localized hotfix to a robust, system-wide security feature.",
+  "difficulty": "hard",
+  "project_spec": {
+    "unique_id": "c_blockchain_defi_expert_034",
+    "name": "MediLedger DeFi Suite",
+    "description": "MediLedger DeFi Suite is an expert-level, C-based decentralized finance platform purpose-built for the healthcare ecosystem. At its core, the project tokenizes clinical assets—such as electronic health-record (EHR) access rights, research data sets, and real-world-evidence NFTs—enabling hospitals, laboratories, and patients to stake, trade, or collateralize these assets through audited smart contracts. A permissioned yet public blockchain, driven by a pluggable BFT + PoS hybrid consensus, guarantees HIPAA-grade data integrity while supporting on-chain governance for formularies, insurance reimbursement rules, and community health grants.\n\nThe codebase is organized in classic multilayered fashion—transport, façade, domain, application, and infrastructure—with cross-cutting cryptographic and compliance services. Event-driven messaging (libevent) funnels HL7/FHIR data streams into the transaction layer, while Strategy and State-Machine patterns coordinate dynamic fee schedules for various healthcare actors (payers, providers, patients). Proxy and Observer patterns secure protected health information behind off-chain vaults but still allow NFTs to reference that data through consented access tokens. DeFi primitives—automated market makers for clinical trial funding, on-chain insurance pools, outcome-based staking—are exposed to wallet SDKs used by hospital revenue-cycle systems, patient apps, and insurer portals.",
+    "domain": "blockchain_defi",
+    "complexity": "expert",
+    "language": "c",
+    "architecture": "layered",
+    "theme": "healthcare",
+    "target_file_count": 83,
+    "target_token_count": 989297,
+    "features": [
+      "transaction_processing",
+      "defi_protocols",
+      "staking",
+      "wallet_integration",
+      "governance",
+      "smart_contracts",
+      "nft_minting",
+      "consensus_mechanism",
+      "token_management",
+      "cryptographic_functions"
+    ],
+    "architecture_patterns": [
+      "Event_Driven",
+      "Proxy_Pattern",
+      "Observer_Pattern",
+      "Strategy_Pattern",
+      "State_Machine",
+      "Factory_Pattern"
+    ],
+    "dependencies": [
+      "libssl / OpenSSL (ECDSA, AES-GCM, SHA-3)",
+      "libevent (event-driven transport layer)",
+      "jansson (JSON parsing/serialization)",
+      "lmdb or RocksDB (key-value state storage)",
+      "protobuf-c (gRPC/FHIR/HL7 schema serialization)",
+      "libsodium (advanced cryptographic primitives, zero-knowledge proofs)",
+      "libpq (PostgreSQL adapter for analytics side-car)",
+      "uthash (lightweight C hash maps in domain layer)",
+      "re2c/flex+bison (smart-contract DSL compiler)",
+      "cmocka (unit testing across layers)"
+    ],
+    "seed": 820358
+  }
+}

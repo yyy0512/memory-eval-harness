@@ -1,0 +1,9 @@
+You are working in the repository at the current working directory. This is session 2 of a 4-session development task. The previous session has ended and conversation context is unavailable. Use the repository state and your persistent memory if available. Do not ask for previous conversation context. Complete only the requirements for this session. At the end, update memory with decisions and remaining work.
+
+You are tasked with implementing a new data enrichment feature in the EduStream Nexus platform. This is a multi-session task. You will be given sequential instructions. Stop after each session and wait for the next prompt.
+
+**Session 2: Core System Integration**
+Welcome back. You previously created the component skeletons. Now, integrate the new 'enrichment' stage type into the core pipeline engine.
+1.  Modify the core pipeline manager (`EduStreamNexus/src/core/pipeline_manager.h` and `EduStreamNexus/src/core/pipeline_manager.c`) to recognize and manage 'enrichment' as a new pipeline stage type. This will likely involve updating enums (e.g., `component_type_t`), data structures, and the main event processing loop in `esp_pipeline_manager_process_event`.
+2.  Update the configuration parser (`EduStreamNexus/src/utils/config_parser.c`) to handle a new `enrichment` section in pipeline YAML files, similar to how `transformation` or `storage` sections are parsed.
+3.  In `EduStreamNexus/src/components/enrichment/redis_enricher.c`, implement a placeholder version of the `process` function. It should log that it was called and simply pass the event through without modification. The goal is to verify the component is correctly invoked by the pipeline manager.

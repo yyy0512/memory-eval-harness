@@ -1,0 +1,38 @@
+{
+  "scenario_id": "c_blockchain_nft_expert_035_multi_session_development_easy_01",
+  "case_id": "c_blockchain_nft_expert_035",
+  "category": "extended_development_projects",
+  "original_task_category": "multi_session_development",
+  "project_source": "/home/yyy/projects/LoCoBench-Agent/.claude/worktrees/memory-eval-harness/data/generated/c_blockchain_nft_expert_035",
+  "project_name": "HoloVerse Showtime Ledger",
+  "language": "c",
+  "complexity": "expert",
+  "session_count": 2,
+  "turns": [
+    {
+      "session": 1,
+      "file": "turns/session_1.jsonl",
+      "turn_count": 1
+    },
+    {
+      "session": 2,
+      "file": "turns/session_2.jsonl",
+      "turn_count": 1
+    }
+  ],
+  "prompts_for_review": [
+    {
+      "session": 1,
+      "file": "prompts/session_1.txt"
+    },
+    {
+      "session": 2,
+      "file": "prompts/session_2.txt"
+    }
+  ],
+  "hashes": {
+    "scenario_json_sha256": "181fa184b52bcecfdb5b2e1915b4bd398c732e71c68150d87d56277d0d0158f6",
+    "project_tree_sha256": "5fb59a16a807a2801df67598386b840989795e89c30b5fb9462e4c712efc88cc",
+    "prepared_case_sha256": "6a3470519103e3ee2700cfb4538b083f779f4ef5609567d1414d5238df4c4bb5"
+  }
+}

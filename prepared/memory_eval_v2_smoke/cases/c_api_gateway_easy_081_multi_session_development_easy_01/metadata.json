@@ -1,0 +1,44 @@
+{
+  "scenario_id": "c_api_gateway_easy_081_multi_session_development_easy_01",
+  "case_id": "c_api_gateway_easy_081",
+  "title": "Implement a Health Check Endpoint in a C-based API Gateway",
+  "description": "This scenario evaluates an agent's ability to perform incremental development over multiple sessions. The agent is tasked with adding a new feature—a health check endpoint—to 'EduGateway-C', a simple API gateway written in C. The agent must first analyze the project's structure from configuration, test, and documentation files, then propose a plan, implement the feature, and finally add tests. This process is broken into distinct sessions to test context retention and planning capabilities.",
+  "difficulty": "easy",
+  "project_spec": {
+    "unique_id": "c_api_gateway_easy_081",
+    "name": "EduGateway-C: Micro Learning API Hub",
+    "description": "EduGateway-C is an educational API gateway written in ANSI-C that fronts a constellation of micro-services delivering quizzes, lesson plans, student analytics, and adaptive content. The gateway unifies disparate service contracts into a single, classroom-friendly REST façade, while simultaneously exposing a thin GraphQL schema for complex queries issued by LMS dashboards. The project showcases how core gateway concerns—versioning, error handling, authentication, response caching, and monitoring—can be implemented with a minimal C codebase suitable for computer-science courses introducing microservices patterns.\n\nThe service layer inside EduGateway-C routes requests to language-agnostic back-end services (e.g., Python grading service, Go analytics service, Node.js content service). Each route is annotated with semantic API versions (v1, v2) so teachers can roll out new curriculum features without breaking older mobile apps used by students. A plug-in authentication module demonstrates how to verify JSON Web Tokens issued by the campus SSO, while a lightweight LRU cache accelerates repeated fetches of static lesson metadata. Instrumentation hooks stream Prometheus metrics and structured error logs to a dedicated monitoring service, giving educators immediate visibility into uptime and learner traffic patterns.",
+    "domain": "api_gateway",
+    "complexity": "easy",
+    "language": "c",
+    "architecture": "microservices",
+    "theme": "education",
+    "target_file_count": 13,
+    "target_token_count": 51454,
+    "features": [
+      "versioning",
+      "error_handling",
+      "authentication",
+      "response_caching",
+      "monitoring",
+      "rest_endpoints"
+    ],
+    "architecture_patterns": [
+      "Microservices",
+      "Service_Layer",
+      "GraphQL_Schema"
+    ],
+    "dependencies": [
+      "libevent (asynchronous networking)",
+      "libcurl (internal service-to-service HTTP)",
+      "cJSON (JSON serialization/deserialization)",
+      "graphqlparser + custom thin wrapper (GraphQL query parsing)",
+      "jwt-c (JWT authentication validation)",
+      "libcache (simple LRU in-memory cache; or uthash/utlist for DIY)",
+      "prometheus-c-client (metrics exposition)",
+      "cmocka (unit testing of routing & error handling)",
+      "Docker & docker-compose (containerised microservices environment)"
+    ],
+    "seed": 245102
+  }
+}

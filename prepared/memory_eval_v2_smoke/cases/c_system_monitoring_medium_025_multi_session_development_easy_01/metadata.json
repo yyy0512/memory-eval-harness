@@ -1,0 +1,46 @@
+{
+  "scenario_id": "c_system_monitoring_medium_025_multi_session_development_easy_01",
+  "case_id": "c_system_monitoring_medium_025",
+  "title": "Enhance Memory Metric with Type Field and Update Alerting",
+  "description": "The EduSysMon Academy system currently monitors memory usage but does not distinguish between different types of memory (e.g., physical RAM vs. swap space). This task involves incrementally enhancing the system to add this distinction. The goal is to add a 'type' field to the core metric data structure, populate it in the memory collector, and then utilize this new information in the alert manager to provide more specific alerts. This task will unfold over three distinct development sessions.",
+  "difficulty": "easy",
+  "project_spec": {
+    "unique_id": "c_system_monitoring_medium_025",
+    "name": "EduSysMon Academy",
+    "description": "EduSysMon Academy is a C-based, medium-scale system-monitoring platform designed specifically for computer-science courses that teach operating-system fundamentals, secure coding, and DevOps concepts. Students deploy agents on laboratory VMs or Raspberry Pi clusters; the agents report real-time metrics (CPU, memory, I/O, network, process trees) while concurrently scanning for common security mis-configurations defined in an instructor-managed policy library.  \n\nBuilt on Clean Architecture, EduSysMon Academy deliberately separates pedagogical content (lesson modules, scoring rubrics, sandbox scripts) from the monitoring core. The platform provides an event-driven pipeline where an Observer harvests metrics, a Chain of Responsibility performs layered analyses (security_scanning → performance_metrics → log_aggregation), and a lightweight Service Mesh of side-car processes handles alerting and deployment_automation across student nodes. Faculty dashboards visualize trends and issue actionable feedback, allowing learners to experiment with system tuning, incident response, and CI/CD practices in a controlled classroom environment.",
+    "domain": "system_monitoring",
+    "complexity": "medium",
+    "language": "c",
+    "architecture": "clean_architecture",
+    "theme": "education",
+    "target_file_count": 22,
+    "target_token_count": 133275,
+    "features": [
+      "security_scanning",
+      "system_monitoring",
+      "deployment_automation",
+      "log_aggregation",
+      "performance_metrics",
+      "alerting"
+    ],
+    "architecture_patterns": [
+      "Observer_Pattern",
+      "Chain_of_Responsibility",
+      "Service_Mesh",
+      "Event_Driven"
+    ],
+    "dependencies": [
+      "libuv (asynchronous event loop for event-driven collectors)",
+      "SQLite3 (embedded storage for offline lab environments)",
+      "jansson (lightweight JSON serialization between Clean Architecture layers)",
+      "libcurl (secure HTTPS publishing to instructor dashboard)",
+      "OpenSSL (TLS for agent-to-mesh communication, enabling security_scanning)",
+      "zeromq (message bus implementing Observer Pattern & Service Mesh)",
+      "cunit (unit testing framework to reinforce TDD lessons)",
+      "cmake (cross-platform build & deployment_automation)",
+      "prometheus-c-client (exporter for performance_metrics)",
+      "syslog-ng libraries (log_aggregation forwarding)"
+    ],
+    "seed": 174217
+  }
+}

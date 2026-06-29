@@ -1,0 +1,52 @@
+{
+  "scenario_id": "c_web_blog_medium_040_multi_session_development_expert_01",
+  "case_id": "c_web_blog_medium_040",
+  "title": "Implement Multi-Tenancy for Data Isolation in BizBlog Nexus",
+  "description": "The BizBlog Nexus platform is being upgraded to a B2B SaaS model. Each client organization (a 'tenant') must have its own private, isolated blog environment. User accounts and blog posts must be strictly partitioned by tenant to prevent data leakage between organizations. A preliminary `tenant.h` model exists, but the actual multi-tenancy logic is not implemented anywhere in the codebase. This task requires a phased implementation across the data, authentication, and application layers over multiple development sessions.",
+  "difficulty": "expert",
+  "project_spec": {
+    "unique_id": "c_web_blog_medium_040",
+    "name": "BizBlog Nexus",
+    "description": "BizBlog Nexus is a business-centric web–blogging platform written entirely in C that merges classic corporate content management with modern monetization and customer-engagement tools.  The application is delivered as a single executable that embeds HTTP handling, templating, payment services, and a multi-tenant blog engine in one cohesive codebase.  Stakeholders such as marketing teams, partner vendors, and finance departments all share the same operational runtime, allowing tight coupling of business rules—discount strategies, subscription tiers, and sponsored content workflows—without the latency or governance overhead typical of distributed systems.\n\nWithin the monolith, dedicated components implement Service Layer orchestration, Repository persistence, an Authentication Middleware pipeline (session, token, and social-login flows), and an extendable API surface that external CRMs can consume.  Enterprise-grade features—SSL termination, role-based access control, full-text search, image/file upload, server-side caching, structured logging, and PCI-ready payment processing—are unified behind a single deployment and upgrade story.  This makes BizBlog Nexus an ideal fit for mid-sized organizations that need reliable, on-prem or single-cloud hosting with predictable compliance boundaries and straightforward DevOps management.",
+    "domain": "web_blog",
+    "complexity": "medium",
+    "language": "c",
+    "architecture": "monolithic",
+    "theme": "business",
+    "target_file_count": 36,
+    "target_token_count": 126702,
+    "features": [
+      "social_login",
+      "search_functionality",
+      "api_endpoints",
+      "user_authentication",
+      "ssl_security",
+      "logging_system",
+      "caching",
+      "payment_processing",
+      "file_upload",
+      "data_validation",
+      "database_integration"
+    ],
+    "architecture_patterns": [
+      "Service_Layer",
+      "Authentication_Middleware",
+      "Component_Architecture",
+      "Repository_Pattern"
+    ],
+    "dependencies": [
+      "libmicrohttpd – lightweight embedded HTTP(S) server",
+      "OpenSSL – TLS/SSL termination and cryptography",
+      "libpq / libmysqlclient – relational database connectivity (PostgreSQL or MySQL)",
+      "libjansson – JSON parsing/serialization for API endpoints",
+      "libcurl – outbound HTTP(S) calls (payment gateways, social OAuth)",
+      "SQLite3 – edge-cache and metadata store for low-latency reads",
+      "zlog – high-performance structured logging",
+      "uthash – in-memory caching/hash maps",
+      "pcre2 – advanced search and validation (regex-based)",
+      "jansson-schema – business-rule data validation",
+      "libmagic – MIME detection for secure file uploads"
+    ],
+    "seed": 725643
+  }
+}

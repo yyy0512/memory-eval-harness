@@ -1,0 +1,47 @@
+{
+  "scenario_id": "c_system_automation_hard_098_multi_session_development_easy_01",
+  "case_id": "c_system_automation_hard_098",
+  "category": "extended_development_projects",
+  "original_task_category": "multi_session_development",
+  "project_source": "/home/yyy/projects/LoCoBench-Agent/.claude/worktrees/memory-eval-harness/data/generated/c_system_automation_hard_098",
+  "project_name": "PulseOps Orchestrator",
+  "language": "c",
+  "complexity": "hard",
+  "session_count": 3,
+  "turns": [
+    {
+      "session": 1,
+      "file": "turns/session_1.jsonl",
+      "turn_count": 1
+    },
+    {
+      "session": 2,
+      "file": "turns/session_2.jsonl",
+      "turn_count": 1
+    },
+    {
+      "session": 3,
+      "file": "turns/session_3.jsonl",
+      "turn_count": 1
+    }
+  ],
+  "prompts_for_review": [
+    {
+      "session": 1,
+      "file": "prompts/session_1.txt"
+    },
+    {
+      "session": 2,
+      "file": "prompts/session_2.txt"
+    },
+    {
+      "session": 3,
+      "file": "prompts/session_3.txt"
+    }
+  ],
+  "hashes": {
+    "scenario_json_sha256": "0b07a83a0ddd9618450c5308ea72d880a1f6c1e76122d25fed163eb471e00fa4",
+    "project_tree_sha256": "8db76b956725b59c448db34c643a746d8f9573df006344bc86cfd058eba74c4b",
+    "prepared_case_sha256": "f37e88f8c8f1207e8fbcf3a515dc70dc9b5b09d86321914f0073a395e65a9fb6"
+  }
+}

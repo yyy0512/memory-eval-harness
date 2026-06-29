@@ -1,0 +1,10 @@
+You are working in the repository at the current working directory. This is session 1 of a multi-session development task. Complete only the requirements for this session. At the end, save any useful project-specific memory for future sessions.
+
+This task is divided into three parts, intended to be completed sequentially across separate sessions.
+
+**Part 1: Configuration and Data Structures**
+Your first goal is to update the configuration system. 
+1.  Add a new setting `default_interpolation_method` to the `config/pixutil.conf` file. Set its default value to `linear`.
+2.  In `include/pixutil.h`, define an enumeration for the supported interpolation methods: `NEAREST_NEIGHBOR`, `LINEAR`, and `CUBIC`.
+3.  Update the main configuration struct (likely also in `pixutil.h`) to include a field for storing the loaded interpolation method.
+4.  Modify the configuration parsing logic to read the `default_interpolation_method` string from the config file and map it to the corresponding enum value. If the setting is missing or invalid, the system should default to `LINEAR`.

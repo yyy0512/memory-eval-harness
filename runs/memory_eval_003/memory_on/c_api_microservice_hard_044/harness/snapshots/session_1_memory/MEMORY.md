@@ -1,0 +1,1 @@
+- [Task Dependency multi-session scope](task_dependency_feature_multisession.md) — Session 1 completed data/repository foundation only.

@@ -1,0 +1,46 @@
+{
+  "scenario_id": "c_fintech_banking_medium_067_multi_session_development_easy_01",
+  "case_id": "c_fintech_banking_medium_067",
+  "title": "Implement Transaction Purpose Field for AML Compliance",
+  "description": "ShowTime PayHub is required to comply with a new Anti-Money Laundering (AML) regulation. This regulation mandates that all financial transactions must be associated with a 'purpose' string, provided by the initiator. This task involves updating the core payment service to include this new data point. The development will be split into two sessions: first, updating the data model and service logic; second, updating the unit tests to validate the new functionality.",
+  "difficulty": "easy",
+  "project_spec": {
+    "unique_id": "c_fintech_banking_medium_067",
+    "name": "ShowTime PayHub",
+    "description": "ShowTime PayHub is a medium-scale fintech banking platform designed in C that merges core banking functions with live entertainment experiences. The application lets users buy movie tickets, concert passes, in-game currency, and other digital media while seamlessly managing real-time payments, settlements, and compliance duties. Every transaction—whether topping up a gamer wallet, paying for a streaming subscription, or settling a backstage VIP upgrade—flows through a classic Model-View-Controller pipeline that keeps domain rules, UI layers, and orchestration logic strictly separated. \n\nMicro-services implement discrete capabilities such as Payment Processing, Fraud Detection, and Compliance Reporting, but the MVC pattern remains at the heart of each service: models hold business data (accounts, tickets, regulatory flags), controllers enforce workflows (transaction management, saga-based settlement), and views expose responses through REST/JSON or embedded WebSockets for streaming dashboards. By weaving interactive leaderboards, loyalty badges, and event-specific promotions directly into the banking flow, ShowTime PayHub makes financial operations feel like part of the show while maintaining regulatory rigor, audit trails, and Security-by-Design from end to end.",
+    "domain": "fintech_banking",
+    "complexity": "medium",
+    "language": "c",
+    "architecture": "mvc",
+    "theme": "entertainment",
+    "target_file_count": 20,
+    "target_token_count": 152049,
+    "features": [
+      "regulatory_compliance",
+      "transaction_management",
+      "audit_logging",
+      "fraud_detection",
+      "compliance_reporting",
+      "payment_processing",
+      "settlement"
+    ],
+    "architecture_patterns": [
+      "Microservices",
+      "Security_by_Design",
+      "Saga_Pattern",
+      "Audit_Trail"
+    ],
+    "dependencies": [
+      "libmicrohttpd (lightweight HTTP server for controller endpoints)",
+      "jansson (JSON parsing/serialization for model ↔ view data)",
+      "SQLite or PostgreSQL client libpq (persistence layer; audit logs, transactions)",
+      "libevent (non-blocking I/O for high-volume ticket purchase spikes)",
+      "OpenSSL (TLS, PKI handling for Security-by-Design)",
+      "RabbitMQ C client (AMQP for Saga Pattern orchestration across microservices)",
+      "libspf+libyara (rule engine foundations for fraud_detection service)",
+      "GLib/GObject (signal/slot MVC glue and entity collections)",
+      "CUnit or Check (unit testing of regulatory_compliance logic)"
+    ],
+    "seed": 428590
+  }
+}

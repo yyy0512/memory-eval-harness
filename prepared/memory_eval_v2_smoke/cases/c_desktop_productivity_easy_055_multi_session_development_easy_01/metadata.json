@@ -1,0 +1,39 @@
+{
+  "scenario_id": "c_desktop_productivity_easy_055_multi_session_development_easy_01",
+  "case_id": "c_desktop_productivity_easy_055",
+  "title": "Implement 'Auto-Save on Exit' Feature in Three Sessions",
+  "description": "The MosaicMind Noteboard application currently requires users to manually save their work. This task involves introducing a new, user-configurable 'Auto-Save on Exit' feature. The user should be able to enable or disable this feature through a checkbox in the settings UI. The setting must be persisted across application launches. This task is broken down into three distinct development sessions to test the agent's ability to maintain context and build incrementally.",
+  "difficulty": "easy",
+  "project_spec": {
+    "unique_id": "c_desktop_productivity_easy_055",
+    "name": "MosaicMind Noteboard",
+    "description": "MosaicMind Noteboard is an easy-to-use, visually expressive desktop productivity tool that lets users arrange ideas, images, and quick sketches on an infinite canvas. Instead of the conventional linear note editor, MosaicMind encourages lateral thinking by allowing notes to be placed, grouped, colour-coded, and connected freely through simple drag-and-drop gestures. A lightweight C code-base, organised with Clean Architecture boundaries, ensures that the core manipulation of \"tiles\" (text, image, and doodle entities) is completely decoupled from the GTK-based GUI layer, making the application both nimble and readily extensible.  \n\nAt its heart, the application treats every user command—adding a tile, theming the board, rearranging items—as a discrete use-case executed through the Command Pattern. The Presentation layer offers both MVC (for traditional list+detail dialogs such as Settings) and MVVM (for the canvas where data binding keeps tiles in sync with the underlying model). A built-in crash reporter packages stack traces and user steps into a JSON bundle, encouraging iterative creative improvements without sacrificing stability. Themes (light, dark, blueprint, sepia) and a settings configuration panel let users personalise the visual mood, ensuring the creative flow matches their style.",
+    "domain": "desktop_productivity",
+    "complexity": "easy",
+    "language": "c",
+    "architecture": "clean_architecture",
+    "theme": "creative",
+    "target_file_count": 13,
+    "target_token_count": 27732,
+    "features": [
+      "gui_interface",
+      "drag_drop",
+      "crash_reporting",
+      "themes",
+      "settings_configuration"
+    ],
+    "architecture_patterns": [
+      "Command_Pattern",
+      "MVC",
+      "MVVM"
+    ],
+    "dependencies": [
+      "GTK4 / libadwaita – cross-platform GUI toolkit with drag-and-drop support",
+      "cJSON – lightweight JSON serialization for settings and crash reports",
+      "libbacktrace – stack-trace collection for the crash reporter",
+      "sqlite3 – embedded storage for notes/tiles metadata",
+      "CMake – project build orchestration adhering to Clean Architecture directory boundaries"
+    ],
+    "seed": 783806
+  }
+}

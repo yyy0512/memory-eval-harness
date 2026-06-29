@@ -1,0 +1,44 @@
+{
+  "scenario_id": "c_ml_nlp_easy_053_multi_session_development_easy_01",
+  "case_id": "c_ml_nlp_easy_053",
+  "title": "Implement and Integrate a Configurable URL Stripping Preprocessing Step",
+  "description": "The ChatRipple-C pipeline analyzes sentiment in text messages. Currently, URLs (e.g., 'http://example.com') are treated as regular words, which can skew the sentiment analysis results. This task involves adding a new preprocessing step to strip these URLs from the input text. To ensure flexibility, this new feature must be configurable, allowing it to be enabled or disabled at compile time.",
+  "difficulty": "easy",
+  "project_spec": {
+    "unique_id": "c_ml_nlp_easy_053",
+    "name": "ChatRipple-C: Event-Driven Social Sentiment Pipeline",
+    "description": "ChatRipple-C is an easy-level C project that demonstrates how real-time social conversations can be mined, modeled, and visualized through an event-driven NLP pipeline. The application listens to public chat rooms (e.g., IRC, Matrix or Discord gateways) and raises an event every time a new message arrives. Each event triggers a lightweight preprocessing stage (tokenization, stop-word removal, emoji normalization) followed by a bag-of-words sentiment classifier exported to ONNX. Events then fan out to downstream subscribers: (1) a live dashboard that graphs aggregated sentiment waves, (2) an experiment-tracking module that logs feature statistics, predictions, and model version meta-data, and (3) an automated-retraining worker that queues nightly jobs when data-drift thresholds are exceeded.\n\nThe project highlights social interactions by focusing on community mood shifts and conversation spikes. Built on a Pipeline Pattern, every processing step pushes an event onto a ZeroMQ bus so new modules (e.g., toxicity detection or language identification) can be hot-plugged without touching the core. Observer Pattern subscribers—visualizer, evaluator, retrainer, and version registry—receive notifications independently, enabling clean separation of concerns. MLOps principles are showcased through model_versioning (each retrain stores metrics and weights in a local directory structure with semantic version tags) and experiment_tracking in an embedded SQLite database that can later be uploaded to a full MLFlow stack.\n\nOverall, ChatRipple-C gives beginners a tangible, social-centric example of how event streams, simple NLP models, and MLOps practices converge in C.",
+    "domain": "ml_nlp",
+    "complexity": "easy",
+    "language": "c",
+    "architecture": "event_driven",
+    "theme": "social",
+    "target_file_count": 13,
+    "target_token_count": 49385,
+    "features": [
+      "data_preprocessing",
+      "data_visualization",
+      "automated_retraining",
+      "model_evaluation",
+      "experiment_tracking",
+      "model_versioning"
+    ],
+    "architecture_patterns": [
+      "Pipeline_Pattern",
+      "MLOps_Architecture",
+      "Observer_Pattern"
+    ],
+    "dependencies": [
+      "ZeroMQ (event bus / pub-sub)",
+      "cJSON (message serialization)",
+      "SQLite3 (experiment tracking & model registry)",
+      "GSL or OpenBLAS + LAPACK (linear-algebra support)",
+      "ONNX Runtime C API (load/run the sentiment model)",
+      "libcurl (fetch chat API streams)",
+      "gnuplot or SDL2_gfx (lightweight real-time visualization)",
+      "pthread (concurrency for observers)",
+      "zlib (compress archived datasets for versioning)"
+    ],
+    "seed": 960580
+  }
+}

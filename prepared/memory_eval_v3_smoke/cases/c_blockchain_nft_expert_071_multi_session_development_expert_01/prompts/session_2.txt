@@ -1,0 +1,8 @@
+You are working in the repository at the current working directory. This is session 2 of a 4-session development task. The previous session has ended and conversation context is unavailable. Use the repository state and your persistent memory if available. Do not ask for previous conversation context. Complete only the requirements for this session. At the end, update memory with decisions and remaining work.
+
+Your multi-session task is to implement the 'Living Artifacts' feature by linking an artifact's trait to the real-world lunar cycle.
+
+**Part 2: Oracle and Observer Implementation (Session 2)**
+1.  Integrate a new data source into the `oracle_bridge` service. In `services/oracle_bridge/include/feeds.h`, define a new feed for the lunar cycle. Implement the logic in `feed_manager.c` to fetch this data (you can mock the external API call).
+2.  Create a new evolution strategy within the `muse_observer` service. Create a new file `services/muse_observer/src/strategies/lunar_evolver.c`, using `weather_evolver.c` as a template. This strategy should subscribe to the new lunar oracle feed.
+3.  When the `lunar_evolver` detects a change in the lunar phase, it should generate an internal event destined for the ledger to update the state of all 'living' artifacts.

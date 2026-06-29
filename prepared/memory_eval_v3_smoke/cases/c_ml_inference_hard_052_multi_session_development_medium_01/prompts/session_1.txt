@@ -1,0 +1,8 @@
+You are working in the repository at the current working directory. This is session 1 of a multi-session development task. Complete only the requirements for this session. At the end, save any useful project-specific memory for future sessions.
+
+Your task is to add binary classification capabilities to the ChronoBoost Inference Factory by implementing a logistic regression model. This will require work over multiple development sessions.
+
+**Session 1: Analysis and Scaffolding**
+1.  Analyze the existing `linear_regression` model implementation (`chrono_boost/ml/models/linear_regression.h`) and how it conforms to the generic model interface defined in `chrono_boost/core/model.h`.
+2.  Investigate how models are instantiated by the `model_factory` (`chrono_boost/core/model_factory.h`) and how the `cb_trainer` executable (`cmd/cb_trainer/main.c`) uses it.
+3.  Create the initial files for the new model: `chrono_boost/ml/models/logistic_regression.h` and `chrono_boost/ml/models/logistic_regression.c`. Define the necessary data structures and function prototypes in the header file, mirroring the structure of the linear regression model but tailored for logistic regression. Leave the function implementations in the `.c` file as stubs.

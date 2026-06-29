@@ -1,0 +1,9 @@
+You are working in the repository at the current working directory. This is session 1 of a multi-session development task. Complete only the requirements for this session. At the end, save any useful project-specific memory for future sessions.
+
+Your multi-session task is to implement the 'Living Artifacts' feature by linking an artifact's trait to the real-world lunar cycle.
+
+**Part 1: Core Data Structure Modification (Session 1)**
+1.  Analyze the existing data structures for artifacts. Locate where artifact metadata is defined (likely in `shared/common/types.h` or `services/ledger_core/include/block.h`).
+2.  Define a new `LunarPhase` enum (e.g., `NEW_MOON`, `WAXING_CRESCENT`, `FIRST_QUARTER`, `WAXING_GIBBOUS`, `FULL_MOON`, `WANING_GIBBOUS`, `THIRD_QUARTER`, `WANING_CRESCENT`).
+3.  Introduce a new structure, `DynamicTrait`, which will hold the `LunarPhase`.
+4.  Modify the main `Artifact` structure to include an optional `DynamicTrait`.

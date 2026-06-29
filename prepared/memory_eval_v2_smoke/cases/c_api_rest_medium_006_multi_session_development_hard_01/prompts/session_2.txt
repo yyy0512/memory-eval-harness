@@ -1,0 +1,11 @@
+You are working in the repository at the current working directory. This is session 2 of a 3-session development task. The previous session has ended and conversation context is unavailable. Use the repository state and your persistent memory if available. Do not ask for previous conversation context. Complete only the requirements for this session. At the end, update memory with decisions and remaining work.
+
+This task is divided into three sessions. You must retain context between sessions to complete the project successfully.
+
+**Session 2: Core Routing Logic Implementation**
+With the configuration loading in place, your second objective is to implement the core routing logic.
+1.  In `src/adapters/rest_handler.c`, intercept the incoming request before it is proxied.
+2.  Inspect the request for the `X-Service-Version` header.
+3.  If the header is present and its value matches a rule defined in the configuration, retrieve the corresponding backend URL from the data structure you created in Session 1.
+4.  If the header is absent or its value does not match any rule, the request should proceed to the default backend URL as it does currently.
+5.  Add logging statements in `src/adapters/rest_handler.c` to record routing decisions (e.g., "Routing to 'beta' backend for request ID X", "No specific version requested, using default backend for request ID Y").

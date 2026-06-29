@@ -1,0 +1,10 @@
+You are working in the repository at the current working directory. This is session 3 of a 3-session development task. The previous session has ended and conversation context is unavailable. Use the repository state and your persistent memory if available. Do not ask for previous conversation context. Complete only the requirements for this session. At the end, update memory with decisions and remaining work.
+
+You are tasked with refactoring the BizBlog Nexus application to support multi-tenancy. This will be done in three distinct sessions.
+
+**Session 3: Application Logic and API Integration**
+With the data and session layers now tenant-aware, the final step is to enforce tenancy at the application and API level. You must refactor the service and routing layers to use the tenant information from the user's session, ensuring all business logic operates strictly within the context of the current tenant. Finally, update the API documentation.
+
+*   **Refactor Service Layer:** Update the `blog_service.c` functions. They must now accept the `tenant_id` from the API handlers and pass it down to the repository functions.
+*   **Update API Handlers:** Modify the API route handlers (likely defined in `src/core/router.c`) to retrieve the `tenant_id` from the request context (set by the middleware in Session 2) and pass it to the appropriate service layer functions.
+*   **Update Documentation:** Briefly update `docs/API.md` to note that resources are now scoped by tenant.

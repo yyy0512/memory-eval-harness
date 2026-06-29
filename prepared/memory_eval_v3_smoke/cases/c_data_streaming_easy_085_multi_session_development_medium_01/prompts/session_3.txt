@@ -1,0 +1,12 @@
+You are working in the repository at the current working directory. This is session 3 of a 3-session development task. The previous session has ended and conversation context is unavailable. Use the repository state and your persistent memory if available. Do not ask for previous conversation context. Complete only the requirements for this session. At the end, update memory with decisions and remaining work.
+
+You will implement the maintenance window feature over three distinct development sessions.
+
+**Session 3: Testing and Documentation**
+(Simulated break - you are returning to the project for the final steps.)
+The core feature is now implemented. To complete the task, you must add tests and update the documentation.
+1.  Modify the test suite in `tests/test_main.txt` (treat as `tests/test_scheduler.c`).
+2.  Add at least two new test cases:
+    a. A test that configures a maintenance window and asserts that processing is skipped when the (mocked) time is inside the window.
+    b. A test that asserts processing proceeds normally when the (mocked) time is outside the configured window.
+3.  Finally, update the user documentation located in `echostream_connect/docs/files` (treat as `docs/configuration.md`) to explain the new `maintenance_start_hour` and `maintenance_end_hour` parameters, their purpose, and their valid range.

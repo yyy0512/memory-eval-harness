@@ -1,0 +1,12 @@
+You are working in the repository at the current working directory. This is session 2 of a 3-session development task. The previous session has ended and conversation context is unavailable. Use the repository state and your persistent memory if available. Do not ask for previous conversation context. Complete only the requirements for this session. At the end, update memory with decisions and remaining work.
+
+You will implement a post tagging system over three sessions. Follow the instructions for each session sequentially.
+
+**Session 2: The Core Logic (Service Layer)**
+With the database layer ready, you will now build the business logic.
+1.  In `services.c`, create a new function: `void process_and_assign_tags(int post_id, const char* comma_separated_tags);`
+2.  This function must parse the `comma_separated_tags` string (e.g., "c, webdev, cms"). For each tag name:
+    a. Call `get_tag_by_name` from `database.c` to see if it exists.
+    b. If it doesn't exist, call `create_tag` to add it to the `tags` table.
+    c. Call `link_tag_to_post` to associate the tag with the post.
+3.  Modify the existing `get_post_by_id` service function. After fetching the main post data, it should now also call `get_tags_for_post` and populate the `tags` field in the `Post` struct it returns.

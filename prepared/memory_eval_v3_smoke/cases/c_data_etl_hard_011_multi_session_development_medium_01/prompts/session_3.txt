@@ -1,0 +1,9 @@
+You are working in the repository at the current working directory. This is session 3 of a 3-session development task. The previous session has ended and conversation context is unavailable. Use the repository state and your persistent memory if available. Do not ask for previous conversation context. Complete only the requirements for this session. At the end, update memory with decisions and remaining work.
+
+You will implement a Dead-Letter Queue (DLQ) for the `transform-worker` service over three development sessions.
+
+**Session 3: Configuration and Documentation**
+The core functionality is in place. Now, make it production-ready and document it.
+1.  Refactor your implementation from Session 2. The DLQ topic name should not be hardcoded. Modify the service to read the topic name from an environment variable named `TRANSFORM_DLQ_TOPIC`.
+2.  Implement a fallback mechanism: if the `TRANSFORM_DLQ_TOPIC` environment variable is not set, the service should default to using `spotlight_transform_failures_dlq`.
+3.  Update the project documentation. Add a new section to `docs/architecture.md` that describes the new DLQ mechanism, its purpose, and how to configure it using the `TRANSFORM_DLQ_TOPIC` environment variable.

@@ -1,0 +1,47 @@
+{
+  "scenario_id": "c_web_cms_medium_038_multi_session_development_expert_01",
+  "case_id": "c_web_cms_medium_038",
+  "category": "extended_development_projects",
+  "original_task_category": "multi_session_development",
+  "project_source": "/home/yyy/projects/LoCoBench-Agent/.claude/worktrees/memory-eval-harness/data/generated/c_web_cms_medium_038",
+  "project_name": "CogStack Utility CMS",
+  "language": "c",
+  "complexity": "medium",
+  "session_count": 3,
+  "turns": [
+    {
+      "session": 1,
+      "file": "turns/session_1.jsonl",
+      "turn_count": 1
+    },
+    {
+      "session": 2,
+      "file": "turns/session_2.jsonl",
+      "turn_count": 1
+    },
+    {
+      "session": 3,
+      "file": "turns/session_3.jsonl",
+      "turn_count": 1
+    }
+  ],
+  "prompts_for_review": [
+    {
+      "session": 1,
+      "file": "prompts/session_1.txt"
+    },
+    {
+      "session": 2,
+      "file": "prompts/session_2.txt"
+    },
+    {
+      "session": 3,
+      "file": "prompts/session_3.txt"
+    }
+  ],
+  "hashes": {
+    "scenario_json_sha256": "d4e804b60517ab58335ce2f3ff62e3d3cc0cc3d151e58729c33e611b9916aa95",
+    "project_tree_sha256": "5afd11ed68de06e0de0b9dab364696725c1b37d2e415f5be7ea9b32bd3157150",
+    "prepared_case_sha256": "ff3996499baa20474a99b91a9b27beb3285191ded0a2387f2c17a0e2aaa4d72d"
+  }
+}

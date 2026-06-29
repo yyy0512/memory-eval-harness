@@ -1,0 +1,296 @@
+diff --git a/socialpulse_gateway/src/adapters/graphql/graphql_parser.c b/socialpulse_gateway/src/adapters/graphql/graphql_parser.c
+index d686e2c..fa499c1 100644
+--- a/socialpulse_gateway/src/adapters/graphql/graphql_parser.c
++++ b/socialpulse_gateway/src/adapters/graphql/graphql_parser.c
+@@ -26,6 +26,8 @@
+ #include <stdlib.h>
+ #include <string.h>
+ 
++#include <cjson/cJSON.h>
++
+ #include "logger.h"             /* project-wide structured logger            */
+ #include "graphql_parser.h"     /* public header for types / function defs   */
+ 
+@@ -46,6 +48,19 @@ typedef struct MemArena {
+ 
+ static void *arena_alloc(MemArena *a, size_t size)
+ {
++    if (size == 0) size = 1;
++    size = (size + sizeof(void *) - 1U) & ~(sizeof(void *) - 1U);
++
++    if (size > ARENA_BLOCK_SIZE) {
++        size_t block_size = sizeof(ArenaBlock) + size;
++        ArenaBlock *blk   = (ArenaBlock *) malloc(block_size);
++        if (!blk) { return NULL; }
++        blk->next = a->head;
++        blk->used = size;
++        a->head   = blk;
++        return blk->data;
++    }
++
+     if (!a->head || (a->head->used + size > ARENA_BLOCK_SIZE)) {
+         size_t block_size = sizeof(ArenaBlock) + ARENA_BLOCK_SIZE;
+         ArenaBlock *blk   = (ArenaBlock *) malloc(block_size);
+@@ -68,6 +83,25 @@ static void arena_reset(MemArena *a)
+     }
+ }
+ 
++static char *arena_strdup(MemArena *arena, const char *src)
++{
++    if (!src) return NULL;
++    size_t len = strlen(src);
++    char *dst = (char *) arena_alloc(arena, len + 1U);
++    if (!dst) return NULL;
++    memcpy(dst, src, len + 1U);
++    return dst;
++}
++
++static GqlError *clone_error(MemArena *arena, const GqlError *src)
++{
++    if (!src) return NULL;
++    GqlError *dst = (GqlError *) arena_alloc(arena, sizeof(GqlError));
++    if (!dst) return NULL;
++    memcpy(dst, src, sizeof(GqlError));
++    return dst;
++}
++
+ /* ===============================  Error API  ============================= */
+ 
+ static GqlError *make_error(MemArena *arena,
+@@ -403,6 +437,7 @@ static GraphQLDocument *parse_document(Parser *p)
+     GraphQLDocument *doc = (GraphQLDocument *) arena_alloc(&p->arena,
+                                                            sizeof(GraphQLDocument));
+     memset(doc, 0, sizeof(GraphQLDocument));
++    doc->request_kind = GQL_REQUEST_SINGLE;
+ 
+     GqlOperation *head = NULL, **tail = &head;
+ 
+@@ -429,6 +464,11 @@ GraphQLDocument *graphql_parse(const char *query, GqlError **out_err)
+ 
+     GraphQLDocument *doc = parse_document(&p);
+ 
++    if (!doc && !p.error) {
++        p.error = make_error(&p.arena, p.curr.line, p.curr.col,
++                             GQL_ERR_OOM, "Out of memory");
++    }
++
+     if (p.error) {
+         if (out_err) *out_err = p.error;   /* pass arena-backed error out */
+         else SPG_LOG_ERROR("GraphQL parse error (%u:%u): %s",
+@@ -438,21 +478,109 @@ GraphQLDocument *graphql_parse(const char *query, GqlError **out_err)
+         if (out_err) *out_err = NULL;
+     }
+ 
++    if (doc) doc->arena_head = p.arena.head;
++    else if (!out_err) arena_reset(&p.arena);
+     return doc;
+ }
+ 
++GraphQLDocument *graphql_parse_request(const char *payload,
++                                       size_t payload_len,
++                                       GqlError **out_err)
++{
++    if (out_err) *out_err = NULL;
++    if (!payload) return NULL;
++
++    cJSON *root = cJSON_ParseWithLength(payload, payload_len);
++    if (!root) {
++        return graphql_parse(payload, out_err);
++    }
++
++    if (!cJSON_IsArray(root)) {
++        cJSON *query = cJSON_GetObjectItemCaseSensitive(root, "query");
++        if (!cJSON_IsString(query) || !query->valuestring) {
++            if (out_err) *out_err = NULL;
++            cJSON_Delete(root);
++            return NULL;
++        }
++        GraphQLDocument *doc = graphql_parse(query->valuestring, out_err);
++        cJSON_Delete(root);
++        return doc;
++    }
++
++    MemArena batch_arena = {0};
++    GraphQLDocument *batch = (GraphQLDocument *) arena_alloc(&batch_arena,
++                                                             sizeof(GraphQLDocument));
++    if (!batch) {
++        cJSON_Delete(root);
++        return NULL;
++    }
++    memset(batch, 0, sizeof(GraphQLDocument));
++    batch->arena_head = batch_arena.head;
++    batch->request_kind = GQL_REQUEST_BATCH;
++    batch->batch_count = (size_t) cJSON_GetArraySize(root);
++
++    if (batch->batch_count > 0) {
++        batch->batch_items = (GraphQLDocument **) arena_alloc(
++                &batch_arena, batch->batch_count * sizeof(GraphQLDocument *));
++        batch->batch_errors = (GqlError **) arena_alloc(
++                &batch_arena, batch->batch_count * sizeof(GqlError *));
++        if (!batch->batch_items || !batch->batch_errors) {
++            cJSON_Delete(root);
++            arena_reset(&batch_arena);
++            return NULL;
++        }
++        memset(batch->batch_items, 0,
++               batch->batch_count * sizeof(GraphQLDocument *));
++        memset(batch->batch_errors, 0,
++               batch->batch_count * sizeof(GqlError *));
++    }
++
++    size_t idx = 0;
++    cJSON *item = NULL;
++    cJSON_ArrayForEach(item, root) {
++        cJSON *query = cJSON_IsObject(item)
++                     ? cJSON_GetObjectItemCaseSensitive(item, "query")
++                     : NULL;
++        if (!cJSON_IsString(query) || !query->valuestring) {
++            batch->batch_errors[idx] = (GqlError *) arena_alloc(&batch_arena,
++                                                                sizeof(GqlError));
++            if (batch->batch_errors[idx]) {
++                batch->batch_errors[idx]->code = GQL_ERR_INVALID_REQUEST;
++                batch->batch_errors[idx]->line = 0;
++                batch->batch_errors[idx]->column = 0;
++                snprintf(batch->batch_errors[idx]->message,
++                         sizeof(batch->batch_errors[idx]->message),
++                         "Expected GraphQL request object with string query");
++            }
++            idx++;
++            continue;
++        }
++
++        GqlError *item_err = NULL;
++        batch->batch_items[idx] = graphql_parse(query->valuestring, &item_err);
++        if (item_err) {
++            batch->batch_errors[idx] = clone_error(&batch_arena, item_err);
++        }
++        idx++;
++    }
++
++    batch->arena_head = batch_arena.head;
++    cJSON_Delete(root);
++    return batch;
++}
++
+ void graphql_doc_free(GraphQLDocument *doc)
+ {
+     if (!doc) return;
+-    /* The arena is located right after the document struct in memory
+-     * Because the parser allocated doc from the arena, we must locate the
+-     * arena head pointer.  Store arena at the beginning of doc (opaque), so
+-     * we treat doc->arena_head as first field. */
+-    MemArena *arena = ((MemArena *) ((uint8_t *) doc -
+-                                     offsetof(Parser, arena) +
+-                                     offsetof(GraphQLDocument, operations)));
+-    /* This is hacky: in production the arena pointer should be saved to doc */
+-    arena_reset(arena);
++
++    if (doc->request_kind == GQL_REQUEST_BATCH) {
++        for (size_t i = 0; i < doc->batch_count; ++i) {
++            graphql_doc_free(doc->batch_items[i]);
++        }
++    }
++
++    MemArena arena = { .head = (ArenaBlock *) doc->arena_head };
++    arena_reset(&arena);
+ }
+ 
+ /* ============================  Diagnostics  ============================= */
+@@ -480,6 +608,20 @@ static void dump_field(const GqlField *f, int indent)
+ 
+ void graphql_doc_debug_print(const GraphQLDocument *doc)
+ {
++    if (!doc) return;
++    if (doc->request_kind == GQL_REQUEST_BATCH) {
++        printf("== GraphQL Batch (%zu requests) ==\n", doc->batch_count);
++        for (size_t i = 0; i < doc->batch_count; ++i) {
++            if (doc->batch_errors && doc->batch_errors[i]) {
++                printf("-- Request %zu parse error: %s\n", i + 1,
++                       doc->batch_errors[i]->message);
++                continue;
++            }
++            graphql_doc_debug_print(doc->batch_items[i]);
++        }
++        return;
++    }
++
+     int idx = 0;
+     for (const GqlOperation *op = doc->operations; op; op = op->next) {
+         printf("== Operation %d ==\n", ++idx);
+diff --git a/socialpulse_gateway/src/adapters/graphql/graphql_parser.h b/socialpulse_gateway/src/adapters/graphql/graphql_parser.h
+index af1c7bf..6eb7688 100644
+--- a/socialpulse_gateway/src/adapters/graphql/graphql_parser.h
++++ b/socialpulse_gateway/src/adapters/graphql/graphql_parser.h
+@@ -188,6 +188,72 @@ typedef struct {
+     sp_gql_vec_t fragments;      /* vector<sp_gql_node_t*>                     */
+ } sp_gql_doc_t;
+ 
++/*───────────────────────────
++ *   Gateway GraphQL Request Model
++ *───────────────────────────*/
++
++typedef enum {
++    GQL_ERR_NONE = 0,
++    GQL_ERR_SYNTAX,
++    GQL_ERR_OOM,
++    GQL_ERR_INVALID_REQUEST
++} GqlErrorCode;
++
++typedef enum {
++    GQL_OP_QUERY = 0,
++    GQL_OP_MUTATION,
++    GQL_OP_SUBSCRIPTION
++} GqlOperationType;
++
++typedef enum {
++    GQL_REQUEST_SINGLE = 0,
++    GQL_REQUEST_BATCH
++} GraphQLRequestKind;
++
++typedef struct GqlError {
++    GqlErrorCode code;
++    uint32_t line;
++    uint32_t column;
++    char message[SP_GQL_MAX_ERROR_MSG];
++} GqlError;
++
++typedef struct GqlArgument {
++    char *name;
++    char *value;
++    struct GqlArgument *next;
++} GqlArgument;
++
++typedef struct GqlField {
++    char *name;
++    char *alias;
++    GqlArgument *arguments;
++    struct GqlField *children;
++    struct GqlField *next;
++} GqlField;
++
++typedef struct GqlOperation {
++    GqlOperationType type;
++    char *name;
++    GqlField *selection_set;
++    struct GqlOperation *next;
++} GqlOperation;
++
++typedef struct GraphQLDocument {
++    void *arena_head;                    /* Private parser arena ownership.        */
++    GraphQLRequestKind request_kind;     /* Single operation payload or batch.     */
++    GqlOperation *operations;
++    struct GraphQLDocument **batch_items;/* Parsed documents for batched payloads. */
++    GqlError **batch_errors;             /* Per-item parse errors, if any.        */
++    size_t batch_count;
++} GraphQLDocument;
++
++GraphQLDocument *graphql_parse(const char *query, GqlError **out_err);
++GraphQLDocument *graphql_parse_request(const char *payload,
++                                       size_t payload_len,
++                                       GqlError **out_err);
++void graphql_doc_free(GraphQLDocument *doc);
++void graphql_doc_debug_print(const GraphQLDocument *doc);
++
+ /*───────────────────────────
+  *        Public API
+  *───────────────────────────*/

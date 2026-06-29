@@ -1,0 +1,6 @@
+You are working in the repository at the current working directory. This is session 1 of a multi-session development task. Complete only the requirements for this session. At the end, save any useful project-specific memory for future sessions.
+
+This task will be completed over multiple sessions.
+
+**Session 1:**
+Your first task is to introduce a new logging level for performance monitoring. Locate the core logging header file (`ProdigiForgeEngine/src/core/pf_log.h`). In the `pf_log_level` enum, add a new level named `PF_LOG_LEVEL_PERF`. It should be placed between `PF_LOG_LEVEL_INFO` and `PF_LOG_LEVEL_WARN` to maintain logical order. Then, add a corresponding convenience macro `PF_LOG_PERF(...)` for easy use, following the pattern of the existing `PF_LOG_INFO` and `PF_LOG_WARN` macros in the same file.

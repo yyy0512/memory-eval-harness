@@ -1,0 +1,29 @@
+{
+  "scenario_id": "c_fintech_payment_expert_065_multi_session_development_expert_01",
+  "case_id": "c_fintech_payment_expert_065",
+  "category": "extended_development_projects",
+  "original_task_category": "multi_session_development",
+  "project_source": "/home/yyy/projects/LoCoBench-Agent/.claude/worktrees/memory-eval-harness/data/generated/c_fintech_payment_expert_065",
+  "project_name": "EduPay Ledger Academy",
+  "language": "c",
+  "complexity": "expert",
+  "session_count": 1,
+  "turns": [
+    {
+      "session": 1,
+      "file": "turns/session_1.jsonl",
+      "turn_count": 1
+    }
+  ],
+  "prompts_for_review": [
+    {
+      "session": 1,
+      "file": "prompts/session_1.txt"
+    }
+  ],
+  "hashes": {
+    "scenario_json_sha256": "45edb9ea2517b788e96041923c2626950366e6db5d8659f9f9de2ec881469f5e",
+    "project_tree_sha256": "1b46359c9c953d1778b9006da7c0ff7ec67fbce31f556e652cfc36e2cf7e1a41",
+    "prepared_case_sha256": "01a630107bf1ef17047ed157c22a08378a2f857496d68a00d7789cfd915c68dc"
+  }
+}

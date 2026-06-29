@@ -1,0 +1,8 @@
+You are working in the repository at the current working directory. This is session 1 of a multi-session development task. Complete only the requirements for this session. At the end, save any useful project-specific memory for future sessions.
+
+Your goal is to implement a data retention policy feature. The work is divided into four sessions. After each session, you can pause. I will provide the next instruction in the following session.
+
+**Session 1: Scoping and Configuration**
+First, we need to define how this feature will be configured and how the scheduler will identify it. Your task is to:
+1. Introduce a new job type for the data retention task. Find the appropriate place in the `scheduler_service`'s headers (likely `job_manager.h`) to define this new job type.
+2. In the `scheduler_service`'s main entry point (`services/scheduler_service/src/main.c`), add a configuration variable to hold the retention period in days. For now, you can hardcode this value to 90 days. The design should make it easy to load this from a configuration file in the future.

@@ -1,0 +1,802 @@
+diff --git a/SynestheticCanvas/libs/sc_common/include/sc_types.h b/SynestheticCanvas/libs/sc_common/include/sc_types.h
+index 1eb3074..f51f265 100644
+--- a/SynestheticCanvas/libs/sc_common/include/sc_types.h
++++ b/SynestheticCanvas/libs/sc_common/include/sc_types.h
+@@ -200,6 +200,13 @@ typedef struct sc_uuid_s {
+     uint8_t bytes[16];   /* RFC 4122 layout */
+ } sc_uuid_t;
+ 
++/* ───────────────────────────────────────────────────────── Trace Context ─── */
++#define SC_TRACE_ID_SIZE 37U
++
++typedef struct sc_trace_context_s {
++    char trace_id[SC_TRACE_ID_SIZE];
++} sc_trace_context_t;
++
+ /* Public UUID helpers (implemented in sc_types.c) */
+ SC_API sc_uuid_t     sc_uuid_generate(void);                    /* v4 random */
+ SC_API bool          sc_uuid_equal(const sc_uuid_t *a,
+diff --git a/SynestheticCanvas/libs/sc_ipc/include/sc_ipc.h b/SynestheticCanvas/libs/sc_ipc/include/sc_ipc.h
+index deac83b..0a85bcd 100644
+--- a/SynestheticCanvas/libs/sc_ipc/include/sc_ipc.h
++++ b/SynestheticCanvas/libs/sc_ipc/include/sc_ipc.h
+@@ -28,6 +28,8 @@
+ #include <stdbool.h>
+ #include <time.h>
+ 
++#include "sc_types.h"
++
+ #if defined(_WIN32) || defined(_WIN64)
+ /*  Windows is currently not supported; compilation will fail clearly.       */
+ #   error "sc_ipc currently supports POSIX / UNIX-like systems only."
+@@ -106,12 +108,13 @@ typedef enum sc_ipc_msg_type
+ #pragma pack(push, 1)
+ typedef struct sc_ipc_msg_hdr
+ {
+-    uint32_t         magic;          /* == SC_IPC_MSG_MAGIC                       */
+-    uint16_t         version;        /* Envelope format version (currently 1)     */
+-    uint16_t         type;           /* sc_ipc_msg_type_t                         */
+-    uint32_t         length;         /* Length of following payload in bytes      */
+-    uint64_t         correlation_id; /* Client-supplied token for matchmaking      */
+-    uint64_t         timestamp_ns;   /* CLOCK_REALTIME timestamp, nanoseconds     */
++    uint32_t           magic;          /* == SC_IPC_MSG_MAGIC                       */
++    uint16_t           version;        /* Envelope format version (currently 1)     */
++    uint16_t           type;           /* sc_ipc_msg_type_t                         */
++    uint32_t           length;         /* Length of following payload in bytes      */
++    uint64_t           correlation_id; /* Client-supplied token for matchmaking      */
++    uint64_t           timestamp_ns;   /* CLOCK_REALTIME timestamp, nanoseconds     */
++    sc_trace_context_t trace_context;  /* Distributed trace context                  */
+ } sc_ipc_msg_hdr_t;
+ #pragma pack(pop)
+ 
+@@ -162,12 +165,13 @@ void sc_ipc_close(sc_ipc_channel_t *chan);
+  * Send a payload with envelope fields filled automatically.  The function
+  * blocks up to `timeout_ms`;  0 → blocking, UINT32_MAX → poll once + return.
+  */
+-int sc_ipc_send_msg(sc_ipc_channel_t        *chan,
+-                    sc_ipc_msg_type_t         type,
+-                    const void              *payload,
+-                    size_t                    payload_len,
+-                    uint64_t                  correlation_id,
+-                    uint32_t                  timeout_ms);
++int sc_ipc_send_msg(sc_ipc_channel_t              *chan,
++                    sc_ipc_msg_type_t             type,
++                    const void                    *payload,
++                    size_t                         payload_len,
++                    uint64_t                       correlation_id,
++                    const sc_trace_context_t      *trace_context,
++                    uint32_t                       timeout_ms);
+ 
+ /*
+  * Receive a message into `buf` (size `buf_size`) and write header to `hdr`.
+diff --git a/SynestheticCanvas/libs/sc_ipc/src/sc_ipc.c b/SynestheticCanvas/libs/sc_ipc/src/sc_ipc.c
+index 8a26940..6149d56 100644
+--- a/SynestheticCanvas/libs/sc_ipc/src/sc_ipc.c
++++ b/SynestheticCanvas/libs/sc_ipc/src/sc_ipc.c
+@@ -1,443 +1,414 @@
+-```c
+-/**
++/*
+  * synesthetic-canvas :: libs/sc_ipc/src/sc_ipc.c
+  *
+  * Inter-process communication helper for SynestheticCanvas micro-services.
+- * The implementation is based on UNIX domain sockets (AF_UNIX) with a
+- * length-prefixed (uint32 big-endian) message framing protocol.
+- *
+- * Copyright (c) 2024
+- * SPDX-License-Identifier: MIT
+  */
+ 
+-#define _GNU_SOURCE /* accept4, SOCK_NONBLOCK, SOCK_CLOEXEC */
++#define _GNU_SOURCE
+ 
+ #include "sc_ipc.h"
+ 
+ #include <errno.h>
+ #include <fcntl.h>
+ #include <poll.h>
+-#include <stdbool.h>
+-#include <stddef.h>
+ #include <stdint.h>
+ #include <stdio.h>
+ #include <stdlib.h>
+ #include <string.h>
+-#include <sys/stat.h>
+ #include <sys/socket.h>
++#include <sys/stat.h>
+ #include <sys/un.h>
+-#include <syslog.h>
+ #include <time.h>
+ #include <unistd.h>
+ 
+-/* -------------------------------------------------------------------------
+- * Internal helpers
+- * -------------------------------------------------------------------------*/
+-
+-/* Simple macro-based logger. Redirects to syslog and stderr (debug builds). */
+-#ifndef SC_IPC_LOG_TAG
+-#define SC_IPC_LOG_TAG "sc_ipc"
++#ifndef MSG_NOSIGNAL
++#define MSG_NOSIGNAL 0
+ #endif
+ 
+-#define SC_LOG(level, fmt, ...)                                                       \
+-    do {                                                                              \
+-        syslog(level, "[" SC_IPC_LOG_TAG "] " fmt, ##__VA_ARGS__);                    \
+-        /* In debug/CI builds we additionally emit to stderr for convenience.   */    \
+-        /* NDEBUG disables the extra logging in production to save cycles.      */    \
+-        /* (The syslog call above remains.)                                     */    \
+-        #ifndef NDEBUG                                                                  \
+-        fprintf(stderr, "[" SC_IPC_LOG_TAG "] " fmt "\n", ##__VA_ARGS__);             \
+-        #endif                                                                         \
+-    } while (0)
+-
+-static inline int
+-set_fd_flags(int fd, int set, int unset)
++static int set_nonblocking_cloexec(int fd)
+ {
+     int flags = fcntl(fd, F_GETFL, 0);
+-    if (flags == -1)
++    if (flags == -1) {
+         return -1;
+-    flags |= set;
+-    flags &= ~unset;
+-    return fcntl(fd, F_SETFL, flags);
+-}
+-
+-static int
+-set_nonblocking_cloexec(int fd)
+-{
+-    if (set_fd_flags(fd, O_NONBLOCK, 0) == -1)
++    }
++    if (fcntl(fd, F_SETFL, flags | O_NONBLOCK) == -1) {
+         return -1;
++    }
+ 
+-    /* Ensure FD_CLOEXEC to avoid leaking sockets into execve. */
+-    int flags = fcntl(fd, F_GETFD, 0);
+-    if (flags == -1)
++    flags = fcntl(fd, F_GETFD, 0);
++    if (flags == -1) {
+         return -1;
++    }
+     return fcntl(fd, F_SETFD, flags | FD_CLOEXEC);
+ }
+ 
+-/* Write exactly len bytes or fail with ‑1. Returns 0 on success. */
+-static int
+-write_full(int fd, const uint8_t *buf, size_t len)
++static int wait_for_fd(int fd, short events, uint32_t timeout_ms)
+ {
+-    while (len > 0) {
+-        ssize_t n = write(fd, buf, len);
++    struct pollfd pfd = { .fd = fd, .events = events };
++    int timeout = timeout_ms == 0U ? -1 : (int)timeout_ms;
++
++    for (;;) {
++        int rc = poll(&pfd, 1, timeout);
++        if (rc > 0) {
++            if ((pfd.revents & (POLLERR | POLLHUP | POLLNVAL)) != 0) {
++                return SC_IPC_ECONN;
++            }
++            return SC_IPC_SUCCESS;
++        }
++        if (rc == 0) {
++            return SC_IPC_ETIMEDOUT;
++        }
++        if (errno != EINTR) {
++            return SC_IPC_EIO;
++        }
++    }
++}
++
++static int write_full(int fd, const uint8_t *buf, size_t len, uint32_t timeout_ms)
++{
++    while (len > 0U) {
++        int wait_rc = wait_for_fd(fd, POLLOUT, timeout_ms);
++        if (wait_rc != SC_IPC_SUCCESS) {
++            return wait_rc;
++        }
++
++        ssize_t n = send(fd, buf, len, MSG_NOSIGNAL);
+         if (n < 0) {
+-            if (errno == EINTR)
++            if (errno == EINTR) {
+                 continue;
++            }
+             if (errno == EAGAIN || errno == EWOULDBLOCK) {
+-                /* Busy-wait could be replaced with poll/epoll for high-load
+-                 * services. Since message payloads are typically small
+-                 * (<64 KiB), we keep the logic simple here. */
+                 continue;
+             }
+-            return -1;
++            return SC_IPC_EIO;
+         }
+-        buf += n;
++        if (n == 0) {
++            return SC_IPC_ECLOSED;
++        }
++
++        buf += (size_t)n;
+         len -= (size_t)n;
+     }
+-    return 0;
++
++    return SC_IPC_SUCCESS;
+ }
+ 
+-/* Read exactly len bytes, honoring deadline. Returns 0, ‑1 on error, ‑2 on
+- * timeout. */
+-static int
+-read_full_deadline(int fd, uint8_t *buf, size_t len, int deadline_ms)
++static int read_full(int fd, uint8_t *buf, size_t len, uint32_t timeout_ms)
+ {
+-    struct pollfd pfd = { .fd = fd, .events = POLLIN };
+-
+-    while (len > 0) {
+-        int rc = poll(&pfd, 1, deadline_ms);
+-        if (rc == 0)
+-            return -2; /* timeout                               */
+-        if (rc < 0) {
+-            if (errno == EINTR)
+-                continue;
+-            return -1;
++    while (len > 0U) {
++        int wait_rc = wait_for_fd(fd, POLLIN, timeout_ms);
++        if (wait_rc != SC_IPC_SUCCESS) {
++            return wait_rc;
+         }
+-        ssize_t n = read(fd, buf, len);
+-        if (n == 0)
+-            return -1; /* orderly shutdown (unexpected here)    */
++
++        ssize_t n = recv(fd, buf, len, 0);
+         if (n < 0) {
+-            if (errno == EINTR)
++            if (errno == EINTR) {
++                continue;
++            }
++            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                 continue;
+-            return -1;
++            }
++            return SC_IPC_EIO;
+         }
+-        buf += n;
++        if (n == 0) {
++            return SC_IPC_ECLOSED;
++        }
++
++        buf += (size_t)n;
+         len -= (size_t)n;
+     }
+-    return 0;
+-}
+-
+-/* -------------------------------------------------------------------------
+- * Public API
+- * -------------------------------------------------------------------------*/
+ 
+-struct sc_ipc_endpoint {
+-    int   fd;
+-    bool  is_server;  /* server listening socket or connected peer         */
+-    char  path[SC_IPC_MAX_PATH + 1];
+-};
++    return SC_IPC_SUCCESS;
++}
+ 
+-/* Helper used by both server and client to allocate endpoint structs */
+-static sc_ipc_endpoint_t *
+-endpoint_new(int fd, bool is_server, const char *path)
++static uint64_t realtime_ns(void)
+ {
+-    sc_ipc_endpoint_t *ep = calloc(1, sizeof(*ep));
+-    if (!ep)
+-        return NULL;
+-
+-    ep->fd         = fd;
+-    ep->is_server  = is_server;
+-
+-    if (path)
+-        strncpy(ep->path, path, SC_IPC_MAX_PATH);
++    struct timespec ts;
++    if (clock_gettime(CLOCK_REALTIME, &ts) != 0) {
++        return 0U;
++    }
++    return ((uint64_t)ts.tv_sec * 1000000000ULL) + (uint64_t)ts.tv_nsec;
++}
+ 
+-    return ep;
++const char *sc_ipc_strerr(sc_ipc_err_t err)
++{
++    switch (err) {
++    case SC_IPC_SUCCESS:   return "success";
++    case SC_IPC_EINVAL:    return "invalid argument";
++    case SC_IPC_ETIMEDOUT: return "operation timed out";
++    case SC_IPC_ECONN:     return "connection failure";
++    case SC_IPC_EIO:       return "I/O error";
++    case SC_IPC_EPROTO:    return "protocol error";
++    case SC_IPC_ECLOSED:   return "peer closed connection";
++    case SC_IPC_EBUFFER:   return "buffer too small";
++    case SC_IPC_ENOMEM:    return "memory allocation failed";
++    case SC_IPC_ESTATE:    return "invalid IPC state";
++    default:               return "unknown IPC error";
++    }
+ }
+ 
+-sc_ipc_endpoint_t *
+-sc_ipc_server_create(const char *socket_path, int backlog)
++int sc_ipc_server_init(sc_ipc_channel_t *srv, const char *endpoint, size_t backlog)
+ {
+-    if (!socket_path) {
+-        errno = EINVAL;
+-        return NULL;
++    if (srv == NULL || endpoint == NULL || endpoint[0] == '\0') {
++        return SC_IPC_EINVAL;
+     }
+-    size_t path_len = strlen(socket_path);
+-    if (path_len == 0 || path_len >= sizeof(((struct sockaddr_un *)0)->sun_path)) {
+-        errno = ENAMETOOLONG;
+-        return NULL;
++    if (strlen(endpoint) > SC_IPC_MAX_ENDPOINT) {
++        return SC_IPC_EINVAL;
+     }
+ 
+-    int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
++    memset(srv, 0, sizeof(*srv));
++    srv->fd = -1;
++
++    int fd = socket(AF_UNIX, SOCK_STREAM, 0);
+     if (fd == -1) {
+-        SC_LOG(LOG_ERR, "socket(): %m");
+-        return NULL;
++        return SC_IPC_EIO;
+     }
+-
+-    /* Remove leftover socket path from previously crashed instance. */
+-    unlink(socket_path);
+-
+-    struct sockaddr_un addr = { .sun_family = AF_UNIX };
+-    strncpy(addr.sun_path, socket_path, sizeof(addr.sun_path) - 1);
+-
+-    if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) == -1) {
+-        SC_LOG(LOG_ERR, "bind(%s): %m", socket_path);
++    if (set_nonblocking_cloexec(fd) == -1) {
+         close(fd);
+-        return NULL;
++        return SC_IPC_EIO;
+     }
+ 
+-    /* Restrict permissions to caller's UID/GID (umask honored). */
+-    if (chmod(socket_path, 0660) == -1) {
+-        SC_LOG(LOG_WARNING, "chmod(%s): %m", socket_path);
+-        /* Not fatal; continue. */
+-    }
++    unlink(endpoint);
+ 
+-    if (listen(fd, backlog) == -1) {
+-        SC_LOG(LOG_ERR, "listen(): %m");
+-        close(fd);
+-        unlink(socket_path);
+-        return NULL;
+-    }
++    struct sockaddr_un addr;
++    memset(&addr, 0, sizeof(addr));
++    addr.sun_family = AF_UNIX;
++    strncpy(addr.sun_path, endpoint, sizeof(addr.sun_path) - 1U);
+ 
+-    sc_ipc_endpoint_t *ep = endpoint_new(fd, true, socket_path);
+-    if (!ep) {
++    if (bind(fd, (const struct sockaddr *)&addr, sizeof(addr)) == -1) {
+         close(fd);
+-        unlink(socket_path);
++        return SC_IPC_EIO;
+     }
+-    SC_LOG(LOG_INFO, "IPC server listening on %s", socket_path);
+-    return ep;
+-}
+ 
+-int
+-sc_ipc_accept(const sc_ipc_endpoint_t *server,
+-              sc_ipc_endpoint_t      **client_out,
+-              int                      timeout_ms)
+-{
+-    if (!server || !server->is_server || !client_out) {
+-        errno = EINVAL;
+-        return -1;
++    if (chmod(endpoint, 0660) == -1) {
++        /* Non-fatal; the socket is still usable. */
+     }
+ 
+-    struct pollfd pfd = { .fd = server->fd, .events = POLLIN };
+-    int rc            = poll(&pfd, 1, timeout_ms);
+-    if (rc == 0)
+-        return -2; /* timeout */
+-    if (rc < 0) {
+-        if (errno == EINTR)
+-            return -2; /* treat as timeout for simplicity */
+-        return -1;
++    if (listen(fd, (int)backlog) == -1) {
++        close(fd);
++        unlink(endpoint);
++        return SC_IPC_EIO;
+     }
+ 
+-    int cfd = accept4(server->fd, NULL, NULL, SOCK_NONBLOCK | SOCK_CLOEXEC);
+-    if (cfd == -1)
+-        return -1;
++    srv->fd = fd;
++    srv->is_server = true;
++    strncpy(srv->endpoint, endpoint, SC_IPC_MAX_ENDPOINT);
++    srv->endpoint[SC_IPC_MAX_ENDPOINT] = '\0';
+ 
+-    *client_out = endpoint_new(cfd, false, NULL);
+-    if (!*client_out) {
+-        close(cfd);
+-        return -1;
+-    }
+-    return 0;
++    return SC_IPC_SUCCESS;
+ }
+ 
+-sc_ipc_endpoint_t *
+-sc_ipc_client_connect(const char *socket_path, int timeout_ms)
++int sc_ipc_client_init(sc_ipc_channel_t *cli, const char *endpoint, uint32_t timeout_ms)
+ {
+-    if (!socket_path) {
+-        errno = EINVAL;
+-        return NULL;
++    if (cli == NULL || endpoint == NULL || endpoint[0] == '\0') {
++        return SC_IPC_EINVAL;
+     }
+-    size_t path_len = strlen(socket_path);
+-    if (path_len == 0 || path_len >= sizeof(((struct sockaddr_un *)0)->sun_path)) {
+-        errno = ENAMETOOLONG;
+-        return NULL;
++    if (strlen(endpoint) > SC_IPC_MAX_ENDPOINT) {
++        return SC_IPC_EINVAL;
+     }
+ 
+-    int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
++    memset(cli, 0, sizeof(*cli));
++    cli->fd = -1;
++
++    int fd = socket(AF_UNIX, SOCK_STREAM, 0);
+     if (fd == -1) {
+-        SC_LOG(LOG_ERR, "socket(): %m");
+-        return NULL;
++        return SC_IPC_EIO;
++    }
++    if (set_nonblocking_cloexec(fd) == -1) {
++        close(fd);
++        return SC_IPC_EIO;
+     }
+ 
+-    struct sockaddr_un addr = { .sun_family = AF_UNIX };
+-    strncpy(addr.sun_path, socket_path, sizeof(addr.sun_path) - 1);
++    struct sockaddr_un addr;
++    memset(&addr, 0, sizeof(addr));
++    addr.sun_family = AF_UNIX;
++    strncpy(addr.sun_path, endpoint, sizeof(addr.sun_path) - 1U);
+ 
+-    int rc = connect(fd, (struct sockaddr *)&addr, sizeof(addr));
++    int rc = connect(fd, (const struct sockaddr *)&addr, sizeof(addr));
+     if (rc == -1 && errno != EINPROGRESS) {
+-        SC_LOG(LOG_ERR, "connect(%s): %m", socket_path);
+         close(fd);
+-        return NULL;
++        return SC_IPC_ECONN;
+     }
+ 
+     if (rc == -1) {
+-        /* Wait for connect completion */
+-        struct pollfd pfd = { .fd = fd, .events = POLLOUT };
+-        rc                = poll(&pfd, 1, timeout_ms);
+-        if (rc == 0) {
+-            errno = ETIMEDOUT;
+-            close(fd);
+-            return NULL;
+-        }
+-        if (rc < 0) {
++        int wait_rc = wait_for_fd(fd, POLLOUT, timeout_ms);
++        if (wait_rc != SC_IPC_SUCCESS) {
+             close(fd);
+-            return NULL;
++            return wait_rc;
+         }
+-        /* Check connection result */
+-        int err;
+-        socklen_t len = sizeof(err);
+-        if (getsockopt(fd, SOL_SOCKET, SO_ERROR, &err, &len) == -1 || err) {
+-            if (!err)
+-                err = errno;
+-            errno = err;
++
++        int err = 0;
++        socklen_t err_len = sizeof(err);
++        if (getsockopt(fd, SOL_SOCKET, SO_ERROR, &err, &err_len) == -1 || err != 0) {
+             close(fd);
+-            return NULL;
++            return SC_IPC_ECONN;
+         }
+     }
+ 
+-    sc_ipc_endpoint_t *ep = endpoint_new(fd, false, socket_path);
+-    if (!ep) {
+-        close(fd);
+-        return NULL;
+-    }
+-    return ep;
++    cli->fd = fd;
++    cli->is_server = false;
++    strncpy(cli->endpoint, endpoint, SC_IPC_MAX_ENDPOINT);
++    cli->endpoint[SC_IPC_MAX_ENDPOINT] = '\0';
++
++    return SC_IPC_SUCCESS;
+ }
+ 
+-ssize_t
+-sc_ipc_send(const sc_ipc_endpoint_t *endpoint, const void *buf, size_t len,
+-            int flags /* future use */)
++int sc_ipc_accept(const sc_ipc_channel_t *srv, sc_ipc_channel_t *out_cli, uint32_t timeout_ms)
+ {
+-    (void)flags;
++    if (srv == NULL || out_cli == NULL || !srv->is_server || srv->fd < 0) {
++        return SC_IPC_EINVAL;
++    }
+ 
+-    if (!endpoint || !buf || len > SC_IPC_MAX_PAYLOAD) {
+-        errno = EINVAL;
+-        return -1;
++    int wait_rc = wait_for_fd(srv->fd, POLLIN, timeout_ms);
++    if (wait_rc != SC_IPC_SUCCESS) {
++        return wait_rc;
+     }
+ 
+-    uint8_t header[4];
+-    uint32_t be_len = htonl((uint32_t)len);
+-    memcpy(header, &be_len, sizeof(be_len));
+-
+-    struct iovec iov[2] = {
+-        { .iov_base = header, .iov_len = sizeof(header) },
+-        { .iov_base = (void *)buf, .iov_len = len },
+-    };
+-
+-    /* Use writev for fewer syscalls */
+-    ssize_t sent = writev(endpoint->fd, iov, 2);
+-    if (sent == -1 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+-        /* Fallback to blocking loop */
+-        if (write_full(endpoint->fd, header, sizeof(header)) == -1)
+-            return -1;
+-        if (write_full(endpoint->fd, buf, len) == -1)
+-            return -1;
+-        sent = sizeof(header) + (ssize_t)len;
+-    } else if (sent != (ssize_t)sizeof(header) + (ssize_t)len) {
+-        /* Partial write not expected when socket is blocking; treat as error. */
+-        errno = EIO;
+-        return -1;
++    int fd = accept(srv->fd, NULL, NULL);
++    if (fd == -1) {
++        return SC_IPC_EIO;
++    }
++    if (set_nonblocking_cloexec(fd) == -1) {
++        close(fd);
++        return SC_IPC_EIO;
+     }
+ 
+-    return sent;
++    memset(out_cli, 0, sizeof(*out_cli));
++    out_cli->fd = fd;
++    out_cli->is_server = false;
++
++    return SC_IPC_SUCCESS;
+ }
+ 
+-ssize_t
+-sc_ipc_recv(const sc_ipc_endpoint_t *endpoint, void **buf_out, int timeout_ms)
++void sc_ipc_close(sc_ipc_channel_t *chan)
+ {
+-    if (!endpoint || !buf_out) {
+-        errno = EINVAL;
+-        return -1;
++    if (chan == NULL) {
++        return;
+     }
+ 
+-    uint32_t be_len;
+-    int rc = read_full_deadline(endpoint->fd, (uint8_t *)&be_len,
+-                                sizeof(be_len), timeout_ms);
+-    if (rc == -2) { /* timeout */
+-        return 0;
++    if (chan->fd >= 0) {
++        close(chan->fd);
++        chan->fd = -1;
+     }
+-    if (rc == -1) {
+-        return -1;
++
++    if (chan->is_server && chan->endpoint[0] != '\0') {
++        unlink(chan->endpoint);
+     }
+ 
+-    uint32_t len = ntohl(be_len);
+-    if (len == 0 || len > SC_IPC_MAX_PAYLOAD) {
+-        errno = EMSGSIZE;
+-        return -1;
++    chan->is_server = false;
++    chan->endpoint[0] = '\0';
++}
++
++int sc_ipc_send_msg(sc_ipc_channel_t *chan,
++                    sc_ipc_msg_type_t type,
++                    const void *payload,
++                    size_t payload_len,
++                    uint64_t correlation_id,
++                    const sc_trace_context_t *trace_context,
++                    uint32_t timeout_ms)
++{
++    if (chan == NULL || chan->fd < 0 || payload_len > SC_IPC_MAX_PAYLOAD) {
++        return SC_IPC_EINVAL;
++    }
++    if (payload_len > 0U && payload == NULL) {
++        return SC_IPC_EINVAL;
+     }
+ 
+-    uint8_t *payload = malloc(len + 1);
+-    if (!payload) {
+-        return -1;
++    sc_ipc_msg_hdr_t hdr;
++    memset(&hdr, 0, sizeof(hdr));
++    hdr.magic = SC_IPC_MSG_MAGIC;
++    hdr.version = SC_IPC_VERSION_MAJOR;
++    hdr.type = (uint16_t)type;
++    hdr.length = (uint32_t)payload_len;
++    hdr.correlation_id = correlation_id;
++    hdr.timestamp_ns = realtime_ns();
++    if (trace_context != NULL) {
++        hdr.trace_context = *trace_context;
+     }
+ 
+-    rc = read_full_deadline(endpoint->fd, payload, len, timeout_ms);
+-    if (rc == -2) {
+-        free(payload);
+-        return 0; /* timeout waiting for rest */
++    int rc = write_full(chan->fd, (const uint8_t *)&hdr, sizeof(hdr), timeout_ms);
++    if (rc != SC_IPC_SUCCESS) {
++        return rc;
+     }
+-    if (rc == -1) {
+-        free(payload);
+-        return -1;
++    if (payload_len == 0U) {
++        return SC_IPC_SUCCESS;
+     }
+ 
+-    payload[len] = '\0'; /* NUL-terminate for quick string use (optional) */
+-    *buf_out     = payload;
+-    return (ssize_t)len;
++    return write_full(chan->fd, (const uint8_t *)payload, payload_len, timeout_ms);
+ }
+ 
+-void
+-sc_ipc_endpoint_destroy(sc_ipc_endpoint_t *endpoint)
++int sc_ipc_recv_msg(sc_ipc_channel_t *chan,
++                    sc_ipc_msg_hdr_t *hdr,
++                    void *buf,
++                    size_t buf_size,
++                    uint32_t timeout_ms)
+ {
+-    if (!endpoint)
+-        return;
++    if (chan == NULL || hdr == NULL || chan->fd < 0) {
++        return SC_IPC_EINVAL;
++    }
+ 
+-    if (endpoint->fd != -1)
+-        close(endpoint->fd);
++    int rc = read_full(chan->fd, (uint8_t *)hdr, sizeof(*hdr), timeout_ms);
++    if (rc != SC_IPC_SUCCESS) {
++        return rc;
++    }
+ 
+-    /* Remove socket file only for server listening endpoints. */
+-    if (endpoint->is_server && *endpoint->path)
+-        unlink(endpoint->path);
++    if (hdr->magic != SC_IPC_MSG_MAGIC || hdr->version != SC_IPC_VERSION_MAJOR) {
++        return SC_IPC_EPROTO;
++    }
++    if (hdr->type < SC_IPC_MSG_REQUEST || hdr->type > SC_IPC_MSG_HEARTBEAT) {
++        return SC_IPC_EPROTO;
++    }
++    if (hdr->length > SC_IPC_MAX_PAYLOAD) {
++        return SC_IPC_EPROTO;
++    }
++    if (hdr->length > 0U && buf == NULL) {
++        return SC_IPC_EINVAL;
++    }
++    if ((size_t)hdr->length > buf_size) {
++        return SC_IPC_EBUFFER;
++    }
+ 
+-    free(endpoint);
+-}
++    if (hdr->length == 0U) {
++        return 0;
++    }
+ 
+-/* Convenience wrapper to send a NUL-terminated string. Returns bytes sent. */
+-ssize_t
+-sc_ipc_send_str(const sc_ipc_endpoint_t *endpoint, const char *str)
+-{
+-    if (!str)
+-        return -1;
+-    return sc_ipc_send(endpoint, str, strlen(str), 0);
++    rc = read_full(chan->fd, (uint8_t *)buf, hdr->length, timeout_ms);
++    if (rc != SC_IPC_SUCCESS) {
++        return rc;
++    }
++
++    return (int)hdr->length;
+ }
+ 
+-/* Graceful shutdown helper: shuts down write side then waits for peer EOF. */
+-int
+-sc_ipc_shutdown(sc_ipc_endpoint_t *endpoint, int deadline_ms)
++uint64_t sc_ipc_gen_correlation_id(void)
+ {
+-    if (!endpoint)
+-        return -1;
+-
+-    shutdown(endpoint->fd, SHUT_WR);
+-
+-    struct pollfd pfd = { .fd = endpoint->fd, .events = POLLIN };
+-    int rc            = poll(&pfd, 1, deadline_ms);
+-    if (rc <= 0)
+-        return rc; /* 0 = timeout, -1 = error */
+-
+-    /* Drain any remaining input (could also just close). */
+-    char tmp[256];
+-    while (read(endpoint->fd, tmp, sizeof(tmp)) > 0)
+-        ;
+-    return 0;
++    uint64_t value = ((uint64_t)time(NULL) << 32) ^ (uint64_t)getpid();
++    value ^= (uint64_t)clock();
++    return value == 0U ? 1U : value;
+ }
+ 
+-/* -------------------------------------------------------------------------
+- * Version info (returned via sc_ipc_version_string()) so that dynamically
+- * loaded plugins can verify ABI compatibility at runtime.
+- * -------------------------------------------------------------------------*/
+-#define SC_IPC_VERSION_STR "1.0.0"
+-
+-const char *
+-sc_ipc_version_string(void)
++int sc_ipc_drain(sc_ipc_channel_t *chan)
+ {
+-    return SC_IPC_VERSION_STR;
++    if (chan == NULL || chan->fd < 0) {
++        return SC_IPC_EINVAL;
++    }
++
++    uint8_t buf[256];
++    for (;;) {
++        ssize_t n = recv(chan->fd, buf, sizeof(buf), 0);
++        if (n > 0) {
++            continue;
++        }
++        if (n == 0) {
++            return SC_IPC_SUCCESS;
++        }
++        if (errno == EAGAIN || errno == EWOULDBLOCK) {
++            return SC_IPC_SUCCESS;
++        }
++        if (errno == EINTR) {
++            continue;
++        }
++        return SC_IPC_EIO;
++    }
+ }
+-```
+\ No newline at end of file

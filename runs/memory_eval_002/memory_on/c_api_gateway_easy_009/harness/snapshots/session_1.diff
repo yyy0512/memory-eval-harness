@@ -1,0 +1,94 @@
+diff --git a/EduGate_ScholarLink/Makefile b/EduGate_ScholarLink/Makefile
+index 7f07044..243a0d4 100644
+--- a/EduGate_ScholarLink/Makefile
++++ b/EduGate_ScholarLink/Makefile
+@@ -83,6 +83,7 @@ endif
+ # ---------------------------------------------------------------------------
+ SRC_CORE        := \
+     src/main.c \
++    src/rate_limiter.c \
+     src/router/router.c \
+     src/validator/validator.c \
+     src/graphql/schema_registry.c \
+diff --git a/EduGate_ScholarLink/src/main.c b/EduGate_ScholarLink/src/main.c
+index d3ba2b2..d9b0b89 100644
+--- a/EduGate_ScholarLink/src/main.c
++++ b/EduGate_ScholarLink/src/main.c
+@@ -22,6 +22,10 @@
+ #define _POSIX_C_SOURCE 200809L /* sigaction, strdup, etc. */
+ 
+ #include <microhttpd.h>
++#include "rate_limiter.h"
++
++#include <arpa/inet.h>
++#include <sys/socket.h>
+ 
+ #include <stdatomic.h>
+ #include <stdbool.h>
+@@ -160,6 +164,29 @@ respond_text(struct MHD_Connection *conn, unsigned int code,
+     return respond(conn, code, TEXT_CONTENT_TYPE, text);
+ }
+ 
++static bool
++get_client_ip(struct MHD_Connection *conn, char *buf, size_t buf_len)
++{
++    const union MHD_ConnectionInfo *info =
++        MHD_get_connection_info(conn, MHD_CONNECTION_INFO_CLIENT_ADDRESS);
++
++    if (!info || !info->client_addr || buf_len == 0)
++        return false;
++
++    const struct sockaddr *addr = info->client_addr;
++    const void *src = NULL;
++
++    if (addr->sa_family == AF_INET) {
++        src = &((const struct sockaddr_in *)addr)->sin_addr;
++    } else if (addr->sa_family == AF_INET6) {
++        src = &((const struct sockaddr_in6 *)addr)->sin6_addr;
++    } else {
++        return false;
++    }
++
++    return inet_ntop(addr->sa_family, src, buf, (socklen_t)buf_len) != NULL;
++}
++
+ /* ------------------------------------------------------------------------- */
+ /* URI Handlers                                                              */
+ /* ------------------------------------------------------------------------- */
+@@ -293,7 +320,24 @@ ahc_router_cb(void *cls,
+     /* On first call for a connection, *con_cls is NULL.  We use it to track
+      * whether we’ve already processed the request body.
+      */
+-    bool consumed_upload = (*con_cls != NULL);
++    bool rate_limit_checked = (*con_cls != NULL);
++    bool consumed_upload = (*con_cls == (void *)2);
++
++    if (!rate_limit_checked) {
++        char client_ip[INET6_ADDRSTRLEN];
++        const char *rate_limit_key = "unknown";
++        if (get_client_ip(conn, client_ip, sizeof(client_ip)))
++            rate_limit_key = client_ip;
++
++        if (!rate_limiter_allow(rate_limit_key)) {
++            atomic_fetch_add_explicit(&g_total_requests, 1, memory_order_relaxed);
++            atomic_fetch_add_explicit(&g_failed_requests, 1, memory_order_relaxed);
++            return respond_json(conn, MHD_HTTP_TOO_MANY_REQUESTS,
++                                "{ \"error\": \"Rate limit exceeded\" }");
++        }
++
++        *con_cls = (void *)1;
++    }
+ 
+     /* Dispatch to appropriate route */
+     for (size_t i = 0; i < g_route_count; ++i) {
+@@ -311,8 +355,8 @@ ahc_router_cb(void *cls,
+             }
+ 
+             /* Mark that we have consumed upload so MHD can free buffers */
+-            if (!*con_cls && consumed_upload)
+-                *con_cls = (void *)1;
++            if (consumed_upload)
++                *con_cls = (void *)2;
+ 
+             /* Update metrics */
+             atomic_fetch_add_explicit(&g_total_requests, 1,

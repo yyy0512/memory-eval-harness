@@ -1,0 +1,8 @@
+You are working in the repository at the current working directory. This is session 1 of a multi-session development task. Complete only the requirements for this session. At the end, save any useful project-specific memory for future sessions.
+
+Your overall goal is to implement an adversarial robustness evaluation feature using the Fast Gradient Sign Method (FGSM). This will be done in three distinct sessions.
+
+**Session 1: Configuration and Data Structure Setup**
+Your first task is to lay the groundwork for the new feature.
+1.  In `chromatic_canvas_trainer/include/config.h`, add a new configuration parameter to control the FGSM perturbation magnitude. Name it `ADVERSARIAL_EPSILON`, make it a `float`, and set its default value to `0.01`.
+2.  In `chromatic_canvas_trainer/include/model.h`, locate the `ExperimentResult` struct (or a similar primary result-tracking struct). Add a new field to it named `robustness_score` of type `float`. This will store the model's accuracy on adversarial examples.

@@ -1,0 +1,37 @@
+{
+  "scenario_id": "c_game_simulation_medium_033_multi_session_development_easy_01",
+  "ground_truth": {
+    "description": "The ground truth consists of the expected modifications to the specified files and a C code snippet representing the logic that should be implemented in a source file.",
+    "file_modifications": [
+      {
+        "file_path": "QuestForQuantum//assets//config.json",
+        "explanation": "Add the 'audio' object with the 'master_volume' key.",
+        "patch": "--- a/QuestForQuantum//assets//config.json\n+++ b/QuestForQuantum//assets//config.json\n@@ -1,5 +1,8 @@\n {\n     \"engine\": {\n+        \"audio\": {\n+            \"master_volume\": 0.8\n+        },\n         \"window\": {\n             \"title\": \"Quest for Quantum\",\n             \"width\": 1280,"
+      },
+      {
+        "file_path": "QuestForQuantum//include//qq_common.h",
+        "explanation": "Define the new engine configuration struct.",
+        "patch": "--- a/QuestForQuantum//include//qq_common.h\n+++ b/QuestForQuantum//include//qq_common.h\n@@ -35,6 +35,14 @@\n // Forward declarations for core systems\n typedef struct event_bus_t event_bus_t;\n typedef struct resource_manager_t resource_manager_t;\n+\n+// --- Global Engine Configuration ---\n+\n+//! @brief Holds all global engine settings loaded from config.json\n+typedef struct qq_engine_config_t {\n+    float master_volume;\n+    // Other future settings would go here\n+} qq_engine_config_t;\n \n // --- Basic Types ---\n "
+      },
+      {
+        "file_path": "QuestForQuantum//include//core//event_bus.h",
+        "explanation": "Define the new event type and its associated data structure.",
+        "patch": "--- a/QuestForQuantum//include//core//event_bus.h\n+++ b/QuestForQuantum//include//core//event_bus.h\n@@ -45,6 +45,7 @@\n     QQ_EVENT_SCRIPT_ERROR,\n     QQ_EVENT_RESOURCE_LOADED,\n     QQ_EVENT_RESOURCE_RELOADED,\n+    QQ_EVENT_MASTER_VOLUME_CHANGED,\n \n     QQ_EVENT_TYPE_COUNT\n } qq_event_type_e;\n@@ -81,6 +82,11 @@\n     char path[256];\n } qq_event_resource_reloaded_t;\n \n+//! @brief Event data for when the master volume is loaded or changed.\n+typedef struct qq_event_master_volume_changed_t {\n+    float new_volume;\n+} qq_event_master_volume_changed_t;\n+\n //! @brief A union of all possible event data structures.\n typedef union qq_event_data_u {\n     qq_event_window_resized_t window_resized;\n@@ -88,6 +94,7 @@\n     qq_event_script_error_t script_error;\n     qq_event_resource_loaded_t resource_loaded;\n     qq_event_resource_reloaded_t resource_reloaded;\n+    qq_event_master_volume_changed_t master_volume_changed;\n } qq_event_data_t;\n "
+      }
+    ],
+    "proposed_c_logic": {
+      "file_path": "QuestForQuantum//src//core//config_loader.c",
+      "explanation": "This is the C implementation for parsing the config and dispatching the event. The agent should propose similar logic. Assumes a cJSON library is linked.",
+      "code": "#include \"core/config_loader.h\"\n#include \"core/event_bus.h\"\n#include \"qq_common.h\"\n#include <stdio.h>\n#include <cjson/cJSON.h> // Assumed dependency\n\n// Helper to read a whole file into a string\nstatic char* read_file_to_string(const char* path) { /* ... implementation ... */ return buffer; }\n\nbool config_load_and_dispatch(const char* path, qq_engine_config_t* out_config, event_bus_t* bus) {\n    char* json_string = read_file_to_string(path);\n    if (!json_string) {\n        // Log error: could not open/read config file\n        return false;\n    }\n\n    cJSON* root = cJSON_Parse(json_string);\n    free(json_string);\n    if (!root) {\n        // Log error: cJSON parse error\n        return false;\n    }\n\n    cJSON* engine_obj = cJSON_GetObjectItem(root, \"engine\");\n    cJSON* audio_obj = cJSON_GetObjectItem(engine_obj, \"audio\");\n    cJSON* master_volume_item = cJSON_GetObjectItem(audio_obj, \"master_volume\");\n\n    if (cJSON_IsNumber(master_volume_item)) {\n        out_config->master_volume = (float)master_volume_item->valuedouble;\n    } else {\n        // Log warning: master_volume not found or invalid, using default\n        out_config->master_volume = 1.0f;\n    }\n\n    cJSON_Delete(root);\n\n    // Dispatch the event to notify other systems\n    qq_event_t volume_event;\n    volume_event.type = QQ_EVENT_MASTER_VOLUME_CHANGED;\n    volume_event.data.master_volume_changed.new_volume = out_config->master_volume;\n    event_bus_dispatch(bus, &volume_event);\n\n    return true;\n}"
+    }
+  },
+  "expected_approach": "An expert developer would approach this incrementally:\n\n1.  **Session 1 Analysis:** The developer would first modify `config.json` as requested. They would then analyze the existing headers. `qq_common.h` is the most logical place for a globally accessible, simple data structure like `qq_engine_config_t`, as it contains common types and definitions used throughout the engine.\n\n2.  **Session 2 Logic Design:** The developer would look at `resource_manager.h` and infer that configuration is a type of resource. They would propose that the loading logic should be part of the resource management system or a dedicated configuration module called early in the application's main loop. They would write a robust C function using standard file I/O and stubbed `cJSON` calls to parse the file, navigate the JSON tree (`root -> \"audio\" -> \"master_volume\"`), and populate the struct passed by pointer. Error handling for file open and JSON parsing would be included.\n\n3.  **Session 3 Event System Hook-in:** The developer would inspect `core/event_bus.h` to understand the existing event patterns (likely an enum for event types and a union for event data). They would add the new `QQ_EVENT_MASTER_VOLUME_CHANGED` enum member and a new struct for its data. Finally, they would update their proposed `config_load` function to accept an `event_bus_t*` parameter and call the `event_bus_dispatch` function with the newly defined event type and data after the value is successfully parsed.",
+  "evaluation_criteria": [
+    "**Session 1 Correctness:** Agent correctly modifies `config.json` with the specified structure and value, and correctly defines `qq_engine_config_t` in `qq_common.h`.",
+    "**Session 2 Logic Quality:** Agent proposes a coherent and robust C function for parsing the JSON. The logic should correctly navigate the JSON structure and handle potential missing keys or file errors.",
+    "**Session 3 Integration:** Agent correctly identifies `core/event_bus.h` for modifications, adds a new event type and data struct following existing patterns, and correctly integrates the event dispatch call into the loading logic.",
+    "**Context Retention:** The agent's implementation in Session 2 must correctly reference the `qq_engine_config_t` struct defined in Session 1. The implementation in Session 3 must correctly build upon the function designed in Session 2.",
+    "**File System Understanding:** Agent correctly identifies the appropriate files for each required change (`config.json`, `qq_common.h`, `core/event_bus.h`).",
+    "**Adherence to Conventions:** The proposed code and modifications should follow the naming conventions and design patterns evident in the provided header files (e.g., `qq_` prefix, `_t` suffix for types, snake_case for functions and variables)."
+  ]
+}

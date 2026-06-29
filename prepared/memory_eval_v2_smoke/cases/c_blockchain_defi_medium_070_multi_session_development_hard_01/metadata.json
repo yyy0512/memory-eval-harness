@@ -1,0 +1,44 @@
+{
+  "scenario_id": "c_blockchain_defi_medium_070_multi_session_development_hard_01",
+  "case_id": "c_blockchain_defi_medium_070",
+  "title": "UtiliChain Core: Implement Transaction Gas and Fee Mechanism (Session 1 - Scaffolding)",
+  "description": "The UtiliChain network is preparing for a major upgrade to enhance its economic model and prevent network spam. This involves introducing a gas-based transaction fee mechanism, similar to Ethereum. This is a large, multi-stage project. This first task focuses on laying the foundational groundwork by modifying the core data structures. The agent must analyze the existing codebase, identify the correct structures to modify, and implement the changes while ensuring the project remains in a compilable state. Subsequent sessions will build upon this foundation to implement the fee calculation, VM integration, and validator rewards.",
+  "difficulty": "hard",
+  "project_spec": {
+    "unique_id": "c_blockchain_defi_medium_070",
+    "name": "UtiliChain Core Suite",
+    "description": "UtiliChain Core Suite is a monolithic C-based platform that provides municipalities, utilities, and infrastructure operators with a single executable for recording, settling, and auditing energy-credit and micro-service payments on a lightweight DeFi-enabled blockchain. The suite bundles transaction processing, a tokenized staking model for grid contributors, and a built-in automated market maker that utilities can use to swap carbon credits, service coupons, or prepaid kilowatt-hours without deploying separate smart-contract projects.\n\nAt its heart, UtiliChain emphasises pragmatic utility management: power-meter devices, water sensors, or public-transport validators can push signed usage events directly into the core binary via an event-driven socket API. The monolith contains integrated cryptographic primitives (ECDSA, BLS, SHA-3) for on-device verification, a state-machine–driven consensus engine (Hybrid-PoS/DPoS) optimised for low-power nodes, and a proxy subsystem that lets legacy SCADA software interact with modern DeFi protocols without rewriting existing code. Observer hooks broadcast real-time ledger changes to billing dashboards, while internal smart-contract byte-code is sandboxed but still lives inside the single codebase, ensuring deterministic upgrades and simple deployment pipelines.",
+    "domain": "blockchain_defi",
+    "complexity": "medium",
+    "language": "c",
+    "architecture": "monolithic",
+    "theme": "utility",
+    "target_file_count": 37,
+    "target_token_count": 150205,
+    "features": [
+      "transaction_processing",
+      "cryptographic_functions",
+      "defi_protocols",
+      "consensus_mechanism",
+      "staking",
+      "token_management",
+      "smart_contracts"
+    ],
+    "architecture_patterns": [
+      "Proxy_Pattern",
+      "Event_Driven",
+      "Observer_Pattern",
+      "State_Machine"
+    ],
+    "dependencies": [
+      "OpenSSL (libcrypto, libssl) – ECDSA, BLS, SHA-3, AES-GCM",
+      "SQLite3 – embedded ledger persistence and state checkpoints",
+      "libuv – asynchronous event loop for the Event_Driven architecture layer",
+      "libtommath – high-precision integer math for consensus and staking calculations",
+      "jansson – JSON parsing/serialization for RPC and Observer_Pattern notifications",
+      "protobuf-c – lightweight binary messaging between proxy adapters and core",
+      "uthash/utarray – hash-map and dynamic array utilities for internal state tables"
+    ],
+    "seed": 935762
+  }
+}

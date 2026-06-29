@@ -1,0 +1,50 @@
+{
+  "scenario_id": "c_api_microservice_medium_008_multi_session_development_expert_01",
+  "case_id": "c_api_microservice_medium_008",
+  "title": "Implement the Core `Order` Service from Specification",
+  "description": "The MerchantMatrix suite is expanding to handle customer orders. A new `order_service` is required. A specification stub (`order_service/STUB.md`) has been created, outlining the basic requirements, data models, and desired API endpoints. The task is to perform the initial, foundational implementation of this service over several development sessions, integrating it into the existing microservice architecture. This involves creating the service skeleton, implementing the core data models, adding the business logic for order creation, and wiring it up to the API Gateway.",
+  "difficulty": "expert",
+  "project_spec": {
+    "unique_id": "c_api_microservice_medium_008",
+    "name": "MerchantMatrix Core Microservice Suite",
+    "description": "MerchantMatrix Core Microservice Suite is a medium-sized, production-grade set of C micro-services that powers the core operations of a B2B marketplace.  The suite exposes product-catalog, pricing, and order-workflow endpoints through a versioned REST & GraphQL façade routed via an API-Gateway.  Each business capability is a self-contained microservice that follows the MVVM pattern at service level: “Models” persist business aggregates (catalog items, price rules, purchase orders); “View-Models” shape those aggregates into DTOs tailored to client use-cases (web dashboard, mobile app, partner API); and lightweight “Views” are the HTTP/GraphQL response payloads published by the gateway.  This clear separation lets product managers evolve UI requirements (new fields, pagination shapes, or GraphQL queries) without destabilising the domain rules enclosed in the Models.\n\nThe project emphasises business concerns such as multi-tenant pricing, auditability, and SLA-driven throughput.  Built-in error handling, request validation, adaptive rate-limiting, and transparent pagination protect the platform from malformed or malicious calls while guaranteeing predictable response times for paying tenants.  Versioned OpenAPI and GraphQL schemas, auto-generated from View-Models, enable forward-compatible evolution, and embedded Prometheus metrics paired with structured logging give real-time insight into sales funnels and service health.  An API documentation micro-UI is generated at build time so that stakeholder teams (sales, finance, BI) can self-serve integration details without developer intervention.",
+    "domain": "api_microservice",
+    "complexity": "medium",
+    "language": "c",
+    "architecture": "mvvm",
+    "theme": "business",
+    "target_file_count": 28,
+    "target_token_count": 183403,
+    "features": [
+      "error_handling",
+      "versioning",
+      "graphql_schema",
+      "request_validation",
+      "rate_limiting",
+      "pagination",
+      "monitoring",
+      "api_documentation"
+    ],
+    "architecture_patterns": [
+      "REST_Architecture",
+      "Microservices",
+      "API_Gateway",
+      "Service_Layer"
+    ],
+    "dependencies": [
+      "libmicrohttpd (HTTP server & REST routing)",
+      "graphqlparser + libgraphqlparser (GraphQL request parsing)",
+      "cJSON (JSON serialisation for View & View-Model payloads)",
+      "SQLite3 (light-weight relational store for Model layer – can be swapped by RDBMS via service layer)",
+      "protobuf-c (binary schema for inter-service events & versioning)",
+      "hiredis (Redis client for cache, rate-limiting tokens, session store)",
+      "prometheus-c-client (metrics & monitoring hooks)",
+      "libjwt (JWT auth/tenant validation)",
+      "inih (INI / env configuration loader)",
+      "uthash (hash-map helpers inside View-Model mappers)",
+      "C11 threads + libuv (async task & IO abstraction)",
+      "swagger-c-generator (OpenAPI documentation generator)"
+    ],
+    "seed": 959132
+  }
+}

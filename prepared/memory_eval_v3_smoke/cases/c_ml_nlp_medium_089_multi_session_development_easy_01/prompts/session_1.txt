@@ -1,0 +1,10 @@
+You are working in the repository at the current working directory. This is session 1 of a multi-session development task. Complete only the requirements for this session. At the end, save any useful project-specific memory for future sessions.
+
+This task is broken into three sessions. You must complete each session before moving to the next, retaining the context of your previous work.
+
+**Session 1: Update the Core Model Data Structure**
+Your first objective is to update the core data structure that represents a model's metadata. This will lay the groundwork for the subsequent sessions.
+
+1.  Examine the project files to identify where model metadata is defined. The `architecture.md` and file names like `model_registry.h` should be good starting points.
+2.  Locate the `LLC_ModelMetadata` struct in `src/core/model_registry.h`.
+3.  Add a new field to this struct named `feature_component_name`. This field should be able to store a string of up to 64 characters, including the null terminator.

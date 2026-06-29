@@ -1,0 +1,8 @@
+You are working in the repository at the current working directory. This is session 1 of a multi-session development task. Complete only the requirements for this session. At the end, save any useful project-specific memory for future sessions.
+
+Your first task is to lay the groundwork for a new post view counter. You must:
+1. Locate the data structure that defines a blog post and add an integer field to it named `view_count`. Initialize it to 0 for new posts.
+2. In the post service header file (`src/services/post_service.h`), declare a new function that will be used to increment the view count. The function signature should be: `void post_service_increment_view_count(int post_id);`.
+3. In the corresponding implementation file (`src/services/post_service.c`), add a basic, empty (stub) implementation for this new function. 
+
+Do not implement the full logic or modify any other files at this time. This concludes the first session.

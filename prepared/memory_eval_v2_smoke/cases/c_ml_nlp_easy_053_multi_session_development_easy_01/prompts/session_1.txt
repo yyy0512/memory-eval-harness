@@ -1,0 +1,8 @@
+You are working in the repository at the current working directory. This is session 1 of a multi-session development task. Complete only the requirements for this session. At the end, save any useful project-specific memory for future sessions.
+
+This task is divided into multiple sessions. You must retain context between sessions to complete the full implementation.
+
+**Session 1: Implement the Core Logic**
+Your first objective is to implement the URL stripping logic. 
+- **File:** `ChatRipple-C//src//pipeline//preprocessor.c`
+- **Action:** Create a new function with the signature `void strip_urls(char *text)`. This function should find and remove any substrings that start with 'http://' or 'https://' from the input `text` string, modifying it in-place.

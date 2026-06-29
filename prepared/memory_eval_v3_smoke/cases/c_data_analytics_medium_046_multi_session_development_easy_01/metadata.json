@@ -1,0 +1,46 @@
+{
+  "scenario_id": "c_data_analytics_medium_046_multi_session_development_easy_01",
+  "case_id": "c_data_analytics_medium_046",
+  "title": "Implement a 'Dry Run' Mode via Command-Line Argument",
+  "description": "The FlowGauge Utility Analytics Engine currently processes and stores water flow data. To allow for safer testing of new configurations or data sources, we need to add a 'dry run' mode. In this mode, the engine will execute the entire data ingestion and analytics pipeline, including all data quality checks and transformations, but will skip the final step of writing the results to the storage medium (either file or SQLite). This task requires modifying the core configuration, the storage adapters, and the main application entry point over several sessions.",
+  "difficulty": "easy",
+  "project_spec": {
+    "unique_id": "c_data_analytics_medium_046",
+    "name": "FlowGauge Utility Analytics Engine",
+    "description": "FlowGauge is a medium-scale data analytics utility designed to ingest, validate, transform, and analyze time-series readings from disparate utility meters (water, gas, electricity, HVAC) in industrial campuses. Following a strict hexagonal architecture, its core analytics domain is completely framework-agnostic and surrounded by interchangeable adapters that handle storage, scheduling, monitoring, and parallel batch execution.\n\nThe application provides a portable C-based toolkit that operations teams can embed on edge gateways or central servers. Incoming raw meter frames are funneled through a configurable Pipeline Pattern: ingestion → validation/quality checks → transformation/normalization → aggregation. Results are persisted to a lightweight Data Lake tier (chunked columnar files or SQLite shards) and pushed to downstream observers (dashboards, alerting services) via an Observer Pattern layer. A micro-service façade exposes REST and gRPC endpoints for real-time queries while background workers perform scheduled re-computations and automatic error recovery to guarantee data integrity. Emphasis is placed on high-performance parallel processing (OpenMP/pthreads) so the toolkit can run efficiently on constrained industrial hardware without managed-language runtimes.",
+    "domain": "data_analytics",
+    "complexity": "medium",
+    "language": "c",
+    "architecture": "hexagonal",
+    "theme": "utility",
+    "target_file_count": 34,
+    "target_token_count": 163384,
+    "features": [
+      "data_storage",
+      "data_quality_checks",
+      "error_recovery",
+      "data_transformation",
+      "scheduling",
+      "monitoring",
+      "parallel_processing",
+      "data_validation"
+    ],
+    "architecture_patterns": [
+      "Data_Lake",
+      "Observer_Pattern",
+      "Microservices",
+      "Pipeline_Pattern"
+    ],
+    "dependencies": [
+      "SQLite3 (embedded relational storage / local Data Lake shards)",
+      "libcurl (remote object storage & HTTP ingest adapter)",
+      "OpenMP + pthreads (CPU-bound parallel analytics)",
+      "cJSON (lightweight JSON serialization for adapters)",
+      "protobuf-c (gRPC/Protobuf boundary ports)",
+      "libevent (high-performance scheduling & IO reactor)",
+      "prometheus-c-client (metrics & monitoring adapter)",
+      "zlib + liblz4 (compression for columnar files)"
+    ],
+    "seed": 392169
+  }
+}

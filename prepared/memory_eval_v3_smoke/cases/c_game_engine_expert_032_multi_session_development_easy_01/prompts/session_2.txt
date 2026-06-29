@@ -1,0 +1,6 @@
+You are working in the repository at the current working directory. This is session 2 of a 2-session development task. The previous session has ended and conversation context is unavailable. Use the repository state and your persistent memory if available. Do not ask for previous conversation context. Complete only the requirements for this session. At the end, update memory with decisions and remaining work.
+
+Your overall goal is to add an analytics event that fires when a level is successfully loaded in the editor.
+
+**Session 2: Implementation**
+Now that you know how to send an event, you will implement the feature. Modify the level editor code in `editor/src/main.c` to call the analytics function you identified in the previous session. The event should be triggered *only after* a level file has been successfully parsed and loaded into the editor's scene. The event name should be `"EditorLevelLoaded"` and its payload should be the file path of the level being loaded.

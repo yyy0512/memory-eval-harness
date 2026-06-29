@@ -1,0 +1,11 @@
+You are working in the repository at the current working directory. This is session 2 of a 3-session development task. The previous session has ended and conversation context is unavailable. Use the repository state and your persistent memory if available. Do not ask for previous conversation context. Complete only the requirements for this session. At the end, update memory with decisions and remaining work.
+
+Your overall goal is to implement an adversarial robustness evaluation feature using the Fast Gradient Sign Method (FGSM). This will be done in three distinct sessions.
+
+**Session 2: Core Logic Implementation**
+(This prompt would be given in a subsequent interaction with the agent)
+Continuing from the previous session, you will now implement the core FGSM logic.
+1.  In `chromatic_canvas_trainer/src/model.c`, create a new function with the signature: `void generate_adversarial_example(const Model* model, const float* input_image, const int* true_label, float epsilon, float* adversarial_image);`
+2.  To implement this function, you will first need to compute the gradient of the model's loss function with respect to the input image pixels. You will likely need to inspect `main.c` and `model.c` to understand how the training loop, forward pass, and backpropagation are currently implemented and adapt that logic for this purpose.
+3.  Once you have the gradient, implement the FGSM formula: `adversarial_image = input_image + epsilon * sign(gradient)`. Ensure the output values are clipped to a valid range for an image (e.g., [0.0, 1.0]).
+4.  Add the corresponding function prototype to `chromatic_canvas_trainer/include/model.h`.

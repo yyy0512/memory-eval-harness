@@ -1,0 +1,42 @@
+{
+  "scenario_id": "c_mobile_social_easy_094_multi_session_development_easy_01",
+  "case_id": "c_mobile_social_easy_094",
+  "title": "Implement Ephemeral Snaps with Configurable Expiration",
+  "description": "The SnapSecure Utility Hub product team wants to introduce a new feature: 'Ephemeral Snaps'. These are temporary photos that automatically become inaccessible after a configurable period. This task requires updating the application's configuration system to define the snap lifetime and then modifying the core snap management logic to enforce this expiration. The task is divided into two sessions to test context retention and incremental development.",
+  "difficulty": "easy",
+  "project_spec": {
+    "unique_id": "c_mobile_social_easy_094",
+    "name": "SnapSecure Utility Hub",
+    "description": "SnapSecure Utility Hub is an easy-tier mobile social utility that helps users quickly capture, annotate, and share secure snapshots of daily items such as receipts, business cards, or whiteboard notes. By blending lightweight social interaction (sharing to trusted circles) with powerful utility functions (OCR-ready image capture, encrypted storage, and searchable history), the app fills the gap between pure social photo apps and standalone scanner tools. Built in C and organized around a classic layered architecture, SnapSecure cleanly separates UI responsiveness from device-level operations, making it highly maintainable even for small teams.\n\nThe application showcases five headline features: camera_integration for one-tap image capture, biometric_auth protecting private collections, push_notifications that alert collaborators when new content is shared, responsive_ui that adapts to varying screen densities, and a lightweight on-device analytics module that tracks capture success rates to improve guidance overlays. Factory, Singleton, and Adapter patterns are used to isolate platform differences (iOS/Android camera APIs), centralize configuration, and enable plug-and-play metric collectors without polluting business logic. This strong focus on practical everyday value—rather than broadcasting to massive networks—makes SnapSecure Utility Hub distinctly different from typical mobile_social projects while still providing a tightly scoped social layer for secure sharing.",
+    "domain": "mobile_social",
+    "complexity": "easy",
+    "language": "c",
+    "architecture": "layered",
+    "theme": "utility",
+    "target_file_count": 14,
+    "target_token_count": 29108,
+    "features": [
+      "camera_integration",
+      "analytics",
+      "push_notifications",
+      "responsive_ui",
+      "biometric_auth"
+    ],
+    "architecture_patterns": [
+      "Factory_Pattern",
+      "Singleton",
+      "Adapter_Pattern"
+    ],
+    "dependencies": [
+      "libcamera2 (or AVFoundation/CameraX via Adapter_Pattern wrappers)",
+      "SDL2 + SDL_gpu for responsive UI rendering",
+      "SQLite3 for local encrypted data/cache layer",
+      "OpenSSL / mbedTLS for secure transport & biometric key storage",
+      "libPush (FCM/APNs thin C wrapper) for push_notifications",
+      "libBiometricAuth (face/fingerprint abstraction)",
+      "cJSON for lightweight analytics event serialization",
+      "zlib for compressed asset packaging"
+    ],
+    "seed": 915832
+  }
+}

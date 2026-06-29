@@ -1,0 +1,156 @@
+diff --git a/EduGate_ScholarLink/Makefile b/EduGate_ScholarLink/Makefile
+index 7f07044..243a0d4 100644
+--- a/EduGate_ScholarLink/Makefile
++++ b/EduGate_ScholarLink/Makefile
+@@ -83,6 +83,7 @@ endif
+ # ---------------------------------------------------------------------------
+ SRC_CORE        := \
+     src/main.c \
++    src/rate_limiter.c \
+     src/router/router.c \
+     src/validator/validator.c \
+     src/graphql/schema_registry.c \
+diff --git a/EduGate_ScholarLink/src/http_handler.c b/EduGate_ScholarLink/src/http_handler.c
+index b86b1b0..ff6bdb9 100644
+--- a/EduGate_ScholarLink/src/http_handler.c
++++ b/EduGate_ScholarLink/src/http_handler.c
+@@ -26,9 +26,13 @@
+ #include <errno.h>
+ #include <inttypes.h>
+ #include <signal.h>
++#include <arpa/inet.h>
++#include <netinet/in.h>
++#include <sys/socket.h>
+ 
+ #include <microhttpd.h>
+ 
++#include "rate_limiter.h"
+ #include "router.h"
+ #include "validator.h"
+ #include "metrics.h"
+@@ -112,6 +116,32 @@ reserve_body_buf(request_ctx_t *ctx, size_t desired_cap)
+     return 0;
+ }
+ 
++/* Extract the peer IP address reported by libmicrohttpd. */
++static const char *
++client_ip_from_connection(struct MHD_Connection *connection,
++                          char *buffer,
++                          size_t buffer_size)
++{
++    const union MHD_ConnectionInfo *info =
++        MHD_get_connection_info(connection, MHD_CONNECTION_INFO_CLIENT_ADDRESS);
++    if (!info || !info->client_addr) {
++        return "unknown";
++    }
++
++    const void *addr = NULL;
++    if (info->client_addr->sa_family == AF_INET) {
++        addr = &((const struct sockaddr_in *)info->client_addr)->sin_addr;
++    } else if (info->client_addr->sa_family == AF_INET6) {
++        addr = &((const struct sockaddr_in6 *)info->client_addr)->sin6_addr;
++    }
++
++    if (!addr || !inet_ntop(info->client_addr->sa_family, addr, buffer, buffer_size)) {
++        return "unknown";
++    }
++
++    return buffer;
++}
++
+ /* Compose JSON error response */
+ static struct MHD_Response *
+ json_error_response(unsigned int status_code, const char *fmt, ...)
+@@ -203,6 +233,18 @@ http_router_callback(void *cls,
+         ctx->version = strdup(version);
+         *con_cls     = ctx;
+ 
++        char client_ip[INET6_ADDRSTRLEN];
++        if (!rate_limiter_allow(client_ip_from_connection(connection,
++                                                          client_ip,
++                                                          sizeof(client_ip)))) {
++            struct MHD_Response *err_resp =
++                json_error_response(429, "Rate limit exceeded");
++            int ret = MHD_queue_response(connection, 429, err_resp);
++            MHD_destroy_response(err_resp);
++            ctx->resp_status = 429;
++            return ret;
++        }
++
+         /* Signal libmicrohttpd that we need more data */
+         return MHD_YES;
+     }
+diff --git a/EduGate_ScholarLink/src/main.c b/EduGate_ScholarLink/src/main.c
+index d3ba2b2..d7cd81b 100644
+--- a/EduGate_ScholarLink/src/main.c
++++ b/EduGate_ScholarLink/src/main.c
+@@ -23,6 +23,9 @@
+ 
+ #include <microhttpd.h>
+ 
++#include <arpa/inet.h>
++#include <netinet/in.h>
++#include <sys/socket.h>
+ #include <stdatomic.h>
+ #include <stdbool.h>
+ #include <stdint.h>
+@@ -44,6 +47,8 @@
+ #define TEXT_CONTENT_TYPE       "text/plain; charset=utf-8"
+ #define GATEWAY_VERSION         "v2024_Spring"
+ 
++#include "rate_limiter.h"
++
+ /* ------------------------------------------------------------------------- */
+ /* Simple logging utility                                                    */
+ /* ------------------------------------------------------------------------- */
+@@ -125,6 +130,32 @@ validate_student_id_header(struct MHD_Connection *conn)
+     return (student_id && *student_id);
+ }
+ 
++/* Extract the peer IP address reported by libmicrohttpd. */
++static const char *
++client_ip_from_connection(struct MHD_Connection *conn,
++                          char *buffer,
++                          size_t buffer_size)
++{
++    const union MHD_ConnectionInfo *info =
++        MHD_get_connection_info(conn, MHD_CONNECTION_INFO_CLIENT_ADDRESS);
++    if (!info || !info->client_addr) {
++        return "unknown";
++    }
++
++    const void *addr = NULL;
++    if (info->client_addr->sa_family == AF_INET) {
++        addr = &((const struct sockaddr_in *)info->client_addr)->sin_addr;
++    } else if (info->client_addr->sa_family == AF_INET6) {
++        addr = &((const struct sockaddr_in6 *)info->client_addr)->sin6_addr;
++    }
++
++    if (!addr || !inet_ntop(info->client_addr->sa_family, addr, buffer, buffer_size)) {
++        return "unknown";
++    }
++
++    return buffer;
++}
++
+ /* ------------------------------------------------------------------------- */
+ /* Response helpers                                                          */
+ /* ------------------------------------------------------------------------- */
+@@ -295,6 +326,17 @@ ahc_router_cb(void *cls,
+      */
+     bool consumed_upload = (*con_cls != NULL);
+ 
++    if (!*con_cls) {
++        char client_ip[INET6_ADDRSTRLEN];
++        if (!rate_limiter_allow(client_ip_from_connection(conn,
++                                                          client_ip,
++                                                          sizeof(client_ip)))) {
++            atomic_fetch_add_explicit(&g_total_requests, 1, memory_order_relaxed);
++            atomic_fetch_add_explicit(&g_failed_requests, 1, memory_order_relaxed);
++            return respond_json(conn, 429, "{ \"error\": \"Rate limit exceeded\" }");
++        }
++    }
++
+     /* Dispatch to appropriate route */
+     for (size_t i = 0; i < g_route_count; ++i) {
+         if (strcmp(url, g_routes[i].path) == 0) {

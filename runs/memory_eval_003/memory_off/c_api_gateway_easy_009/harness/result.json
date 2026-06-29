@@ -1,0 +1,237 @@
+{
+  "scenario_id": "c_api_gateway_easy_009_multi_session_development_expert_01",
+  "case_id": "c_api_gateway_easy_009",
+  "variant": "memory_off",
+  "run_environment": {
+    "agent_bin": "codeagentcli",
+    "memory_mode": "off",
+    "home": "/home/yyy/projects/LoCoBench-Agent/.claude/worktrees/memory-eval-harness/runs/memory_eval_003/memory_off/c_api_gateway_easy_009/harness/home",
+    "xdg_config_home": "/home/yyy/projects/LoCoBench-Agent/.claude/worktrees/memory-eval-harness/runs/memory_eval_003/memory_off/c_api_gateway_easy_009/harness/xdg_config",
+    "xdg_cache_home": "/home/yyy/projects/LoCoBench-Agent/.claude/worktrees/memory-eval-harness/runs/memory_eval_003/memory_off/c_api_gateway_easy_009/harness/xdg_cache"
+  },
+  "sessions": [
+    {
+      "session": 1,
+      "turns_file": "turns/session_1.jsonl",
+      "turn_count": 1,
+      "exit_code": 0,
+      "duration_sec": 471.4797495880048,
+      "stdout": "logs/session_1.stream.jsonl",
+      "stderr": "logs/session_1.stderr",
+      "stream_json_log": "logs/session_1.stream.jsonl",
+      "cli_result_json": "logs/session_1.result.json",
+      "subtype": "success",
+      "is_error": false,
+      "session_id": "89dcb39c-d36b-4f75-8b06-64bc78daf6ac",
+      "num_turns": 30,
+      "stop_reason": "end_turn",
+      "total_cost_usd": 2.776752,
+      "usage": {
+        "input_tokens": 465538,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 474624,
+        "output_tokens": 8470,
+        "server_tool_use": {
+          "web_search_requests": 0,
+          "web_fetch_requests": 0
+        },
+        "service_tier": "standard",
+        "cache_creation": {
+          "ephemeral_1h_input_tokens": 0,
+          "ephemeral_5m_input_tokens": 0
+        },
+        "cache_deleted_input_tokens": 0,
+        "inference_geo": "",
+        "iterations": [],
+        "speed": "standard"
+      },
+      "modelUsage": {
+        "gpt-5.5": {
+          "inputTokens": 465538,
+          "outputTokens": 8470,
+          "cacheReadInputTokens": 474624,
+          "cacheCreationInputTokens": 0,
+          "webSearchRequests": 0,
+          "costUSD": 2.776752,
+          "contextWindow": 196000,
+          "maxOutputTokens": 32000
+        }
+      },
+      "permission_denials": [],
+      "errors": [],
+      "token_metrics": {
+        "input_tokens": 465538,
+        "output_tokens": 8470,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 474624,
+        "new_input_output_tokens": 474008,
+        "total_reported_tokens": 948632,
+        "total_cost_usd": 2.776752,
+        "duration_ms": 470620,
+        "duration_api_ms": 468982
+      },
+      "diff": "snapshots/session_1.diff",
+      "memory_snapshot": "snapshots/session_1_memory",
+      "memory_diff": null,
+      "files_changed": [
+        "EduGate_ScholarLink/Makefile",
+        "EduGate_ScholarLink/src/main.c",
+        ".session_memory",
+        "EduGate_ScholarLink/build/",
+        "EduGate_ScholarLink/src/rate_limiter.c"
+      ]
+    },
+    {
+      "session": 2,
+      "turns_file": "turns/session_2.jsonl",
+      "turn_count": 1,
+      "exit_code": 0,
+      "duration_sec": 567.8593581040041,
+      "stdout": "logs/session_2.stream.jsonl",
+      "stderr": "logs/session_2.stderr",
+      "stream_json_log": "logs/session_2.stream.jsonl",
+      "cli_result_json": "logs/session_2.result.json",
+      "subtype": "success",
+      "is_error": false,
+      "session_id": "200fe21e-c689-4435-b9d8-49bce9ee2396",
+      "num_turns": 53,
+      "stop_reason": "end_turn",
+      "total_cost_usd": 3.6721369999999998,
+      "usage": {
+        "input_tokens": 553432,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 1314304,
+        "output_tokens": 9913,
+        "server_tool_use": {
+          "web_search_requests": 0,
+          "web_fetch_requests": 0
+        },
+        "service_tier": "standard",
+        "cache_creation": {
+          "ephemeral_1h_input_tokens": 0,
+          "ephemeral_5m_input_tokens": 0
+        },
+        "cache_deleted_input_tokens": 0,
+        "inference_geo": "",
+        "iterations": [],
+        "speed": "standard"
+      },
+      "modelUsage": {
+        "gpt-5.5": {
+          "inputTokens": 553432,
+          "outputTokens": 9913,
+          "cacheReadInputTokens": 1314304,
+          "cacheCreationInputTokens": 0,
+          "webSearchRequests": 0,
+          "costUSD": 3.6721369999999998,
+          "contextWindow": 196000,
+          "maxOutputTokens": 32000
+        }
+      },
+      "permission_denials": [],
+      "errors": [],
+      "token_metrics": {
+        "input_tokens": 553432,
+        "output_tokens": 9913,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 1314304,
+        "new_input_output_tokens": 563345,
+        "total_reported_tokens": 1877649,
+        "total_cost_usd": 3.6721369999999998,
+        "duration_ms": 566312,
+        "duration_api_ms": 563102
+      },
+      "diff": "snapshots/session_2.diff",
+      "memory_snapshot": "snapshots/session_2_memory",
+      "memory_diff": null,
+      "files_changed": [
+        "EduGate_ScholarLink/Makefile",
+        "EduGate_ScholarLink/config/gateway.conf",
+        "EduGate_ScholarLink/docs/API_GUIDE.md",
+        "EduGate_ScholarLink/src/main.c",
+        "EduGate_ScholarLink/src/rate_limiter.h",
+        ".session_memory",
+        "EduGate_ScholarLink/build/",
+        "EduGate_ScholarLink/src/rate_limiter.c"
+      ]
+    },
+    {
+      "session": 3,
+      "turns_file": "turns/session_3.jsonl",
+      "turn_count": 1,
+      "exit_code": 0,
+      "duration_sec": 690.1724799509975,
+      "stdout": "logs/session_3.stream.jsonl",
+      "stderr": "logs/session_3.stderr",
+      "stream_json_log": "logs/session_3.stream.jsonl",
+      "cli_result_json": "logs/session_3.result.json",
+      "subtype": "success",
+      "is_error": false,
+      "session_id": "b88e9e32-ed13-496e-a077-be6492d0c7bb",
+      "num_turns": 45,
+      "stop_reason": "end_turn",
+      "total_cost_usd": 3.7652370000000004,
+      "usage": {
+        "input_tokens": 555110,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 1345024,
+        "output_tokens": 12687,
+        "server_tool_use": {
+          "web_search_requests": 0,
+          "web_fetch_requests": 0
+        },
+        "service_tier": "standard",
+        "cache_creation": {
+          "ephemeral_1h_input_tokens": 0,
+          "ephemeral_5m_input_tokens": 0
+        },
+        "cache_deleted_input_tokens": 0,
+        "inference_geo": "",
+        "iterations": [],
+        "speed": "standard"
+      },
+      "modelUsage": {
+        "gpt-5.5": {
+          "inputTokens": 555110,
+          "outputTokens": 12687,
+          "cacheReadInputTokens": 1345024,
+          "cacheCreationInputTokens": 0,
+          "webSearchRequests": 0,
+          "costUSD": 3.7652370000000004,
+          "contextWindow": 196000,
+          "maxOutputTokens": 32000
+        }
+      },
+      "permission_denials": [],
+      "errors": [],
+      "token_metrics": {
+        "input_tokens": 555110,
+        "output_tokens": 12687,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 1345024,
+        "new_input_output_tokens": 567797,
+        "total_reported_tokens": 1912821,
+        "total_cost_usd": 3.7652370000000004,
+        "duration_ms": 689435,
+        "duration_api_ms": 686981
+      },
+      "diff": "snapshots/session_3.diff",
+      "memory_snapshot": "snapshots/session_3_memory",
+      "memory_diff": null,
+      "files_changed": [
+        "EduGate_ScholarLink/Makefile",
+        "EduGate_ScholarLink/config/gateway.conf",
+        "EduGate_ScholarLink/docs/API_GUIDE.md",
+        "EduGate_ScholarLink/src/main.c",
+        "EduGate_ScholarLink/src/rate_limiter.h",
+        ".session_memory",
+        "EduGate_ScholarLink/build/",
+        "EduGate_ScholarLink/src/rate_limiter.c",
+        "EduGate_ScholarLink/tests/test_rate_limiter_versions.c"
+      ]
+    }
+  ],
+  "final_diff": "snapshots/final.diff",
+  "final_memory_snapshot": "snapshots/final_memory",
+  "errors": []
+}

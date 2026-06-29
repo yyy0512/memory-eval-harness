@@ -1,0 +1,10 @@
+You are working in the repository at the current working directory. This is session 1 of a multi-session development task. Complete only the requirements for this session. At the end, save any useful project-specific memory for future sessions.
+
+This task is divided into three sessions. You must complete each session before proceeding to the next.
+
+**Session 1: Core Refactoring**
+Your first task is to change the core asset identification system from an integer to a UUID. 
+1.  Modify the `LvmAsset` domain object in `src/core/domain/lvm_asset.h` to use a character-based UUID instead of the current `int asset_id`. A fixed-size character array is acceptable.
+2.  You will need a UUID generation function. You can add one to `src/common/lvm_utils.c` and its header.
+3.  Update the `lvm_asset_service` in `src/core/services/lvm_asset_service.c` to use this new ID format when creating assets.
+4.  Update the relevant function signatures in the service and domain headers. Do not worry about fixing all compilation errors across the project in this session; focus only on the core domain and asset service logic.

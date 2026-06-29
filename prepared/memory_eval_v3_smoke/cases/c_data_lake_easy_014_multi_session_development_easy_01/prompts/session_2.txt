@@ -1,0 +1,9 @@
+You are working in the repository at the current working directory. This is session 2 of a 2-session development task. The previous session has ended and conversation context is unavailable. Use the repository state and your persistent memory if available. Do not ask for previous conversation context. Complete only the requirements for this session. At the end, update memory with decisions and remaining work.
+
+You will complete this task over two sessions.
+
+**Session 2: Implementation and Integration**
+Welcome back. Now, building on the changes from the previous session, you will implement and integrate the validation logic.
+1.  In `src/main.c`, update the configuration loading logic to parse the new `max_record_size_bytes` value from the configuration file and store it in the config struct.
+2.  In `src/storage.c`, provide the full implementation for the `validate_record_size` function you declared earlier. The function should return `1` if the `record_size` is less than or equal to `max_size`, and `0` otherwise.
+3.  In `src/main.c`, find the primary data ingestion loop where records are processed. Before a record is sent to storage, call your `validate_record_size` function. If the function returns `0` (indicating a validation failure), print an error message to `stderr` (e.g., "Error: Record exceeds max size of [max_size] bytes. Skipping.") and do not process the record further.

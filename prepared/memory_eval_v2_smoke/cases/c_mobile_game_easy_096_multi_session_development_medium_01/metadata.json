@@ -1,0 +1,41 @@
+{
+  "scenario_id": "c_mobile_game_easy_096_multi_session_development_medium_01",
+  "case_id": "c_mobile_game_easy_096",
+  "title": "Implement a Multi-Session Daily Bonus Feature",
+  "description": "The 'PocketStartup Ledger' is a simple mobile simulation game where players manage a virtual startup, earning in-game currency. To improve player retention, we want to introduce a 'Daily Bonus' feature. This task requires implementing this feature over several simulated development sessions, starting with the core logic and persistence, then refining it with UI feedback and analytics, and finally hardening it against edge cases. The agent must retain context between sessions to successfully complete the task.",
+  "difficulty": "medium",
+  "project_spec": {
+    "unique_id": "c_mobile_game_easy_096",
+    "name": "PocketStartup Ledger",
+    "description": "PocketStartup Ledger is a lightweight, tap-based mobile tycoon game where players grow a virtual portfolio of small companies, balance cash-flow, and make real-time executive decisions— all wrapped in a playful but data-driven business simulation.  Built on a strict hexagonal (ports-and-adapters) architecture, the core domain models concepts such as cash-on-hand, burn-rate, and return-on-investment while secondary adapters handle rendering, touch input, biometric authentication for profile access, in-app purchase flows, offline data sync, and analytics.  By separating the business simulation core from mobile-specific details, PocketStartup Ledger remains both easily testable and ready for future platform shifts (e.g., from iOS/Android to desktop or web), demonstrating how game mechanics and serious business logic can coexist cleanly in a hexagonal design.",
+    "domain": "mobile_game",
+    "complexity": "easy",
+    "language": "c",
+    "architecture": "hexagonal",
+    "theme": "business",
+    "target_file_count": 11,
+    "target_token_count": 61707,
+    "features": [
+      "biometric_auth",
+      "in_app_purchases",
+      "responsive_ui",
+      "offline_sync",
+      "analytics"
+    ],
+    "architecture_patterns": [
+      "Observer_Pattern",
+      "Singleton",
+      "Adapter_Pattern"
+    ],
+    "dependencies": [
+      "SDL2 (cross-platform rendering/input)",
+      "SQLite3 (local save-store & offline sync buffer)",
+      "libcurl (HTTP adapter for analytics & sync)",
+      "OpenSSL (secure IAP receipt validation and TLS)",
+      "cJSON (lightweight JSON serialization for adapters)",
+      "Apple/Google Biometric APIs via thin C FFI shims",
+      "Unity Ads or equivalent SDK headers (monetization adapter)"
+    ],
+    "seed": 98136
+  }
+}

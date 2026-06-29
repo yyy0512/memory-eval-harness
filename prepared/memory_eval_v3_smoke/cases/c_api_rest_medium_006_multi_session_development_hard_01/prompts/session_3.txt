@@ -1,0 +1,8 @@
+You are working in the repository at the current working directory. This is session 3 of a 3-session development task. The previous session has ended and conversation context is unavailable. Use the repository state and your persistent memory if available. Do not ask for previous conversation context. Complete only the requirements for this session. At the end, update memory with decisions and remaining work.
+
+This task is divided into three sessions. You must retain context between sessions to complete the project successfully.
+
+**Session 3: Integration, Error Handling, and Documentation**
+Your final objective is to finalize the feature by ensuring its robustness and documenting it for users.
+1.  Review your implementation to ensure it integrates with the existing error handling. If a dynamically selected backend is unavailable, the gateway should return a standard `503 Service Unavailable` error, consistent with existing error patterns.
+2.  Update the API documentation in `docs/OpenAPI.yaml`. For all relevant paths, add a parameter definition for the new `X-Service-Version` header, clearly explaining its purpose and providing examples of possible values (e.g., 'stable', 'beta').

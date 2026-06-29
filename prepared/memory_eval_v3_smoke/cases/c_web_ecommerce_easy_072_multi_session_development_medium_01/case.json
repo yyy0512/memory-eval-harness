@@ -1,0 +1,47 @@
+{
+  "scenario_id": "c_web_ecommerce_easy_072_multi_session_development_medium_01",
+  "case_id": "c_web_ecommerce_easy_072",
+  "category": "extended_development_projects",
+  "original_task_category": "multi_session_development",
+  "project_source": "/home/yyy/projects/LoCoBench-Agent/.claude/worktrees/memory-eval-harness/data/generated/c_web_ecommerce_easy_072",
+  "project_name": "LambdaCommerce Lite",
+  "language": "c",
+  "complexity": "easy",
+  "session_count": 3,
+  "turns": [
+    {
+      "session": 1,
+      "file": "turns/session_1.jsonl",
+      "turn_count": 1
+    },
+    {
+      "session": 2,
+      "file": "turns/session_2.jsonl",
+      "turn_count": 1
+    },
+    {
+      "session": 3,
+      "file": "turns/session_3.jsonl",
+      "turn_count": 1
+    }
+  ],
+  "prompts_for_review": [
+    {
+      "session": 1,
+      "file": "prompts/session_1.txt"
+    },
+    {
+      "session": 2,
+      "file": "prompts/session_2.txt"
+    },
+    {
+      "session": 3,
+      "file": "prompts/session_3.txt"
+    }
+  ],
+  "hashes": {
+    "scenario_json_sha256": "39a3e1ac34f08ad81d1a0d196b644755d97579cf3becbde9e50957a674e2e5e4",
+    "project_tree_sha256": "e8082829bd731ed429e0127f06739bab69bbe241f641245237aa7389fd48db5c",
+    "prepared_case_sha256": "f67f862253567865938274daf0d0dde18acfb04ea4bf38a22772154912e6dac8"
+  }
+}

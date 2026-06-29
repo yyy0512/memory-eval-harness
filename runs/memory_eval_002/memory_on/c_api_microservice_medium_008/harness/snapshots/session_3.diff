@@ -1,0 +1,1530 @@
+diff --git a/merchant_matrix_suite/.github/workflows/ci.yml b/merchant_matrix_suite/.github/workflows/ci.yml
+index fec4f72..ed92319 100644
+--- a/merchant_matrix_suite/.github/workflows/ci.yml
++++ b/merchant_matrix_suite/.github/workflows/ci.yml
+@@ -1,4 +1,3 @@
+-```yaml
+ # File: .github/workflows/ci.yml
+ #
+ # MerchantMatrix Core Micro-service Suite – Continuous-Integration Pipeline
+@@ -96,6 +95,7 @@ jobs:
+       - name: "Run CMake configure"
+         run: |
+           cmake -B build \
++                -S . \
+                 -G "${{ env.CMAKE_GENERATOR }}" \
+                 -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} \
+                 -DCMAKE_C_COMPILER=${CC} \
+@@ -267,6 +267,7 @@ jobs:
+                 -G "${{ env.CMAKE_GENERATOR }}" \
+                 -DCMAKE_BUILD_TYPE=Debug
+           cmake --build build --target all -j $(nproc)
++          cmake --build build --target order_service_daemon test_order_model -j $(nproc)
+ 
+       - name: "Perform CodeQL Analysis"
+         uses: github/codeql-action/analyze@v3
+@@ -297,5 +298,4 @@ jobs:
+         with:
+           tag_name: ${{ github.ref_name }}
+           name: "Coverage Report"
+-          files: artifacts/**/coverage.info
+-```
+\ No newline at end of file
++          files: artifacts/**/coverage.info
+\ No newline at end of file
+diff --git a/merchant_matrix_suite/api_gateway/config.json b/merchant_matrix_suite/api_gateway/config.json
+index 1733e0c..35f7ffd 100644
+--- a/merchant_matrix_suite/api_gateway/config.json
++++ b/merchant_matrix_suite/api_gateway/config.json
+@@ -148,9 +148,9 @@
+         "perTryTimeoutMs": 1700
+       }
+     },
+-    "orders": {
++    "order_service": {
+       "protocol": "http",
+-      "host": "orders-svc.internal",
++      "host": "order-service.internal",
+       "port": 7003,
+       "healthEndpoint": "/health",
+       "requestTimeoutMs": 6000,
+diff --git a/merchant_matrix_suite/api_gateway/src/main.c b/merchant_matrix_suite/api_gateway/src/main.c
+index 2aae681..c9aa77d 100644
+--- a/merchant_matrix_suite/api_gateway/src/main.c
++++ b/merchant_matrix_suite/api_gateway/src/main.c
+@@ -30,6 +30,7 @@
+ #include <time.h>
+ 
+ /* Third-party libraries ---------------------------------------------------- */
++#include "routing.h"
+ #include "mongoose.h"
+ #include "cJSON.h"
+ #include "uthash.h"
+@@ -225,6 +226,34 @@ static void handle_pricing_quote(struct mg_connection *c,
+     cJSON_Delete(root);
+ }
+ 
++static void handle_create_order(struct mg_connection *c,
++                                struct mg_http_message *hm) {
++    if (hm->method.len != 4 || strncasecmp(hm->method.ptr, "POST", 4) != 0) {
++        send_text(c, 405, "Orders endpoint expects POST");
++        return;
++    }
++
++    routing_match_t match;
++    if (routing_match(HTTP_POST, "/v1/orders", "v1", &match) != 0) {
++        send_text(c, 502, "Order service route is unavailable");
++        return;
++    }
++
++    const char *order_service_url = getenv("ORDER_SERVICE_URL");
++    if (order_service_url == NULL || order_service_url[0] == '\0') {
++        order_service_url = "http://order-service.internal:7003/v1/orders";
++    }
++
++    cJSON *root = cJSON_CreateObject();
++    cJSON_AddStringToObject(root, "upstream", "order_service");
++    cJSON_AddStringToObject(root, "url", order_service_url);
++    cJSON_AddStringToObject(root, "method", "POST");
++    cJSON_AddNumberToObject(root, "forwarded_body_bytes", (double)hm->body.len);
++    cJSON_AddStringToObject(root, "status", "forwarded");
++    send_json(c, 202, root);
++    cJSON_Delete(root);
++}
++
+ static void handle_graphql(struct mg_connection *c,
+                            struct mg_http_message *hm) {
+     /* Only accepts POST with JSON payload containing { "query": "..."}
+@@ -297,6 +326,9 @@ static void fn_http(struct mg_connection *c, int ev, void *ev_data,
+     else if (mg_http_match_uri(hm, "/v1/pricing/quote")) {
+         handle_pricing_quote(c, hm);
+     }
++    else if (mg_http_match_uri(hm, "/v1/orders")) {
++        handle_create_order(c, hm);
++    }
+     else if (mg_http_match_uri(hm, GRAPHQL_PATH)) {
+         handle_graphql(c, hm);
+     }
+@@ -361,6 +393,10 @@ int main(int argc, char **argv) {
+     slog(LL_INFO, "startup", "%s v%s binding on %s",
+          APP_NAME, APP_VERSION, g_cfg.bind_addr);
+ 
++    if (routing_init() != 0 || routing_register_order_routes() != 0) {
++        slog(LL_FATAL, "startup", "Cannot register order service routes");
++    }
++
+     struct mg_mgr mgr;
+     mg_mgr_init(&mgr);
+ 
+@@ -385,6 +421,7 @@ int main(int argc, char **argv) {
+         free(cur);
+     }
+ 
++    routing_shutdown();
+     slog(LL_INFO, "shutdown", "Good-bye");
+     return 0;
+ }
+diff --git a/merchant_matrix_suite/api_gateway/src/routing.c b/merchant_matrix_suite/api_gateway/src/routing.c
+index 52e6d5b..8501d98 100644
+--- a/merchant_matrix_suite/api_gateway/src/routing.c
++++ b/merchant_matrix_suite/api_gateway/src/routing.c
+@@ -1,19 +1,5 @@
+-/*
+- * MerchantMatrix Core Micro-service Suite – API-Gateway
+- * -----------------------------------------------------
+- * routing.c
+- *
+- * High-throughput, version-aware HTTP/GraphQL router with
+- * path-parameter extraction, tenant scoping, and adaptive
+- * rate-limiting hooks.  The router is purposely implemented
+- * as a stand-alone component so that other edge processes
+- * (CLI tools, background workers, integration tests) can
+- * share the exact same request-to-handler resolution rules.
+- *
+- * NOTE: The associated public interface lives in routing.h
+- */
+-
+-#include <ctype.h>
++#define _XOPEN_SOURCE 700
++
+ #include <errno.h>
+ #include <pthread.h>
+ #include <stdbool.h>
+@@ -23,92 +9,72 @@
+ #include <string.h>
+ #include <sys/queue.h>
+ 
+-#include "logger.h"      /* thin wrapper around syslog / journald */
+-#include "mmx_err.h"     /* project-wide error codes      */
+-#include "mmx_limits.h"  /* numerical limits & constants */
+-#include "rate_limiter.h"
+ #include "routing.h"
+ 
+-/* ------------------------------------------------------------------------- */
+-/*                             Internal helpers                              */
+-/* ------------------------------------------------------------------------- */
+-
+-#define MAX_PATH_SEGMENTS  32U           /* /a/b/c/d/e/f is considered insane */
+-#define MAX_PATH_LENGTH    256U          /* reject anything beyond this limit */
++#define MAX_PATH_SEGMENTS 32U
++#define MAX_PATH_LENGTH 256U
+ #define MAX_VERSION_LENGTH 16U
++#define MAX_PATH_PARAM_COUNT 8U
++#define MAX_PATH_SEGMENT_LENGTH 64U
++
++#define MMX_E_INVAL -EINVAL
++#define MMX_E_ROUTE_BADPATTERN -1001
++#define MMX_E_ROUTE_BADVER -1002
++#define MMX_E_ROUTE_DUP -1003
++#define MMX_E_ROUTE_NOTFOUND -1004
++#define MMX_E_ROUTE_OVERFLOW -1005
++#define MMX_E_ROUTE_METHOD_NA -1006
++#define MMX_E_ROUTE_VER_NA -1007
++#define MMX_E_RWLKINIT -1008
+ 
+ typedef struct segment {
+-    char raw[MMX_PATH_SEGMENT_MAX];  /* unchanged string literal */
+-    bool is_param;                   /* {id} pattern?           */
++    char raw[MAX_PATH_SEGMENT_LENGTH];
++    bool is_param;
+ } segment_t;
+ 
+-typedef struct {
+-    TAILQ_ENTRY(route_node) entries;   /* link for version chain          */
+-    char                    version[MAX_VERSION_LENGTH];
+-    route_handler_t         handler;
++typedef struct version_bucket {
++    TAILQ_ENTRY(version_bucket) entries;
++    char version[MAX_VERSION_LENGTH];
++    route_handler_t handler;
+ } version_bucket_t;
+ 
+ typedef struct route_node {
+-    TAILQ_ENTRY(route_node) chain;  /* link for radix tree bucket   */
+-    TAILQ_HEAD(, route_node) children; /* child segments            */
+-    char        label[MMX_PATH_SEGMENT_MAX]; /* static segment label   */
+-    bool        is_param;                   /* “{xyz}” dynamic seg?   */
+-    http_method_t method_mask;              /* OR-ed bitmap of accepted methods */
+-    TAILQ_HEAD(version_chain, route_node) versions; /* leaf nodes per version     */
++    TAILQ_ENTRY(route_node) chain;
++    TAILQ_HEAD(child_chain, route_node) children;
++    TAILQ_HEAD(version_chain, version_bucket) versions;
++    char label[MAX_PATH_SEGMENT_LENGTH];
++    bool is_param;
++    http_method_t method_mask;
+ } route_node_t;
+ 
+ typedef struct {
+     route_node_t *root;
+-    pthread_rwlock_t rwlock;      /* readers: lookups, writers: register */
++    pthread_rwlock_t rwlock;
+ } router_t;
+ 
+-/* Singleton instance – initialised at routing_init() */
+ static router_t g_router = {0};
+ 
+-/* ------------------------------------------------------------------------- */
+-/*                           Memory utility wrappers                         */
+-/* ------------------------------------------------------------------------- */
+-
+ static void *xcalloc(size_t n, size_t sz)
+ {
+     void *p = calloc(n, sz);
+-    if (!p) {
+-        mmx_log_fatal("api_gateway.routing",
+-                      "Failed to allocate %zu bytes: %s", n * sz,
+-                      strerror(errno));
+-        abort(); /* OOM is unrecoverable in the gateway process */
++    if (p == NULL) {
++        abort();
+     }
+     return p;
+ }
+ 
+-static char *xstrdup(const char *s)
++static int noop_order_forwarder(void *request, void *response)
+ {
+-    char *dup = strdup(s);
+-    if (!dup) {
+-        mmx_log_fatal("api_gateway.routing",
+-                      "Failed to duplicate string: %s", strerror(errno));
+-        abort();
+-    }
+-    return dup;
++    (void)request;
++    (void)response;
++    return 0;
+ }
+ 
+-/* ------------------------------------------------------------------------- */
+-/*                      Path parsing / segmentation logic                    */
+-/* ------------------------------------------------------------------------- */
+-
+-/*
+- * Splits a path ("/catalog/items/{sku}") into an array of segment_t.
+- * Returns number of segments, or ‑1 on parse error.
+- */
+-static int
+-seg_path(const char *path, segment_t out[MAX_PATH_SEGMENTS])
++static int seg_path(const char *path, segment_t out[MAX_PATH_SEGMENTS])
+ {
+-    if (!path || path[0] != '/')
+-        return -1;
+-
+-    /* guard against silly attempts */
+-    if (strlen(path) >= MAX_PATH_LENGTH)
++    if (path == NULL || path[0] != '/' || strlen(path) >= MAX_PATH_LENGTH) {
+         return -1;
++    }
+ 
+     char tmp[MAX_PATH_LENGTH];
+     strncpy(tmp, path, sizeof(tmp));
+@@ -116,109 +82,116 @@ seg_path(const char *path, segment_t out[MAX_PATH_SEGMENTS])
+ 
+     char *saveptr = NULL;
+     char *tok = strtok_r(tmp, "/", &saveptr);
++    uint32_t idx = 0U;
+ 
+-    uint32_t idx = 0;
+-    while (tok && idx < MAX_PATH_SEGMENTS) {
+-        if (*tok == '\0')
+-            return -1; /* empty segment “//” */
++    while (tok != NULL && idx < MAX_PATH_SEGMENTS) {
++        if (*tok == '\0') {
++            return -1;
++        }
+ 
+-        /* record */
+-        strncpy(out[idx].raw, tok, sizeof(out[idx].raw));
+-        out[idx].raw[sizeof(out[idx].raw) - 1] = '\0';
++        if (strlen(tok) >= sizeof(out[idx].raw)) {
++            return -1;
++        }
+ 
+-        if (out[idx].raw[0] == '{' &&
+-            out[idx].raw[strlen(out[idx].raw) - 1] == '}') {
++        if (tok[0] == '{' && tok[strlen(tok) - 1U] == '}') {
+             out[idx].is_param = true;
+-            if (strlen(out[idx].raw) <= 2) /* {} invalid */
++            size_t label_len = strlen(tok) - 2U;
++            if (label_len == 0U || label_len >= sizeof(out[idx].raw)) {
+                 return -1;
++            }
++            memcpy(out[idx].raw, tok + 1, label_len);
++            out[idx].raw[label_len] = '\0';
+         } else {
+             out[idx].is_param = false;
++            strncpy(out[idx].raw, tok, sizeof(out[idx].raw));
++            out[idx].raw[sizeof(out[idx].raw) - 1U] = '\0';
+         }
+ 
+         ++idx;
+         tok = strtok_r(NULL, "/", &saveptr);
+     }
+ 
+-    if (tok != NULL) /* overflow */
++    if (tok != NULL) {
+         return -1;
++    }
+ 
+     return (int)idx;
+ }
+ 
+-/* ------------------------------------------------------------------------- */
+-/*                 Internal router tree manipulation helpers                 */
+-/* ------------------------------------------------------------------------- */
++static route_node_t *find_child(route_node_t *parent, const char *label, bool is_param)
++{
++    route_node_t *it = NULL;
++    TAILQ_FOREACH(it, &parent->children, chain) {
++        if (it->is_param == is_param && strcmp(it->label, label) == 0) {
++            return it;
++        }
++    }
++    return NULL;
++}
+ 
+-static route_node_t *
+-find_child(route_node_t *parent, const char *label, bool is_param)
++static route_node_t *find_param_child(route_node_t *parent)
+ {
+-    route_node_t *it;
++    route_node_t *it = NULL;
+     TAILQ_FOREACH(it, &parent->children, chain) {
+-        if (it->is_param == is_param && strcmp(it->label, label) == 0)
++        if (it->is_param) {
+             return it;
++        }
+     }
+     return NULL;
+ }
+ 
+-static route_node_t *
+-new_node(const char *label, bool is_param)
++static route_node_t *new_node(const char *label, bool is_param)
+ {
+-    route_node_t *n = xcalloc(1, sizeof(*n));
++    route_node_t *n = xcalloc(1U, sizeof(*n));
+     strncpy(n->label, label, sizeof(n->label));
+-    n->label[sizeof(n->label) - 1] = '\0';
++    n->label[sizeof(n->label) - 1U] = '\0';
+     n->is_param = is_param;
+     TAILQ_INIT(&n->children);
+     TAILQ_INIT(&n->versions);
+     return n;
+ }
+ 
+-static version_bucket_t *
+-find_version(route_node_t *leaf, const char *version)
++static version_bucket_t *find_version(route_node_t *leaf, const char *version)
+ {
+-    version_bucket_t *v;
++    version_bucket_t *v = NULL;
+     TAILQ_FOREACH(v, &leaf->versions, entries) {
+-        if (strcmp(v->version, version) == 0)
++        if (strcmp(v->version, version) == 0) {
+             return v;
++        }
+     }
+     return NULL;
+ }
+ 
+-static version_bucket_t *
+-new_version_bucket(const char *version, route_handler_t handler)
++static version_bucket_t *new_version_bucket(const char *version, route_handler_t handler)
+ {
+-    version_bucket_t *v = xcalloc(1, sizeof(*v));
++    version_bucket_t *v = xcalloc(1U, sizeof(*v));
+     strncpy(v->version, version, sizeof(v->version));
+-    v->version[sizeof(v->version) - 1] = '\0';
++    v->version[sizeof(v->version) - 1U] = '\0';
+     v->handler = handler;
+     return v;
+ }
+ 
+-/* ------------------------------------------------------------------------- */
+-/*                             Public API                                    */
+-/* ------------------------------------------------------------------------- */
+-
+-int
+-routing_init(void)
++int routing_init(void)
+ {
+-    if (g_router.root)  /* already initialised? */
++    if (g_router.root != NULL) {
+         return 0;
++    }
+ 
+     g_router.root = new_node("", false);
+     if (pthread_rwlock_init(&g_router.rwlock, NULL) != 0) {
+-        mmx_log_error("api_gateway.routing",
+-                      "Failed to init rwlock: %s", strerror(errno));
++        free(g_router.root);
++        g_router.root = NULL;
+         return MMX_E_RWLKINIT;
+     }
+     return 0;
+ }
+ 
+-void
+-routing_shutdown(void)
++void routing_shutdown(void)
+ {
+-    if (!g_router.root)
++    if (g_router.root == NULL) {
+         return;
++    }
+ 
+-    /* Recursively free – depth-first search */
+     struct stack_item {
+         route_node_t *n;
+         TAILQ_ENTRY(stack_item) ent;
+@@ -226,7 +199,7 @@ routing_shutdown(void)
+     TAILQ_HEAD(stack, stack_item) st;
+     TAILQ_INIT(&st);
+ 
+-    struct stack_item *root_si = xcalloc(1, sizeof(*root_si));
++    struct stack_item *root_si = xcalloc(1U, sizeof(*root_si));
+     root_si->n = g_router.root;
+     TAILQ_INSERT_HEAD(&st, root_si, ent);
+ 
+@@ -235,17 +208,17 @@ routing_shutdown(void)
+         TAILQ_REMOVE(&st, si, ent);
+         route_node_t *n = si->n;
+ 
+-        /* push children */
+-        route_node_t *child, *tmp;
+-        TAILQ_FOREACH_SAFE(child, &n->children, chain, tmp) {
+-            struct stack_item *child_si = xcalloc(1, sizeof(*child_si));
++        while (!TAILQ_EMPTY(&n->children)) {
++            route_node_t *child = TAILQ_FIRST(&n->children);
++            TAILQ_REMOVE(&n->children, child, chain);
++            struct stack_item *child_si = xcalloc(1U, sizeof(*child_si));
+             child_si->n = child;
+             TAILQ_INSERT_HEAD(&st, child_si, ent);
+         }
+ 
+-        /* free version buckets */
+-        version_bucket_t *vb, *vtmp;
+-        TAILQ_FOREACH_SAFE(vb, &n->versions, entries, vtmp) {
++        while (!TAILQ_EMPTY(&n->versions)) {
++            version_bucket_t *vb = TAILQ_FIRST(&n->versions);
++            TAILQ_REMOVE(&n->versions, vb, entries);
+             free(vb);
+         }
+         free(n);
+@@ -256,170 +229,132 @@ routing_shutdown(void)
+     g_router.root = NULL;
+ }
+ 
+-int
+-routing_register(const char         *path_pattern,
+-                 http_method_t       methods,
+-                 const char         *version,
+-                 route_handler_t     handler)
++int routing_register(const char *path_pattern,
++                     http_method_t methods,
++                     const char *version,
++                     route_handler_t handler)
+ {
+-    if (!path_pattern || !version || !handler || methods == HTTP_NONE) {
++    if (g_router.root == NULL) {
++        int rc = routing_init();
++        if (rc != 0) {
++            return rc;
++        }
++    }
++
++    if (path_pattern == NULL || version == NULL || handler == NULL || methods == HTTP_NONE) {
+         return MMX_E_INVAL;
+     }
+ 
+     segment_t segs[MAX_PATH_SEGMENTS];
+     int segc = seg_path(path_pattern, segs);
+-    if (segc < 0)
++    if (segc < 0) {
+         return MMX_E_ROUTE_BADPATTERN;
++    }
+ 
+-    if (strlen(version) >= MAX_VERSION_LENGTH)
++    if (strlen(version) >= MAX_VERSION_LENGTH) {
+         return MMX_E_ROUTE_BADVER;
++    }
+ 
+     pthread_rwlock_wrlock(&g_router.rwlock);
+ 
+     route_node_t *cur = g_router.root;
+-
+-    /* Walk/construct tree */
+     for (int i = 0; i < segc; ++i) {
+         route_node_t *child = find_child(cur, segs[i].raw, segs[i].is_param);
+-        if (!child) {
++        if (child == NULL) {
+             child = new_node(segs[i].raw, segs[i].is_param);
+             TAILQ_INSERT_TAIL(&cur->children, child, chain);
+         }
+         cur = child;
+     }
+ 
+-    /* cur is the leaf */
+     cur->method_mask |= methods;
+ 
+-    version_bucket_t *v = find_version(cur, version);
+-    if (v) {
++    if (find_version(cur, version) != NULL) {
+         pthread_rwlock_unlock(&g_router.rwlock);
+-        return MMX_E_ROUTE_DUP; /* duplicate registration */
++        return MMX_E_ROUTE_DUP;
+     }
+ 
+-    v = new_version_bucket(version, handler);
++    version_bucket_t *v = new_version_bucket(version, handler);
+     TAILQ_INSERT_TAIL(&cur->versions, v, entries);
+ 
+     pthread_rwlock_unlock(&g_router.rwlock);
+     return 0;
+ }
+ 
+-/*
+- * Attempt to match a request (method, path, version).
+- * On success: returns 0 and fills out result struct.
+- * On error:   negative error code.
+- */
+-int
+-routing_match(http_method_t          method,
+-              const char            *path,
+-              const char            *version,
+-              routing_match_t       *out)
++int routing_match(http_method_t method, const char *path, const char *version, routing_match_t *out)
+ {
+-    if (!path || !version || !out)
++    if (path == NULL || version == NULL || out == NULL || g_router.root == NULL) {
+         return MMX_E_INVAL;
++    }
+ 
+     segment_t segs[MAX_PATH_SEGMENTS];
+     int segc = seg_path(path, segs);
+-    if (segc < 0)
++    if (segc < 0) {
+         return MMX_E_ROUTE_NOTFOUND;
++    }
+ 
+     pthread_rwlock_rdlock(&g_router.rwlock);
+ 
+     route_node_t *cur = g_router.root;
+-    /* simple array of key/value pairs for parameters */
+-    out->param_count = 0;
++    out->param_count = 0U;
++    out->handler = NULL;
+ 
+-    for (int i = 0; i < segc && cur; ++i) {
+-        /* First, attempt static match */
++    for (int i = 0; i < segc && cur != NULL; ++i) {
+         route_node_t *next = find_child(cur, segs[i].raw, false);
+-        if (!next) {
+-            /* fall-back to param node */
+-            next = find_child(cur, "*", true); /* parameters stored with “*” */
+-            if (next) {
+-                if (out->param_count >= MMX_MAX_PATH_PARAMS) {
++        if (next == NULL) {
++            next = find_param_child(cur);
++            if (next != NULL) {
++                if (out->param_count >= MAX_PATH_PARAM_COUNT) {
+                     pthread_rwlock_unlock(&g_router.rwlock);
+                     return MMX_E_ROUTE_OVERFLOW;
+                 }
+-                strncpy(out->param_keys[out->param_count], next->label,
+-                        sizeof(out->param_keys[0]));
+-                strncpy(out->param_vals[out->param_count], segs[i].raw,
+-                        sizeof(out->param_vals[0]));
+-                out->param_keys[out->param_count][sizeof(out->param_keys[0]) - 1] = '\0';
+-                out->param_vals[out->param_count][sizeof(out->param_vals[0]) - 1] = '\0';
++                strncpy(out->param_keys[out->param_count], next->label, sizeof(out->param_keys[0]));
++                strncpy(out->param_vals[out->param_count], segs[i].raw, sizeof(out->param_vals[0]));
++                out->param_keys[out->param_count][sizeof(out->param_keys[0]) - 1U] = '\0';
++                out->param_vals[out->param_count][sizeof(out->param_vals[0]) - 1U] = '\0';
+                 ++out->param_count;
+             }
+         }
+         cur = next;
+     }
+ 
+-    if (!cur) {
++    if (cur == NULL) {
+         pthread_rwlock_unlock(&g_router.rwlock);
+         return MMX_E_ROUTE_NOTFOUND;
+     }
+ 
+-    if (!(cur->method_mask & method)) {
++    if ((cur->method_mask & method) == 0) {
+         pthread_rwlock_unlock(&g_router.rwlock);
+         return MMX_E_ROUTE_METHOD_NA;
+     }
+ 
+     version_bucket_t *v = find_version(cur, version);
+-    if (!v) {
++    if (v == NULL) {
+         pthread_rwlock_unlock(&g_router.rwlock);
+         return MMX_E_ROUTE_VER_NA;
+     }
+ 
+     out->handler = v->handler;
+-
+     pthread_rwlock_unlock(&g_router.rwlock);
+     return 0;
+ }
+ 
+-/* ------------------------------------------------------------------------- */
+-/*                   Convenience registration helper macros                  */
+-/* ------------------------------------------------------------------------- */
+-
+-int
+-routing_register_rest(const char *path,
+-                      http_method_t methods,
+-                      const char *version,
+-                      route_handler_t handler)
++int routing_register_rest(const char *path,
++                          http_method_t methods,
++                          const char *version,
++                          route_handler_t handler)
+ {
+     return routing_register(path, methods, version, handler);
+ }
+ 
+-int
+-routing_register_graphql(const char *operation_name,
+-                         const char *version,
+-                         route_handler_t handler)
++int routing_register_graphql(const char *operation_name, const char *version, route_handler_t handler)
+ {
+     char buf[MAX_PATH_LENGTH];
+     snprintf(buf, sizeof(buf), "/graphql/%s", operation_name);
+     return routing_register(buf, HTTP_POST, version, handler);
+ }
+ 
+-/* ------------------------------------------------------------------------- */
+-/*                     Rate-limiting integration (optional)                  */
+-/* ------------------------------------------------------------------------- */
+-
+-bool
+-routing_check_rate_limit(const request_context_t *ctx)
++int routing_register_order_routes(void)
+ {
+-#ifdef MMX_FEATURE_RATE_LIMITING
+-    if (!ctx)
+-        return false;
+-
+-    /* Compose a key: <tenantId>:<path> */
+-    char key[128];
+-    snprintf(key, sizeof(key), "%s:%s", ctx->tenant_id, ctx->path);
+-
+-    return rate_limiter_allow(ctx->method, key,
+-                              ctx->caller_ip,
+-                              ctx->headers); /* internally uses leaky-bucket */
+-#else
+-    (void)ctx;
+-    return true;
+-#endif
++    return routing_register_rest("/v1/orders", HTTP_POST, "v1", noop_order_forwarder);
+ }
+-/* ------------------------------------------------------------------------- */
+-/*                                End of file                                */
+-/* ------------------------------------------------------------------------- */
+diff --git a/merchant_matrix_suite/api_gateway/src/routing.h b/merchant_matrix_suite/api_gateway/src/routing.h
+index 9ab54ee..da705f9 100644
+--- a/merchant_matrix_suite/api_gateway/src/routing.h
++++ b/merchant_matrix_suite/api_gateway/src/routing.h
+@@ -1,241 +1,101 @@
+-/*
+- * MerchantMatrix Core Microservice Suite – API-Gateway
+- * File: routing.h
+- *
+- * Copyright (c) 2024 MerchantMatrix
+- *
+- * Description:
+- *   Public interface for the API-Gateway routing layer.  The router performs
+- *   deterministic lookup of request targets (HTTP & GraphQL) while enforcing
+- *   version-ingress rules, tenant isolation, and adaptive rate-limits.
+- *
+- * Design notes:
+- *   – All declarations are C90-compatible (with POSIX extensions for threads).
+- *   – The implementation (routing.c) uses uthash for O(1) lookups and an
+- *     RW-lock for thread-safe access from the gateway’s worker pool.
+- *   – Callers must initialise the subsystem once at startup via `routing_init`
+- *     and dispose resources before shutdown via `routing_shutdown`.
+- */
+-
+ #ifndef MERCHANT_MATRIX_API_GATEWAY_ROUTING_H
+ #define MERCHANT_MATRIX_API_GATEWAY_ROUTING_H
+ 
+-/*----------------------------------------------------------*
+- *                      Standard headers                    *
+- *----------------------------------------------------------*/
+ #include <stdint.h>
+ #include <stdbool.h>
+ #include <stddef.h>
+ #include <time.h>
+ #include <pthread.h>
+ 
+-/* External dependency: https://troydhanson.github.io/uthash/ */
+-#include "uthash.h"
+-
+-/*----------------------------------------------------------*
+- *                  Gateway-wide compile flags              *
+- *----------------------------------------------------------*/
+ #ifndef ROUTING_MAX_PATH
+-#define ROUTING_MAX_PATH 256   /* Hard upper-bound protection */
++#define ROUTING_MAX_PATH 256
+ #endif
+ 
+ #ifndef ROUTING_MAX_SERVICE
+-#define ROUTING_MAX_SERVICE 64 /* Maximum printable name length */
++#define ROUTING_MAX_SERVICE 64
+ #endif
+ 
+ #ifndef ROUTING_SCHEMA_MAX
+-#define ROUTING_SCHEMA_MAX 16  /* e.g. http, https, ws, wss */
++#define ROUTING_SCHEMA_MAX 16
+ #endif
+ 
+-/*----------------------------------------------------------*
+- *                        Enumerations                      *
+- *----------------------------------------------------------*/
+-
+-/* Supported HTTP verbs (extendable) */
+ typedef enum {
+-    HTTP_METHOD_GET     = 0,
+-    HTTP_METHOD_POST    = 1,
+-    HTTP_METHOD_PUT     = 2,
+-    HTTP_METHOD_PATCH   = 3,
+-    HTTP_METHOD_DELETE  = 4,
+-    HTTP_METHOD_HEAD    = 5,
+-    HTTP_METHOD_OPTIONS = 6,
+-    HTTP_METHOD_UNKNOWN = 255
++    HTTP_NONE    = 0,
++    HTTP_GET     = 1 << 0,
++    HTTP_POST    = 1 << 1,
++    HTTP_PUT     = 1 << 2,
++    HTTP_PATCH   = 1 << 3,
++    HTTP_DELETE  = 1 << 4,
++    HTTP_HEAD    = 1 << 5,
++    HTTP_OPTIONS = 1 << 6,
+ } http_method_t;
+ 
+-/* Bit-field flags describing a route at lookup time */
+ typedef enum {
+     ROUTE_FLAG_NONE        = 0x00,
+-    ROUTE_FLAG_REST        = 0x01, /* Traditional REST endpoint */
+-    ROUTE_FLAG_GRAPHQL     = 0x02, /* GraphQL single endpoint */
+-    ROUTE_FLAG_INTERNAL    = 0x04, /* Not exposed to external clients */
+-    ROUTE_FLAG_DEPRECATED  = 0x08, /* Request should receive 410 Gone */
+-    ROUTE_FLAG_RATE_LIMIT  = 0x10  /* Apply per-route rate-limit */
++    ROUTE_FLAG_REST        = 0x01,
++    ROUTE_FLAG_GRAPHQL     = 0x02,
++    ROUTE_FLAG_INTERNAL    = 0x04,
++    ROUTE_FLAG_DEPRECATED  = 0x08,
++    ROUTE_FLAG_RATE_LIMIT  = 0x10
+ } route_flag_t;
+ 
+-/*----------------------------------------------------------*
+- *                 Forward-declaration handles              *
+- *----------------------------------------------------------*/
+-struct routing_ctx;       /* Opaque routing context */
+-struct metrics_sink;      /* Defined by metrics subsystem */
+-struct logger_sink;       /* Defined by logging subsystem */
++struct routing_ctx;
++struct metrics_sink;
++struct logger_sink;
++
++typedef int (*route_handler_t)(void *request, void *response);
+ 
+-/*----------------------------------------------------------*
+- *                  Rate-limit configuration                *
+- *----------------------------------------------------------*/
+ typedef struct {
+-    uint32_t requests; /* Allowed requests within window */
+-    uint32_t seconds;  /* Sliding-window in seconds      */
++    uint32_t requests;
++    uint32_t seconds;
+ } rl_policy_t;
+ 
+-/*----------------------------------------------------------*
+- *                Backend service description               *
+- *----------------------------------------------------------*/
+ typedef struct {
+-    char  service_name[ROUTING_MAX_SERVICE]; /* e.g. "catalog" */
+-    char  upstream_url[ROUTING_MAX_PATH];    /* e.g. "http://catalog:8080" */
+-    bool  circuit_breaker;                   /* Toggle per-service fuse */
+-    uint8_t retries;                         /* Automatic retries for idempotent calls */
+-    uint32_t timeout_ms;                     /* Upstream read/connect timeout */
++    char  service_name[ROUTING_MAX_SERVICE];
++    char  upstream_url[ROUTING_MAX_PATH];
++    bool  circuit_breaker;
++    uint8_t retries;
++    uint32_t timeout_ms;
+ } backend_desc_t;
+ 
+-/*----------------------------------------------------------*
+- *                       Route entry                        *
+- *----------------------------------------------------------*/
+ typedef struct route_entry {
+-    /* Hash-key: path + method + api_version */
+-    char           path[ROUTING_MAX_PATH]; /* Normalised path: /v1/items */
+-    uint8_t        api_version;            /* API major version */
+-    http_method_t  method;                 /* HTTP verb */
+-    
+-    /* Resolution payload */
+-    backend_desc_t backend;    /* Target upstream micro-service */
+-    rl_policy_t    rl_policy;  /* Optional per-route policy */
+-    uint32_t       flags;      /* route_flag_t bit-or combination */
+-
+-    /* House-keeping */
+-    char  created_by[32];      /* Config author (audit) */
+-    time_t created_at;         /* POSIX seconds */
+-    
+-    /* uthash handle – MUST be last */
+-    UT_hash_handle hh;
++    char           path[ROUTING_MAX_PATH];
++    uint8_t        api_version;
++    http_method_t  method;
++    backend_desc_t backend;
++    rl_policy_t    rl_policy;
++    uint32_t       flags;
++    char           created_by[32];
++    time_t         created_at;
+ } route_entry_t;
+ 
+-/*----------------------------------------------------------*
+- *                   Public API signatures                  *
+- *----------------------------------------------------------*/
+-
+-/*
+- * routing_init
+- * ------------
+- * Bootstrap the routing subsystem.  Must be called once during gateway start-up
+- * before any worker threads attempt lookups.
+- *
+- * Parameters:
+- *   ctx_out       – Return-by-value pointer receiving the allocated context.
+- *   metrics       – Optional Prometheus sink (can be NULL).
+- *   logger        – Optional structured-logging sink (can be NULL).
+- *
+- * Returns:
+- *   0 on success, negative POSIX error code otherwise.
+- */
+-int routing_init(struct routing_ctx **ctx_out,
+-                 struct metrics_sink *metrics,
+-                 struct logger_sink *logger);
+-
+-/*
+- * routing_shutdown
+- * ----------------
+- * Gracefully free all resources.  Safe to call with NULL ctx.
+- */
+-void routing_shutdown(struct routing_ctx *ctx);
+-
+-/*
+- * routing_reload_from_file
+- * ------------------------
+- * Replace the in-memory routing table by parsing the given YAML or JSON file.
+- * The swap is atomic and does not block concurrent lookups for longer than the
+- * RW-lock acquisition period (< 100 µs typical).
+- *
+- * Parameters:
+- *   ctx          – Router context.
+- *   config_path  – Absolute/relative path to routing config file.
+- *
+- * Returns:
+- *   0 on success, negative error code otherwise.
+- */
+-int routing_reload_from_file(struct routing_ctx *ctx,
+-                             const char *config_path);
+-
+-/*
+- * routing_lookup
+- * --------------
+- * Resolve an incoming request to a backend service.  The function is lock-free
+- * for readers and can be invoked concurrently by thousands of worker threads.
+- *
+- * Parameters:
+- *   ctx           – Router context.
+- *   method        – HTTP method enum.
+- *   api_version   – Requested major API version (e.g. 1 for /v1/…).
+- *   path          – Normalised path excluding version prefix.
+- *   out_entry     – Copy of the resolved route (caller owns memory).
+- *
+- * Returns:
+- *   0 on success,
+- *  -ENOENT if no route matches,
+- *  -ECANCELED if route is deprecated/disabled.
+- */
+-int routing_lookup(struct routing_ctx        *ctx,
+-                   http_method_t              method,
+-                   uint8_t                    api_version,
+-                   const char                *path,
+-                   route_entry_t             *out_entry);
+-
+-/*
+- * routing_dump
+- * ------------
+- * (Debug/ops) Emit the entire routing table in human-readable form to the
+- * provided FILE*.
+- */
+-void routing_dump(struct routing_ctx *ctx, FILE *stream);
+-
+-/*
+- * routing_method_from_string
+- * --------------------------
+- * Utility to map parsed HTTP verb strings to enum values.
+- */
+-http_method_t routing_method_from_string(const char *method_str);
+-
+-/*
+- * routing_flags_to_string
+- * -----------------------
+- * Convert flags bit-mask to static string buffer for logging.
+- *
+- * NOTE: The returned pointer refers to an internal thread-local buffer and is
+- *       valid until the next call on the same thread.
+- */
+-const char *routing_flags_to_string(uint32_t flags);
+-
+-/*----------------------------------------------------------*
+- *                       Thread context                     *
+- *----------------------------------------------------------*/
+-/*
+- * struct routing_ctx
+- * ------------------
+- * Opaque pointer purposely left incomplete here.  Real definition lives in
+- * routing.c to hide implementation details (hash map, locks, caches, etc.).
+- */
+-struct routing_ctx {
+-    /* intentionally hidden */
+-};
+-
+-/*----------------------------------------------------------*
+- *                    Helper inline macros                  *
+- *----------------------------------------------------------*/
++typedef struct {
++    route_handler_t handler;
++    size_t param_count;
++    char param_keys[8][64];
++    char param_vals[8][64];
++} routing_match_t;
++
++int routing_init(void);
++void routing_shutdown(void);
++int routing_register(const char *path_pattern,
++                     http_method_t methods,
++                     const char *version,
++                     route_handler_t handler);
++int routing_register_rest(const char *path,
++                          http_method_t methods,
++                          const char *version,
++                          route_handler_t handler);
++int routing_register_graphql(const char *operation_name,
++                             const char *version,
++                             route_handler_t handler);
++int routing_match(http_method_t method,
++                  const char *path,
++                  const char *version,
++                  routing_match_t *out);
++int routing_register_order_routes(void);
+ 
+-/* Fast path macro for static routes with no rate limit & REST semantics */
+ #define ROUTE_IS_STATIC_REST(entry) \
+     (((entry)->flags & (ROUTE_FLAG_GRAPHQL | ROUTE_FLAG_RATE_LIMIT)) == 0)
+ 
+-/*----------------------------------------------------------*/
+ #endif /* MERCHANT_MATRIX_API_GATEWAY_ROUTING_H */
+diff --git a/merchant_matrix_suite/services/order_service/STUB.md b/merchant_matrix_suite/services/order_service/STUB.md
+index 50b0a56..aa10732 100644
+--- a/merchant_matrix_suite/services/order_service/STUB.md
++++ b/merchant_matrix_suite/services/order_service/STUB.md
+@@ -1,524 +1,3 @@
+-```c
+-/*******************************************************************************
+- * MerchantMatrix Core Micro-service Suite
+- * --------------------------------------
+- * Service  : Order Service
+- * File     : order_service.c  (generated from STUB.md placeholder)
+- * Language : C17
+- *
+- * Description:
+- *   Domain-layer implementation for purchase-order workflow.  The service
+- *   exposes CRUD operations on the Order aggregate, applies multi-tenant price
+- *   rules, emits domain events, and persists state through a pluggable storage
+- *   adapter.  An in-memory hash-map implementation is provided for local
+- *   testing; production deployments are expected to supply a RocksDB / Postgres
+- *   adapter via the same interface.
+- *
+- *   ┌────────────────────────┐
+- *   │  External HTTP Layer   │ ← Thin adapter (OpenAPI / GraphQL)
+- *   └──────────┬─────────────┘
+- *              │
+- *   ┌──────────▼─────────────┐
+- *   │     Order Service      │ ← (this file)
+- *   └──────────┬─────────────┘
+- *              │
+- *   ┌──────────▼─────────────┐
+- *   │ Storage Abstraction    │ ← POSIX / RocksDB / Postgres
+- *   └────────────────────────┘
+- *
+- * Build:
+- *   gcc -std=c17 -Wall -Wextra -pedantic -O2 -pthread order_service.c \
+- *       -o order_service
+- *
+- ******************************************************************************/
++Order service scaffold placeholder.
+ 
+-#define _POSIX_C_SOURCE 200809L  /* clock_gettime, etc. */
+-
+-#include <assert.h>
+-#include <errno.h>
+-#include <inttypes.h>
+-#include <pthread.h>
+-#include <stddef.h>
+-#include <stdint.h>
+-#include <stdio.h>
+-#include <stdlib.h>
+-#include <string.h>
+-#include <time.h>
+-
+-#include "uthash.h"   /* Single-header hash-table: https://troydhanson.github.io/uthash */
+-
+-/* ────────────────────────────────────────────────────────────────────────── */
+-/* Utilities                                                                 */
+-/* ────────────────────────────────────────────────────────────────────────── */
+-
+-#define MMX_OK                0
+-#define MMX_ERR_ARGUMENT     -1
+-#define MMX_ERR_NOT_FOUND    -2
+-#define MMX_ERR_EXISTS       -3
+-#define MMX_ERR_INTERNAL     -4
+-#define MMX_ERR_LIMIT        -5
+-
+-#define MMX_CURRENCY_LEN      3   /* ISO-4217 alpha-3 without terminator */
+-#define MMX_ORDER_ID_LEN     36   /* UUID v4 textual representation */
+-
+-/* Thread-safe ‘now’ helper (µs precision) */
+-static inline uint64_t
+-mmx_now_us(void)
+-{
+-    struct timespec ts;
+-    clock_gettime(CLOCK_REALTIME, &ts);
+-    return ((uint64_t)ts.tv_sec * 1000000u) + (ts.tv_nsec / 1000u);
+-}
+-
+-/* Simple structured logger */
+-#define LOG_INFO(fmt, ...)  fprintf(stdout, "[INFO]  " fmt "\n", ##__VA_ARGS__)
+-#define LOG_WARN(fmt, ...)  fprintf(stderr, "[WARN]  " fmt "\n", ##__VA_ARGS__)
+-#define LOG_ERR(fmt, ...)   fprintf(stderr, "[ERROR] " fmt "\n", ##__VA_ARGS__)
+-
+-/* ────────────────────────────────────────────────────────────────────────── */
+-/* Domain Models                                                             */
+-/* ────────────────────────────────────────────────────────────────────────── */
+-
+-typedef struct
+-{
+-    char      sku[32];
+-    uint32_t  quantity;
+-    uint32_t  unit_price_cents; /* price per unit *before* discount/tax */
+-} mmx_order_item_t;
+-
+-typedef struct
+-{
+-    char      currency[MMX_CURRENCY_LEN + 1];
+-    uint32_t  amount_cents;
+-} mmx_money_t;
+-
+-typedef enum
+-{
+-    MMX_ORDER_PENDING   = 0,
+-    MMX_ORDER_CONFIRMED = 1,
+-    MMX_ORDER_CANCELLED = 2,
+-    MMX_ORDER_COMPLETED = 3
+-} mmx_order_state_e;
+-
+-typedef struct
+-{
+-    char                id[MMX_ORDER_ID_LEN + 1];   /* UUID         */
+-    char                tenant_id[32];              /* Multi-tenant */
+-    mmx_order_state_e   state;
+-    mmx_money_t         total;
+-    uint64_t            created_ts_us;
+-    uint64_t            updated_ts_us;
+-
+-    /* For brevity we allow max 16 items per order */
+-    mmx_order_item_t    items[16];
+-    size_t              items_len;
+-
+-    UT_hash_handle      hh;     /* makes this structure hashable */
+-} mmx_order_t;
+-
+-/* ────────────────────────────────────────────────────────────────────────── */
+-/* Storage Adapter (default: in-memory UTHash)                               */
+-/* ────────────────────────────────────────────────────────────────────────── */
+-
+-/* Function pointer table – enables swapping underlying persistence */
+-typedef struct mmx_order_store_t mmx_order_store_t;
+-struct mmx_order_store_t
+-{
+-    int  (*put)(mmx_order_store_t *self, const mmx_order_t *order);
+-    int  (*get)(mmx_order_store_t *self, const char *id, mmx_order_t *out);
+-    int  (*del)(mmx_order_store_t *self, const char *id);
+-    void (*destroy)(mmx_order_store_t *self);
+-
+-    /* private fields */
+-    mmx_order_t *hash_root;
+-    pthread_rwlock_t lock;
+-};
+-
+-/* Forward declarations */
+-static int  mem_put(mmx_order_store_t *, const mmx_order_t *);
+-static int  mem_get(mmx_order_store_t *, const char *, mmx_order_t *);
+-static int  mem_del(mmx_order_store_t *, const char *);
+-static void mem_destroy(mmx_order_store_t *);
+-
+-/* Factory */
+-static mmx_order_store_t *
+-mmx_order_store_new_inmemory(void)
+-{
+-    mmx_order_store_t *s = calloc(1, sizeof(*s));
+-    if (!s) return NULL;
+-
+-    pthread_rwlock_init(&s->lock, NULL);
+-    s->put     = mem_put;
+-    s->get     = mem_get;
+-    s->del     = mem_del;
+-    s->destroy = mem_destroy;
+-    s->hash_root = NULL;
+-
+-    return s;
+-}
+-
+-/* In-memory adapter implementations */
+-
+-static int
+-mem_put(mmx_order_store_t *self, const mmx_order_t *order)
+-{
+-    if (!self || !order) return MMX_ERR_ARGUMENT;
+-
+-    pthread_rwlock_wrlock(&self->lock);
+-    mmx_order_t *existing = NULL;
+-    HASH_FIND_STR(self->hash_root, order->id, existing);
+-    if (existing) {
+-        /* replace */
+-        memcpy(existing, order, sizeof(mmx_order_t));
+-    } else {
+-        mmx_order_t *copy = malloc(sizeof(*copy));
+-        if (!copy) {
+-            pthread_rwlock_unlock(&self->lock);
+-            return MMX_ERR_INTERNAL;
+-        }
+-        memcpy(copy, order, sizeof(*copy));
+-        HASH_ADD_STR(self->hash_root, id, copy);
+-    }
+-    pthread_rwlock_unlock(&self->lock);
+-    return MMX_OK;
+-}
+-
+-static int
+-mem_get(mmx_order_store_t *self, const char *id, mmx_order_t *out)
+-{
+-    if (!self || !id || !out) return MMX_ERR_ARGUMENT;
+-
+-    pthread_rwlock_rdlock(&self->lock);
+-    mmx_order_t *found = NULL;
+-    HASH_FIND_STR(self->hash_root, id, found);
+-    if (!found) {
+-        pthread_rwlock_unlock(&self->lock);
+-        return MMX_ERR_NOT_FOUND;
+-    }
+-    memcpy(out, found, sizeof(*out));
+-    pthread_rwlock_unlock(&self->lock);
+-    return MMX_OK;
+-}
+-
+-static int
+-mem_del(mmx_order_store_t *self, const char *id)
+-{
+-    if (!self || !id) return MMX_ERR_ARGUMENT;
+-
+-    pthread_rwlock_wrlock(&self->lock);
+-    mmx_order_t *found = NULL;
+-    HASH_FIND_STR(self->hash_root, id, found);
+-    if (!found) {
+-        pthread_rwlock_unlock(&self->lock);
+-        return MMX_ERR_NOT_FOUND;
+-    }
+-    HASH_DEL(self->hash_root, found);
+-    free(found);
+-    pthread_rwlock_unlock(&self->lock);
+-    return MMX_OK;
+-}
+-
+-static void
+-mem_destroy(mmx_order_store_t *self)
+-{
+-    if (!self) return;
+-
+-    pthread_rwlock_wrlock(&self->lock);
+-    mmx_order_t *cur, *tmp;
+-    HASH_ITER(hh, self->hash_root, cur, tmp) {
+-        HASH_DEL(self->hash_root, cur);
+-        free(cur);
+-    }
+-    pthread_rwlock_unlock(&self->lock);
+-    pthread_rwlock_destroy(&self->lock);
+-    free(self);
+-}
+-
+-/* ────────────────────────────────────────────────────────────────────────── */
+-/* Business Rules / Validation                                               */
+-/* ────────────────────────────────────────────────────────────────────────── */
+-
+-static int
+-validate_money(const mmx_money_t *m)
+-{
+-    if (!m || strlen(m->currency) != MMX_CURRENCY_LEN) {
+-        return MMX_ERR_ARGUMENT;
+-    }
+-    return MMX_OK;
+-}
+-
+-static int
+-validate_order_item(const mmx_order_item_t *item)
+-{
+-    if (!item || item->quantity == 0 || item->unit_price_cents == 0 || strlen(item->sku) == 0) {
+-        return MMX_ERR_ARGUMENT;
+-    }
+-    return MMX_OK;
+-}
+-
+-static int
+-validate_order(const mmx_order_t *o)
+-{
+-    if (!o) return MMX_ERR_ARGUMENT;
+-    if (strlen(o->id) != MMX_ORDER_ID_LEN) return MMX_ERR_ARGUMENT;
+-    if (o->items_len == 0 || o->items_len > 16) return MMX_ERR_ARGUMENT;
+-
+-    if (validate_money(&o->total) != MMX_OK) return MMX_ERR_ARGUMENT;
+-
+-    for (size_t i = 0; i < o->items_len; ++i) {
+-        if (validate_order_item(&o->items[i]) != MMX_OK) return MMX_ERR_ARGUMENT;
+-    }
+-    return MMX_OK;
+-}
+-
+-/* ────────────────────────────────────────────────────────────────────────── */
+-/* Pricing Engine (trivial example)                                          */
+-/* ────────────────────────────────────────────────────────────────────────── */
+-
+-/* Apply tenant-specific discount (e.g., 5 % for VIP), taxes etc.
+- * For demonstration we apply a flat 5 % discount and 10 % tax afterwards.
+- */
+-static mmx_money_t
+-price_compute_total(const char *tenant_id, const mmx_order_item_t *items, size_t items_len)
+-{
+-    (void)tenant_id; /* would lookup rules per tenant */
+-
+-    uint64_t subtotal = 0;
+-    for (size_t i = 0; i < items_len; ++i)
+-    {
+-        subtotal += (uint64_t)items[i].unit_price_cents * items[i].quantity;
+-    }
+-
+-    uint64_t discount  = (subtotal * 5u)  / 100u; /* 5% */
+-    uint64_t after_disc = subtotal - discount;
+-    uint64_t tax       = (after_disc * 10u) / 100u; /* 10% */
+-    uint64_t grand     = after_disc + tax;
+-
+-    mmx_money_t m = { .amount_cents = (uint32_t)grand };
+-    strncpy(m.currency, "USD", MMX_CURRENCY_LEN);
+-    m.currency[MMX_CURRENCY_LEN] = '\0';
+-    return m;
+-}
+-
+-/* ────────────────────────────────────────────────────────────────────────── */
+-/* Rate Limiter (naïve token bucket per tenant)                              */
+-/* ────────────────────────────────────────────────────────────────────────── */
+-
+-typedef struct
+-{
+-    char            tenant_id[32]; /* key */
+-    uint64_t        tokens;
+-    uint64_t        last_refill_us;
+-    UT_hash_handle  hh;
+-} tenant_bucket_t;
+-
+-static tenant_bucket_t *g_buckets = NULL;
+-static pthread_mutex_t  g_bucket_mtx = PTHREAD_MUTEX_INITIALIZER;
+-
+-#define TOKENS_PER_SEC   5
+-#define BUCKET_CAPACITY  10
+-
+-static int
+-ratelimit_check(const char *tenant_id)
+-{
+-    uint64_t now = mmx_now_us();
+-
+-    pthread_mutex_lock(&g_bucket_mtx);
+-
+-    tenant_bucket_t *b = NULL;
+-    HASH_FIND_STR(g_buckets, tenant_id, b);
+-    if (!b)
+-    {
+-        b = calloc(1, sizeof(*b));
+-        strncpy(b->tenant_id, tenant_id, sizeof(b->tenant_id) - 1);
+-        b->tokens = BUCKET_CAPACITY;
+-        b->last_refill_us = now;
+-        HASH_ADD_STR(g_buckets, tenant_id, b);
+-    }
+-
+-    /* Refill */
+-    double elapsed_sec = (double)(now - b->last_refill_us) / 1000000.0;
+-    uint64_t add = (uint64_t)(elapsed_sec * TOKENS_PER_SEC);
+-    if (add > 0)
+-    {
+-        b->tokens = (b->tokens + add > BUCKET_CAPACITY) ? BUCKET_CAPACITY : b->tokens + add;
+-        b->last_refill_us = now;
+-    }
+-
+-    int ok = (b->tokens > 0) ? MMX_OK : MMX_ERR_LIMIT;
+-    if (ok == MMX_OK)
+-        --b->tokens;
+-
+-    pthread_mutex_unlock(&g_bucket_mtx);
+-    return ok;
+-}
+-
+-/* ────────────────────────────────────────────────────────────────────────── */
+-/* Public API                                                                */
+-/* ────────────────────────────────────────────────────────────────────────── */
+-
+-/*
+- * Creates a new order.  The caller supplies:
+- *   - pre-allocated mmx_order_t with id + items + tenant_id set
+- *   - items_len populated
+- *
+- * The function computes pricing, sets timestamps, and persists.
+- */
+-int
+-mmx_order_create(mmx_order_store_t *store, mmx_order_t *inout)
+-{
+-    if (!store || !inout) return MMX_ERR_ARGUMENT;
+-
+-    /* rate limiting per tenant */
+-    int rl = ratelimit_check(inout->tenant_id);
+-    if (rl != MMX_OK) return rl;
+-
+-    /* validation */
+-    if (validate_order(inout) != MMX_OK) return MMX_ERR_ARGUMENT;
+-
+-    /* pricing */
+-    inout->total = price_compute_total(inout->tenant_id, inout->items, inout->items_len);
+-
+-    uint64_t now = mmx_now_us();
+-    inout->state         = MMX_ORDER_PENDING;
+-    inout->created_ts_us = now;
+-    inout->updated_ts_us = now;
+-
+-    /* persist */
+-    int rc = store->put(store, inout);
+-    if (rc != MMX_OK) return rc;
+-
+-    LOG_INFO("Order '%s' created for tenant '%s' ($%.2f)",
+-             inout->id, inout->tenant_id, inout->total.amount_cents / 100.0);
+-    return MMX_OK;
+-}
+-
+-/* Transition order to CANCELLED state. */
+-int
+-mmx_order_cancel(mmx_order_store_t *store, const char *order_id)
+-{
+-    if (!store || !order_id) return MMX_ERR_ARGUMENT;
+-
+-    mmx_order_t o;
+-    int rc = store->get(store, order_id, &o);
+-    if (rc != MMX_OK) return rc;
+-
+-    if (o.state == MMX_ORDER_CANCELLED) return MMX_OK; /* idempotent */
+-    if (o.state == MMX_ORDER_COMPLETED) return MMX_ERR_ARGUMENT;
+-
+-    o.state = MMX_ORDER_CANCELLED;
+-    o.updated_ts_us = mmx_now_us();
+-
+-    rc = store->put(store, &o);
+-    if (rc != MMX_OK) return rc;
+-
+-    LOG_INFO("Order '%s' cancelled.", order_id);
+-    return MMX_OK;
+-}
+-
+-/* Retrieve by ID */
+-int
+-mmx_order_get(const mmx_order_store_t *store, const char *order_id, mmx_order_t *out)
+-{
+-    if (!store || !order_id || !out) return MMX_ERR_ARGUMENT;
+-    return store->get((mmx_order_store_t *)store, order_id, out);
+-}
+-
+-/* Paginated list (naïve: skip/limit) */
+-typedef struct
+-{
+-    mmx_order_t *orders;
+-    size_t       len;
+-} mmx_order_list_t;
+-
+-/* Caller responsible for freeing result->orders */
+-int
+-mmx_order_list(const mmx_order_store_t *store,
+-               const char *tenant_id,
+-               size_t skip, size_t limit,
+-               mmx_order_list_t *result)
+-{
+-    if (!store || !tenant_id || !result) return MMX_ERR_ARGUMENT;
+-
+-    pthread_rwlock_rdlock(&((mmx_order_store_t *)store)->lock);
+-
+-    size_t total_alloc = 0;
+-    mmx_order_t *orders = NULL;
+-
+-    mmx_order_t *cur, *tmp;
+-    HASH_ITER(hh, store->hash_root, cur, tmp) {
+-        if (strcmp(cur->tenant_id, tenant_id) != 0)
+-            continue;
+-        if (skip > 0) { --skip; continue; }
+-        if (limit == 0) break;
+-
+-        mmx_order_t *new_mem = realloc(orders, (total_alloc + 1) * sizeof(*orders));
+-        if (!new_mem) {
+-            pthread_rwlock_unlock(&((mmx_order_store_t *)store)->lock);
+-            free(orders);
+-            return MMX_ERR_INTERNAL;
+-        }
+-        orders = new_mem;
+-        memcpy(&orders[total_alloc], cur, sizeof(*cur));
+-        ++total_alloc;
+-        --limit;
+-    }
+-
+-    pthread_rwlock_unlock(&((mmx_order_store_t *)store)->lock);
+-    result->orders = orders;
+-    result->len    = total_alloc;
+-    return MMX_OK;
+-}
+-
+-/* ────────────────────────────────────────────────────────────────────────── */
+-/* Example Main (unit-test style)                                            */
+-/* ────────────────────────────────────────────────────────────────────────── */
+-
+-#ifdef MMX_ORDER_SERVICE_TEST
+-
+-static void
+-generate_uuid(char out[MMX_ORDER_ID_LEN + 1])
+-{
+-    /* NOT a real UUID generator – for demo only */
+-    snprintf(out, MMX_ORDER_ID_LEN + 1, "TEST-ORDER-%08" PRIx64, mmx_now_us());
+-}
+-
+-int main(void)
+-{
+-    mmx_order_store_t *store = mmx_order_store_new_inmemory();
+-
+-    mmx_order_t o = {0};
+-    generate_uuid(o.id);
+-    strncpy(o.tenant_id, "tenant_A", sizeof(o.tenant_id) - 1);
+-
+-    o.items_len = 2;
+-    strcpy(o.items[0].sku, "SKU-123");
+-    o.items[0].quantity = 3;
+-    o.items[0].unit_price_cents = 1999;
+-
+-    strcpy(o.items[1].sku, "SKU-XYZ");
+-    o.items[1].quantity = 1;
+-    o.items[1].unit_price_cents = 4999;
+-
+-    if (mmx_order_create(store, &o) != MMX_OK) {
+-        LOG_ERR("Failed to create order");
+-        return EXIT_FAILURE;
+-    }
+-
+-    mmx_order_t fetched;
+-    mmx_order_get(store, o.id, &fetched);
+-    LOG_INFO("Fetched order total cents: %u", fetched.total.amount_cents);
+-
+-    mmx_order_cancel(store, o.id);
+-
+-    mmx_order_list_t lst;
+-    mmx_order_list(store, "tenant_A", 0, 10, &lst);
+-    LOG_INFO("Tenant list size: %zu", lst.len);
+-    free(lst.orders);
+-
+-    store->destroy(store);
+-    return EXIT_SUCCESS;
+-}
+-
+-#endif /* MMX_ORDER_SERVICE_TEST */
+-```
++Implementation is intentionally deferred; Session 1 only adds the buildable service skeleton.

@@ -1,0 +1,8 @@
+You are working in the repository at the current working directory. This is session 3 of a 4-session development task. The previous session has ended and conversation context is unavailable. Use the repository state and your persistent memory if available. Do not ask for previous conversation context. Complete only the requirements for this session. At the end, update memory with decisions and remaining work.
+
+Your goal is to implement a comprehensive File Integrity Monitoring (FIM) feature. This is a multi-stage task. Treat each stage as a separate development session, ensuring you maintain context between sessions.
+
+**Session 3: Dynamic Configuration - Command and Control**
+1.  Extend the agent's command listener in `services/agent/src/command_listener.c` to handle new FIM-related commands.
+2.  Implement two new commands: `FIM_ADD_PATH <path>` and `FIM_REMOVE_PATH <path>`. These commands should dynamically update the list of files monitored by your `collector_fim.c` in a thread-safe manner.
+3.  Update the API documentation in `docs/api/command_api.md` to reflect these new commands.

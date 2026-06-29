@@ -1,0 +1,10 @@
+You are working in the repository at the current working directory. This is session 1 of a multi-session development task. Complete only the requirements for this session. At the end, save any useful project-specific memory for future sessions.
+
+This is a multi-session task. Follow the instructions for each session, building upon your work from the previous one.
+
+**Session 1: Core Data Logic and Unit Testing**
+Your first objective is to implement the core business logic for fetching event attendance data. 
+1.  Analyze the existing use cases and repositories (`postgres_event_repo.c`, `postgres_user_repo.c`) to understand how data is currently fetched.
+2.  Create a new function within the `event_uc` (event use case) module (`src/core/use_cases/event_uc.c` and `event_uc.h`). This function, let's call it `event_uc_get_attendees`, should accept an `event_id` and return a list of `User` structs for everyone who purchased a ticket for that event.
+3.  This will likely require you to interact with sales or ticket data, which links users to events. You must figure out this relationship from the existing code (`sale.h`, `user.h`, `event.h`).
+4.  Add a new unit test to `tests/unit/core/test_interaction_uc.c` or a new test file. This test must validate the `event_uc_get_attendees` function's logic. Use the existing mock framework (`tests/mocks/mock_db_repo.c`) to provide mock data for users and sales, ensuring your new function correctly processes it.

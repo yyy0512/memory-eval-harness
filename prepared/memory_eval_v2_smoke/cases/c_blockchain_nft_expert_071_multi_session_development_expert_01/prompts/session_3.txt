@@ -1,0 +1,10 @@
+You are working in the repository at the current working directory. This is session 3 of a 4-session development task. The previous session has ended and conversation context is unavailable. Use the repository state and your persistent memory if available. Do not ask for previous conversation context. Complete only the requirements for this session. At the end, update memory with decisions and remaining work.
+
+Your multi-session task is to implement the 'Living Artifacts' feature by linking an artifact's trait to the real-world lunar cycle.
+
+**Part 3: Ledger State Transition (Session 3)**
+This is the most critical part. The `muse_observer`'s event must trigger a state change on the blockchain.
+1.  Define a new, internal-only transaction type `TX_ARTIFACT_EVOLVE` in `services/ledger_core/include/transaction.h`.
+2.  Update the transaction payload structures to accommodate the data needed for this evolution (e.g., `artifactId` and the new `LunarPhase`).
+3.  In `services/ledger_core/src/transaction_processor.c`, add logic to handle the new `TX_ARTIFACT_EVOLVE` transaction. Crucially, this logic **must** include a security check to ensure the transaction originates from a trusted source (the `muse_observer` service's identity).
+4.  Implement the state change itself in `services/ledger_core/src/state_machine.c`. This function will take the processed transaction and update the specified artifact's `DynamicTrait` in the state tree.

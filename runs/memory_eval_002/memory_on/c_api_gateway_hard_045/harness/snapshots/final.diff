@@ -1,0 +1,462 @@
+diff --git a/socialpulse_gateway/src/adapters/graphql/graphql_parser.c b/socialpulse_gateway/src/adapters/graphql/graphql_parser.c
+index d686e2c..96f0940 100644
+--- a/socialpulse_gateway/src/adapters/graphql/graphql_parser.c
++++ b/socialpulse_gateway/src/adapters/graphql/graphql_parser.c
+@@ -24,7 +24,7 @@
+ #include <stdint.h>
+ #include <stdio.h>
+ #include <stdlib.h>
+-#include <string.h>
++#include <jansson.h>
+ 
+ #include "logger.h"             /* project-wide structured logger            */
+ #include "graphql_parser.h"     /* public header for types / function defs   */
+@@ -418,9 +418,13 @@ static GraphQLDocument *parse_document(Parser *p)
+     return doc;
+ }
+ 
+-/* ============================  Public API  ============================== */
++static const char *skip_json_ws(const char *src)
++{
++    while (*src == ' ' || *src == '\t' || *src == '\r' || *src == '\n') src++;
++    return src;
++}
+ 
+-GraphQLDocument *graphql_parse(const char *query, GqlError **out_err)
++static GraphQLDocument *parse_graphql_query_text(const char *query, GqlError **out_err)
+ {
+     Parser p;
+     memset(&p, 0, sizeof(Parser));
+@@ -430,10 +434,9 @@ GraphQLDocument *graphql_parse(const char *query, GqlError **out_err)
+     GraphQLDocument *doc = parse_document(&p);
+ 
+     if (p.error) {
+-        if (out_err) *out_err = p.error;   /* pass arena-backed error out */
++        if (out_err) *out_err = p.error;
+         else SPG_LOG_ERROR("GraphQL parse error (%u:%u): %s",
+                            p.error->line, p.error->column, p.error->message);
+-        /* Caller still receives partially built doc for inspection */
+     } else {
+         if (out_err) *out_err = NULL;
+     }
+@@ -441,6 +444,90 @@ GraphQLDocument *graphql_parse(const char *query, GqlError **out_err)
+     return doc;
+ }
+ 
++static bool parse_request_object_into_batch(json_t *item,
++                                            GraphQLBatchRequest *batch,
++                                            size_t index)
++{
++    if (!json_is_object(item)) return false;
++
++    json_t *query_json = json_object_get(item, "query");
++    if (!json_is_string(query_json)) return false;
++
++    const char *query = json_string_value(query_json);
++    batch->requests[index].query = strdup(query);
++    if (!batch->requests[index].query) return false;
++
++    json_t *op_name_json = json_object_get(item, "operationName");
++    if (json_is_string(op_name_json)) {
++        batch->requests[index].operation_name = strdup(json_string_value(op_name_json));
++        if (!batch->requests[index].operation_name) return false;
++    }
++
++    json_t *variables_json = json_object_get(item, "variables");
++    if (variables_json && !json_is_null(variables_json)) {
++        batch->requests[index].variables_json = json_dumps(variables_json, JSON_COMPACT);
++        if (!batch->requests[index].variables_json) return false;
++    }
++
++    batch->requests[index].document = parse_graphql_query_text(query,
++                                                               &batch->requests[index].error);
++    batch->requests[index].has_error = batch->requests[index].error != NULL;
++    return true;
++}
++
++static GraphQLDocument *parse_json_graphql_payload(const char *payload, GqlError **out_err)
++{
++    json_error_t json_err;
++    json_t *root = json_loads(payload, 0, &json_err);
++    if (!root) return NULL;
++
++    GraphQLDocument *doc = NULL;
++
++    if (json_is_array(root)) {
++        Parser p;
++        memset(&p, 0, sizeof(Parser));
++        doc = (GraphQLDocument *) arena_alloc(&p.arena, sizeof(GraphQLDocument));
++        if (!doc) goto done;
++        memset(doc, 0, sizeof(GraphQLDocument));
++        doc->request_kind = GQL_REQUEST_BATCH;
++        doc->batch.count = json_array_size(root);
++        doc->batch.requests = calloc(doc->batch.count, sizeof(GraphQLRequest));
++        if (!doc->batch.requests) {
++            doc = NULL;
++            goto done;
++        }
++
++        for (size_t i = 0; i < doc->batch.count; ++i) {
++            if (!parse_request_object_into_batch(json_array_get(root, i), &doc->batch, i)) {
++                doc->batch.requests[i].has_error = true;
++            }
++        }
++    } else if (json_is_object(root)) {
++        json_t *query_json = json_object_get(root, "query");
++        if (json_is_string(query_json)) {
++            doc = parse_graphql_query_text(json_string_value(query_json), out_err);
++            if (doc) doc->request_kind = GQL_REQUEST_SINGLE;
++        }
++    }
++
++done:
++    json_decref(root);
++    return doc;
++}
++
++/* ============================  Public API  ============================== */
++
++GraphQLDocument *graphql_parse(const char *query, GqlError **out_err)
++{
++    const char *first = skip_json_ws(query);
++    if (*first == '[' || *first == '{') {
++        GraphQLDocument *json_doc = parse_json_graphql_payload(query, out_err);
++        if (json_doc || *first == '[') return json_doc;
++    }
++
++    return parse_graphql_query_text(query, out_err);
++}
++
+ void graphql_doc_free(GraphQLDocument *doc)
+ {
+     if (!doc) return;
+diff --git a/socialpulse_gateway/src/adapters/graphql/graphql_parser.h b/socialpulse_gateway/src/adapters/graphql/graphql_parser.h
+index af1c7bf..d47b05c 100644
+--- a/socialpulse_gateway/src/adapters/graphql/graphql_parser.h
++++ b/socialpulse_gateway/src/adapters/graphql/graphql_parser.h
+@@ -32,7 +32,8 @@
+ #include <stddef.h>     /* size_t                     */
+ #include <stdio.h>      /* FILE*, snprintf()          */
+ #include <stdlib.h>     /* malloc(), free()           */
+-#include <string.h>     /* memcpy(), strlen()        >
++#include <string.h>     /* memcpy(), strlen()          */
++#include <jansson.h>    /* JSON request payload parsing */
+ 
+ /* ───────────────  Parser Configuration  ───────────── */
+ #ifndef SP_GQL_MAX_TOKEN_LEN
+@@ -181,12 +182,40 @@ struct sp_gql_node_s {
+     };
+ };
+ 
+-/* Top-level document root returned to caller. */
++/* Forward declaration for parsed request containers. */
++typedef struct sp_gql_doc_s sp_gql_doc_t;
++
++/* Indicates whether the incoming GraphQL HTTP payload was a single operation or a batch. */
++typedef enum {
++    SP_GQL_REQUEST_SINGLE = 0,
++    SP_GQL_REQUEST_BATCH
++} sp_gql_request_kind_t;
++
++/* One standard GraphQL request object inside a single or batched HTTP payload. */
++typedef struct {
++    char *query;                 /* GraphQL document text copied from JSON "query". */
++    char *operation_name;        /* Optional copied "operationName" value. */
++    char *variables_json;        /* Optional compact JSON copy of "variables". */
++    sp_gql_doc_t *document;      /* Parsed query document for this operation. */
++    sp_gql_error_t error;        /* Per-operation parse error for batched requests. */
++    bool has_error;
++} sp_gql_request_t;
++
++/* A JSON array of standard GraphQL request objects. */
+ typedef struct {
++    sp_gql_request_t *items;
++    size_t len;
++    size_t cap;
++} sp_gql_batch_t;
++
++/* Top-level document root returned to caller. */
++struct sp_gql_doc_s {
+     char *query_buffer;          /* Entire copy of input (NUL-terminated).     */
+     sp_gql_vec_t operations;     /* vector<sp_gql_node_t*>                     */
+     sp_gql_vec_t fragments;      /* vector<sp_gql_node_t*>                     */
+-} sp_gql_doc_t;
++    sp_gql_request_kind_t request_kind;
++    sp_gql_batch_t batch;        /* Populated when request_kind == BATCH.       */
++};
+ 
+ /*───────────────────────────
+  *        Public API
+@@ -230,6 +259,12 @@ sp_gql_validate(const sp_gql_doc_t *doc,
+ /* Deep-free the entire AST document allocated by sp_gql_parse(). */
+ void sp_gql_doc_free(sp_gql_doc_t *doc);
+ 
++/* Free copied metadata and parsed document owned by an individual request. */
++void sp_gql_request_free(sp_gql_request_t *req);
++
++/* Free all entries owned by a parsed batched request. */
++void sp_gql_batch_free(sp_gql_batch_t *batch);
++
+ /*───────────────────────────
+  *    Debug / Introspection
+  *───────────────────────────*/
+@@ -432,8 +467,10 @@ static bool _parse_document(_parser_t *p, sp_gql_doc_t *doc_out)
+             op->operation.op_type = SP_GQL_OP_QUERY;
+         }
+ 
+-        if (!_expect(p, TOK_LBRACE, "'{' to start selection set"))
+-            return false;
++        if (p->lx.current.kind != TOK_LBRACE) {
++            if (!_expect(p, TOK_LBRACE, "'{' to start selection set"))
++                return false;
++        }
+ 
+         /* Parse selection set recursively */
+         p->depth = 0;
+@@ -544,17 +581,56 @@ static bool _expect(_parser_t *p, _tok_kind_t kind, const char *what)
+ /*────────────────────────────
+  *         Top-Level API
+  *───────────────────────────*/
+-sp_gql_status_t
+-sp_gql_parse(const char   *query,
+-             size_t        query_len,
+-             uint32_t      max_depth,
+-             sp_gql_doc_t **out_doc,
+-             sp_gql_error_t *out_err)
++static char *_sp_gql_strdup_len(const char *src, size_t len)
++{
++    char *out = (char*)malloc(len + 1U);
++    if (!out) return NULL;
++    memcpy(out, src, len);
++    out[len] = '\0';
++    return out;
++}
++
++static const char *_sp_gql_skip_json_ws(const char *src, size_t len)
++{
++    size_t i = 0U;
++    while (i < len) {
++        unsigned char c = (unsigned char)src[i];
++        if (c != ' ' && c != '\t' && c != '\r' && c != '\n') break;
++        i++;
++    }
++    return src + i;
++}
++
++void sp_gql_request_free(sp_gql_request_t *req)
++{
++    if (!req) return;
++    free(req->query);
++    free(req->operation_name);
++    free(req->variables_json);
++    sp_gql_doc_free(req->document);
++    memset(req, 0, sizeof(*req));
++}
++
++void sp_gql_batch_free(sp_gql_batch_t *batch)
++{
++    if (!batch) return;
++    for (size_t i = 0U; i < batch->len; ++i) {
++        sp_gql_request_free(&batch->items[i]);
++    }
++    free(batch->items);
++    memset(batch, 0, sizeof(*batch));
++}
++
++static sp_gql_status_t _sp_gql_parse_document_text(const char   *query,
++                                                   size_t        query_len,
++                                                   uint32_t      max_depth,
++                                                   sp_gql_doc_t **out_doc,
++                                                   sp_gql_error_t *out_err)
+ {
+-    if (!query || !out_doc) return SP_GQL_ERR_INTERNAL;
+-    *out_doc = NULL;
+     sp_gql_doc_t doc;
+     memset(&doc, 0, sizeof(doc));
++    doc.request_kind = SP_GQL_REQUEST_SINGLE;
++
+     _parser_t p;
+     memset(&p, 0, sizeof p);
+     p.max_depth = max_depth;
+@@ -582,14 +658,19 @@ sp_gql_parse(const char   *query,
+     }
+ 
+     if (!_parse_document(&p, &doc)) {
++        sp_gql_status_t code = p.err->code;
+         _arena_free(&p.arena);
++        free(doc.operations.items);
++        free(doc.fragments.items);
+         free(doc.query_buffer);
+-        return p.err->code;
++        return code;
+     }
+ 
+     _arena_free(&p.arena);
+     *out_doc = (sp_gql_doc_t*)malloc(sizeof(doc));
+     if (!*out_doc) {
++        free(doc.operations.items);
++        free(doc.fragments.items);
+         free(doc.query_buffer);
+         return SP_GQL_ERR_OOM;
+     }
+@@ -597,6 +678,150 @@ sp_gql_parse(const char   *query,
+     return SP_GQL_OK;
+ }
+ 
++static sp_gql_status_t _sp_gql_parse_request_object(json_t *obj,
++                                                    uint32_t max_depth,
++                                                    sp_gql_request_t *out_req)
++{
++    if (!json_is_object(obj)) return SP_GQL_ERR_TYPE_MISMATCH;
++
++    json_t *query_json = json_object_get(obj, "query");
++    if (!json_is_string(query_json)) return SP_GQL_ERR_TYPE_MISMATCH;
++
++    const char *query_text = json_string_value(query_json);
++    if (!query_text) return SP_GQL_ERR_TYPE_MISMATCH;
++
++    memset(out_req, 0, sizeof(*out_req));
++    out_req->query = _sp_gql_strdup_len(query_text, strlen(query_text));
++    if (!out_req->query) return SP_GQL_ERR_OOM;
++
++    json_t *op_name_json = json_object_get(obj, "operationName");
++    if (json_is_string(op_name_json)) {
++        const char *op_name = json_string_value(op_name_json);
++        out_req->operation_name = _sp_gql_strdup_len(op_name, strlen(op_name));
++        if (!out_req->operation_name) {
++            sp_gql_request_free(out_req);
++            return SP_GQL_ERR_OOM;
++        }
++    }
++
++    json_t *variables_json = json_object_get(obj, "variables");
++    if (variables_json && !json_is_null(variables_json)) {
++        out_req->variables_json = json_dumps(variables_json, JSON_COMPACT);
++        if (!out_req->variables_json) {
++            sp_gql_request_free(out_req);
++            return SP_GQL_ERR_OOM;
++        }
++    }
++
++    sp_gql_status_t status = _sp_gql_parse_document_text(out_req->query,
++                                                         strlen(out_req->query),
++                                                         max_depth,
++                                                         &out_req->document,
++                                                         &out_req->error);
++    if (status != SP_GQL_OK) {
++        out_req->has_error = true;
++    }
++    return SP_GQL_OK;
++}
++
++static sp_gql_status_t _sp_gql_parse_json_payload(const char *json,
++                                                  size_t json_len,
++                                                  uint32_t max_depth,
++                                                  sp_gql_doc_t **out_doc,
++                                                  sp_gql_error_t *out_err)
++{
++    json_error_t json_err;
++    json_t *root = json_loadb(json, json_len, 0, &json_err);
++    if (!root) {
++        if (out_err) {
++            out_err->code = SP_GQL_ERR_SYNTAX;
++            out_err->where.line = (uint32_t)json_err.line;
++            out_err->where.column = (uint32_t)json_err.column;
++            snprintf(out_err->message, sizeof out_err->message, "%s", json_err.text);
++        }
++        return SP_GQL_ERR_SYNTAX;
++    }
++
++    sp_gql_doc_t *doc = (sp_gql_doc_t*)calloc(1U, sizeof(*doc));
++    if (!doc) {
++        json_decref(root);
++        return SP_GQL_ERR_OOM;
++    }
++
++    sp_gql_status_t status = SP_GQL_OK;
++    if (json_is_array(root)) {
++        doc->request_kind = SP_GQL_REQUEST_BATCH;
++        doc->batch.len = json_array_size(root);
++        doc->batch.cap = doc->batch.len;
++        if (doc->batch.len > 0U) {
++            doc->batch.items = (sp_gql_request_t*)calloc(doc->batch.len, sizeof(*doc->batch.items));
++            if (!doc->batch.items) {
++                status = SP_GQL_ERR_OOM;
++                goto done;
++            }
++        }
++        for (size_t i = 0U; i < doc->batch.len; ++i) {
++            sp_gql_request_t *req = &doc->batch.items[i];
++            status = _sp_gql_parse_request_object(json_array_get(root, i), max_depth, req);
++            if (status != SP_GQL_OK) {
++                req->has_error = true;
++                req->error.code = status;
++                snprintf(req->error.message, sizeof req->error.message,
++                         "invalid GraphQL request at batch index %zu", i);
++                status = SP_GQL_OK;
++            }
++        }
++    } else if (json_is_object(root)) {
++        sp_gql_request_t req;
++        status = _sp_gql_parse_request_object(root, max_depth, &req);
++        if (status != SP_GQL_OK) goto done;
++        *doc = *req.document;
++        doc->request_kind = SP_GQL_REQUEST_SINGLE;
++        free(req.document);
++        free(req.query);
++        free(req.operation_name);
++        free(req.variables_json);
++    } else {
++        status = SP_GQL_ERR_TYPE_MISMATCH;
++        if (out_err) {
++            out_err->code = status;
++            snprintf(out_err->message, sizeof out_err->message,
++                     "GraphQL JSON payload must be an object or an array of objects");
++        }
++    }
++
++done:
++    json_decref(root);
++    if (status != SP_GQL_OK) {
++        sp_gql_doc_free(doc);
++        return status;
++    }
++    *out_doc = doc;
++    return SP_GQL_OK;
++}
++
++sp_gql_status_t
++sp_gql_parse(const char   *query,
++             size_t        query_len,
++             uint32_t      max_depth,
++             sp_gql_doc_t **out_doc,
++             sp_gql_error_t *out_err)
++{
++    if (!query || !out_doc) return SP_GQL_ERR_INTERNAL;
++    *out_doc = NULL;
++
++    const char *first = _sp_gql_skip_json_ws(query, query_len);
++    if (first < query + query_len && (*first == '[' || *first == '{')) {
++        sp_gql_status_t json_status = _sp_gql_parse_json_payload(query, query_len, max_depth, out_doc, out_err);
++        if (json_status == SP_GQL_OK || *first == '[') {
++            return json_status;
++        }
++        /* Preserve existing behavior for raw GraphQL shorthand documents that start with '{'. */
++    }
++
++    return _sp_gql_parse_document_text(query, query_len, max_depth, out_doc, out_err);
++}
++
+ sp_gql_status_t
+ sp_gql_validate(const sp_gql_doc_t *doc, sp_gql_error_t *out_err)
+ {
+@@ -611,6 +836,9 @@ void sp_gql_doc_free(sp_gql_doc_t *doc)
+     if (!doc) return;
+     /* All AST nodes live in arenas we already freed after parse.
+      * Only need to free top-level vectors and query buffer. */
++    if (doc->request_kind == SP_GQL_REQUEST_BATCH) {
++        sp_gql_batch_free(&doc->batch);
++    }
+     free(doc->operations.items);
+     free(doc->fragments.items);
+     free(doc->query_buffer);

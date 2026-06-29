@@ -1,0 +1,82 @@
+diff --git a/EduGate_ScholarLink/Makefile b/EduGate_ScholarLink/Makefile
+index 7f07044..243a0d4 100644
+--- a/EduGate_ScholarLink/Makefile
++++ b/EduGate_ScholarLink/Makefile
+@@ -83,6 +83,7 @@ endif
+ # ---------------------------------------------------------------------------
+ SRC_CORE        := \
+     src/main.c \
++    src/rate_limiter.c \
+     src/router/router.c \
+     src/validator/validator.c \
+     src/graphql/schema_registry.c \
+diff --git a/EduGate_ScholarLink/src/main.c b/EduGate_ScholarLink/src/main.c
+index d3ba2b2..2caa5f5 100644
+--- a/EduGate_ScholarLink/src/main.c
++++ b/EduGate_ScholarLink/src/main.c
+@@ -23,6 +23,10 @@
+ 
+ #include <microhttpd.h>
+ 
++#include <arpa/inet.h>
++#include <netinet/in.h>
++#include <sys/socket.h>
++
+ #include <stdatomic.h>
+ #include <stdbool.h>
+ #include <stdint.h>
+@@ -33,6 +37,8 @@
+ #include <time.h>
+ #include <unistd.h>
+ 
++#include "rate_limiter.h"
++
+ /* ------------------------------------------------------------------------- */
+ /* Compile-time / run-time configuration                                     */
+ /* ------------------------------------------------------------------------- */
+@@ -160,6 +166,31 @@ respond_text(struct MHD_Connection *conn, unsigned int code,
+     return respond(conn, code, TEXT_CONTENT_TYPE, text);
+ }
+ 
++static const char *
++get_client_ip(struct MHD_Connection *conn)
++{
++    const union MHD_ConnectionInfo *info =
++        MHD_get_connection_info(conn, MHD_CONNECTION_INFO_CLIENT_ADDRESS);
++
++    if (!info || !info->client_addr)
++        return "unknown";
++
++    const struct sockaddr *addr = info->client_addr;
++    if (addr->sa_family == AF_INET) {
++        static _Thread_local char ip[INET_ADDRSTRLEN];
++        const struct sockaddr_in *in = (const struct sockaddr_in *)addr;
++        return inet_ntop(AF_INET, &in->sin_addr, ip, sizeof(ip)) ? ip : "unknown";
++    }
++
++    if (addr->sa_family == AF_INET6) {
++        static _Thread_local char ip[INET6_ADDRSTRLEN];
++        const struct sockaddr_in6 *in6 = (const struct sockaddr_in6 *)addr;
++        return inet_ntop(AF_INET6, &in6->sin6_addr, ip, sizeof(ip)) ? ip : "unknown";
++    }
++
++    return "unknown";
++}
++
+ /* ------------------------------------------------------------------------- */
+ /* URI Handlers                                                              */
+ /* ------------------------------------------------------------------------- */
+@@ -295,6 +326,13 @@ ahc_router_cb(void *cls,
+      */
+     bool consumed_upload = (*con_cls != NULL);
+ 
++    if (*upload_data_size == 0 && !rate_limiter_allow(get_client_ip(conn))) {
++        atomic_fetch_add_explicit(&g_total_requests, 1, memory_order_relaxed);
++        atomic_fetch_add_explicit(&g_failed_requests, 1, memory_order_relaxed);
++        return respond_json(conn, MHD_HTTP_TOO_MANY_REQUESTS,
++                            "{ \"error\": \"Rate limit exceeded\" }");
++    }
++
+     /* Dispatch to appropriate route */
+     for (size_t i = 0; i < g_route_count; ++i) {
+         if (strcmp(url, g_routes[i].path) == 0) {

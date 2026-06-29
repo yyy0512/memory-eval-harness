@@ -1,0 +1,53 @@
+{
+  "scenario_id": "c_web_ecommerce_medium_036_multi_session_development_medium_01",
+  "case_id": "c_web_ecommerce_medium_036",
+  "title": "Implement Configurable Rate Limiting for Search API",
+  "description": "The FlowCart Productivity Commerce platform is experiencing performance degradation due to high traffic and automated bots targeting the product search functionality. To ensure service stability and fair usage, a rate-limiting mechanism needs to be implemented for the search API endpoint. This task requires the agent to develop and integrate this feature over multiple sessions, leveraging the existing Redis caching infrastructure and making the limit configurable.",
+  "difficulty": "medium",
+  "project_spec": {
+    "unique_id": "c_web_ecommerce_medium_036",
+    "name": "FlowCart Productivity Commerce",
+    "description": "FlowCart Productivity Commerce is a medium-sized e-commerce platform written in C that puts workplace efficiency front-and-center. Beyond traditional shopping-cart capabilities, FlowCart introduces built-in personal and team productivity boosters—task-oriented dashboards for merchants, inline stock-replenishment reminders, and KPI widgets—while still delivering a fast storefront for end-customers. Every business interaction (orders, inventory, shipping, customer service tickets) is exposed as a discrete ‘activity’ that can be scheduled, prioritized, and delegated, allowing store owners to manage their workflows in one place without leaving the admin panel.\n\nThe application follows a strict Hexagonal Architecture: all productivity workflows, commerce rules, and KPI engines live in the core domain; adapters on the outside handle HTTP, CLI batch jobs, e-mail, file uploads, and databases. This isolation keeps the productivity logic testable and re-usable (e.g., it can later power a desktop client or mobile worker app). Ports define abstract operations such as “ScheduleTask”, “SearchCatalog”, or “GenerateSalesReport”, and every adapter simply plugs in—be it a REST controller using libmicrohttpd, a PostgreSQL repository using libpq, or a Redis cache layer via hiredis. The result is an e-commerce system that feels more like a productivity suite, letting merchants get more done with fewer context switches.",
+    "domain": "web_ecommerce",
+    "complexity": "medium",
+    "language": "c",
+    "architecture": "hexagonal",
+    "theme": "productivity",
+    "target_file_count": 26,
+    "target_token_count": 156648,
+    "features": [
+      "logging_system",
+      "admin_panel",
+      "search_functionality",
+      "caching",
+      "session_management",
+      "user_authentication",
+      "database_integration",
+      "file_upload",
+      "responsive_design",
+      "data_validation",
+      "error_handling"
+    ],
+    "architecture_patterns": [
+      "Authentication_Middleware",
+      "Repository_Pattern",
+      "MVC",
+      "Database_ORM"
+    ],
+    "dependencies": [
+      "libmicrohttpd (HTTP server adapter)",
+      "jansson (JSON serialization / request-response mapping)",
+      "libpq (PostgreSQL client, primary RDBMS repository)",
+      "sqlite3 (embedded DB for unit tests and local dev)",
+      "hiredis (Redis client – caching, session store)",
+      "zlog (structured logging system)",
+      "libcurl (external payment-gateway adapter)",
+      "libsodium (session encryption & secure token generation)",
+      "libmagic (file type validation for uploads)",
+      "c-template (minimal server-side HTML rendering for responsive UI)",
+      "uthash (in-memory collections for domain and cache)",
+      "cmocka (unit & port-adapter contract testing framework)"
+    ],
+    "seed": 926460
+  }
+}

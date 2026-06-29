@@ -1,0 +1,41 @@
+{
+  "scenario_id": "c_fintech_trading_easy_030_multi_session_development_easy_01",
+  "case_id": "c_fintech_trading_easy_030",
+  "title": "Implement a New 'PENDING_REVIEW' Trade Status Across Multiple Sessions",
+  "description": "The TradeUtility OneBox system requires a new feature to handle trades that need manual compliance review. This task involves incrementally introducing a new 'PENDING_REVIEW' status for transactions. The work will be split across three distinct development sessions to simulate a real-world workflow where a developer might pause and resume work. The agent must retain context between sessions to complete the full implementation, touching data structures, business logic, and creating new function stubs.",
+  "difficulty": "easy",
+  "project_spec": {
+    "unique_id": "c_fintech_trading_easy_030",
+    "name": "TradeUtility OneBox",
+    "description": "TradeUtility OneBox is an \"all-in-one\" command-line utility written in C that helps small brokerage start-ups perform day-to-day operational tasks—such as payment capture, internal transaction routing, on-ledger settlement, and regulatory audit extraction—without having to spin up multiple services. Built as a single executable, the tool embeds a lightweight relational store (SQLite) and exposes a REPL-style CLI plus a minimal REST gateway (libmicrohttpd) for scripting and integrations. Internally, the codebase follows a consciously simple monolithic layout: one process, one deployable artifact, one shared memory space. Yet it cleanly separates concerns through a header-oriented Saga coordinator, CQRS-inspired read/write façades, and a pluggable audit-trail subsystem so that junior engineers can trace the full payment-to-settlement flow in a single debugging session. The project focuses on utility value—speedy batch uploads, on-demand reconciliation reports, encrypted export of trades—rather than high-frequency trading logic, making it ideal for training, demos, and small production desks.\n\nWithin the monolith, the Payment Saga walks through authorization, capture, FX conversion, and manual review in a linear state machine saved in the same SQLite database. Command handlers mutate aggregates (orders, payments, positions) while Query handlers read from pre-computed views, reflecting a CQRS pattern without additional services. Every mutating step appends a record to an immutable AUDIT_LOG table and, when configured, streams the log to an encrypted file using libsodium. Settlement batches can be triggered manually or via cron, producing ISO-20022-style files for downstream clearing houses. Because all subsystems—payment_processing, transaction_management, audit_logging, settlement, encryption—co-exist in one address space, deployment on bare-metal or inexpensive VPS is trivial, reinforcing the project’s utility character.\n",
+    "domain": "fintech_trading",
+    "complexity": "easy",
+    "language": "c",
+    "architecture": "monolithic",
+    "theme": "utility",
+    "target_file_count": 10,
+    "target_token_count": 54196,
+    "features": [
+      "payment_processing",
+      "transaction_management",
+      "audit_logging",
+      "settlement",
+      "encryption"
+    ],
+    "architecture_patterns": [
+      "Saga_Pattern",
+      "CQRS",
+      "Audit_Trail"
+    ],
+    "dependencies": [
+      "SQLite3 (embedded file-based relational DB)",
+      "libmicrohttpd (very small HTTP/REST gateway for automation hooks)",
+      "libsodium (modern, easy-to-use encryption primitives)",
+      "cJSON (lightweight JSON parsing/serialization for REST and CLI I/O)",
+      "uthash/utarray (header-only hash/array utilities for in-memory caching)",
+      "GNU Readline (optional, enhanced interactive CLI experience)",
+      "CMake 3.x (build and packaging convenience)"
+    ],
+    "seed": 197316
+  }
+}

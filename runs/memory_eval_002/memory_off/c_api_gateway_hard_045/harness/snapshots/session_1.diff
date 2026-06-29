@@ -1,0 +1,291 @@
+diff --git a/socialpulse_gateway/src/adapters/graphql/graphql_parser.c b/socialpulse_gateway/src/adapters/graphql/graphql_parser.c
+index d686e2c..a153416 100644
+--- a/socialpulse_gateway/src/adapters/graphql/graphql_parser.c
++++ b/socialpulse_gateway/src/adapters/graphql/graphql_parser.c
+@@ -25,6 +25,11 @@
+ #include <stdio.h>
+ #include <stdlib.h>
+ #include <string.h>
++#if __has_include(<cjson/cJSON.h>)
++#   include <cjson/cJSON.h>
++#else
++#   include "cJSON.h"
++#endif
+ 
+ #include "logger.h"             /* project-wide structured logger            */
+ #include "graphql_parser.h"     /* public header for types / function defs   */
+@@ -418,7 +423,168 @@ static GraphQLDocument *parse_document(Parser *p)
+     return doc;
+ }
+ 
+-/* ============================  Public API  ============================== */
++static char *dup_cstr(const char *s)
++{
++    if (!s) return NULL;
++    size_t len = strlen(s);
++    char *copy = (char *) malloc(len + 1);
++    if (!copy) return NULL;
++    memcpy(copy, s, len + 1);
++    return copy;
++}
++
++static GqlError *make_heap_error(GqlErrorCode code, const char *fmt, ...)
++{
++    GqlError *err = (GqlError *) calloc(1, sizeof(GqlError));
++    if (!err) return NULL;
++
++    err->code = code;
++    err->line = 1;
++    err->column = 1;
++
++    va_list ap;
++    va_start(ap, fmt);
++    vsnprintf(err->message, sizeof(err->message), fmt, ap);
++    va_end(ap);
++
++    return err;
++}
++
++static bool parse_request_object(cJSON *object, GraphQLRequestItem *item)
++{
++    memset(item, 0, sizeof(*item));
++
++    if (!cJSON_IsObject(object)) {
++        item->error = make_heap_error(GQL_ERR_INVALID_REQUEST,
++                                      "GraphQL request entry must be an object");
++        return true;
++    }
++
++    cJSON *query = cJSON_GetObjectItemCaseSensitive(object, "query");
++    if (!cJSON_IsString(query) || !query->valuestring) {
++        item->error = make_heap_error(GQL_ERR_INVALID_REQUEST,
++                                      "GraphQL request object requires string field 'query'");
++        return true;
++    }
++
++    item->query = dup_cstr(query->valuestring);
++    if (!item->query) {
++        item->error = make_heap_error(GQL_ERR_OOM, "out of memory copying query");
++        return false;
++    }
++
++    cJSON *operation_name = cJSON_GetObjectItemCaseSensitive(object, "operationName");
++    if (cJSON_IsString(operation_name) && operation_name->valuestring) {
++        item->operation_name = dup_cstr(operation_name->valuestring);
++        if (!item->operation_name) {
++            item->error = make_heap_error(GQL_ERR_OOM, "out of memory copying operationName");
++            return false;
++        }
++    }
++
++    cJSON *variables = cJSON_GetObjectItemCaseSensitive(object, "variables");
++    if (variables && !cJSON_IsNull(variables)) {
++        char *variables_json = cJSON_PrintUnformatted(variables);
++        if (!variables_json) {
++            item->error = make_heap_error(GQL_ERR_OOM, "out of memory copying variables");
++            return false;
++        }
++        item->variables_json = dup_cstr(variables_json);
++        cJSON_free(variables_json);
++        if (!item->variables_json) {
++            item->error = make_heap_error(GQL_ERR_OOM, "out of memory copying variables");
++            return false;
++        }
++    }
++
++    GqlError *parse_err = NULL;
++    item->document = graphql_parse(item->query, &parse_err);
++    if (parse_err) {
++        item->error = (GqlError *) malloc(sizeof(GqlError));
++        if (!item->error) return false;
++        memcpy(item->error, parse_err, sizeof(GqlError));
++    }
++    return true;
++}
++
++GraphQLRequest *graphql_parse_request(const char *json_payload, size_t payload_len, GqlError **out_err)
++{
++    if (out_err) *out_err = NULL;
++    if (!json_payload) {
++        if (out_err) *out_err = make_heap_error(GQL_ERR_INVALID_REQUEST, "missing GraphQL request payload");
++        return NULL;
++    }
++
++    cJSON *root = cJSON_ParseWithLength(json_payload, payload_len);
++    if (!root) {
++        if (out_err) *out_err = make_heap_error(GQL_ERR_SYNTAX, "malformed JSON request payload");
++        return NULL;
++    }
++
++    GraphQLRequest *request = (GraphQLRequest *) calloc(1, sizeof(GraphQLRequest));
++    if (!request) {
++        cJSON_Delete(root);
++        if (out_err) *out_err = make_heap_error(GQL_ERR_OOM, "out of memory allocating GraphQL request");
++        return NULL;
++    }
++
++    if (cJSON_IsArray(root)) {
++        request->kind = GRAPHQL_REQUEST_BATCH;
++        GraphQLRequestItem **tail = &request->as.batch.items;
++        cJSON *entry = NULL;
++        cJSON_ArrayForEach(entry, root) {
++            GraphQLRequestItem *item = (GraphQLRequestItem *) calloc(1, sizeof(GraphQLRequestItem));
++            if (!item || !parse_request_object(entry, item)) {
++                free(item);
++                graphql_request_free(request);
++                cJSON_Delete(root);
++                if (out_err) *out_err = make_heap_error(GQL_ERR_OOM, "out of memory parsing GraphQL batch");
++                return NULL;
++            }
++            *tail = item;
++            tail = &item->next;
++            request->as.batch.count++;
++        }
++    } else {
++        request->kind = GRAPHQL_REQUEST_SINGLE;
++        if (!parse_request_object(root, &request->as.single)) {
++            graphql_request_free(request);
++            cJSON_Delete(root);
++            if (out_err) *out_err = make_heap_error(GQL_ERR_OOM, "out of memory parsing GraphQL request");
++            return NULL;
++        }
++    }
++
++    cJSON_Delete(root);
++    return request;
++}
++
++static void graphql_request_item_free(GraphQLRequestItem *item, bool free_self)
++{
++    if (!item) return;
++    free(item->query);
++    free(item->operation_name);
++    free(item->variables_json);
++    graphql_doc_free(item->document);
++    free(item->error);
++    if (free_self) free(item);
++}
++
++void graphql_request_free(GraphQLRequest *request)
++{
++    if (!request) return;
++    if (request->kind == GRAPHQL_REQUEST_BATCH) {
++        GraphQLRequestItem *item = request->as.batch.items;
++        while (item) {
++            GraphQLRequestItem *next = item->next;
++            graphql_request_item_free(item, true);
++            item = next;
++        }
++    } else {
++        graphql_request_item_free(&request->as.single, false);
++    }
++    free(request);
++}
+ 
+ GraphQLDocument *graphql_parse(const char *query, GqlError **out_err)
+ {
+diff --git a/socialpulse_gateway/src/adapters/graphql/graphql_parser.h b/socialpulse_gateway/src/adapters/graphql/graphql_parser.h
+index af1c7bf..699d610 100644
+--- a/socialpulse_gateway/src/adapters/graphql/graphql_parser.h
++++ b/socialpulse_gateway/src/adapters/graphql/graphql_parser.h
+@@ -188,6 +188,77 @@ typedef struct {
+     sp_gql_vec_t fragments;      /* vector<sp_gql_node_t*>                     */
+ } sp_gql_doc_t;
+ 
++/* Legacy parser model used by the gateway request path. */
++typedef enum {
++    GQL_ERR_NONE = 0,
++    GQL_ERR_SYNTAX,
++    GQL_ERR_OOM,
++    GQL_ERR_INVALID_REQUEST,
++} GqlErrorCode;
++
++typedef enum {
++    GQL_OP_QUERY = 0,
++    GQL_OP_MUTATION,
++    GQL_OP_SUBSCRIPTION,
++} GqlOperationType;
++
++typedef struct GqlError {
++    GqlErrorCode code;
++    uint32_t line;
++    uint32_t column;
++    char message[SP_GQL_MAX_ERROR_MSG];
++} GqlError;
++
++typedef struct GqlArgument {
++    char *name;
++    char *value;
++    struct GqlArgument *next;
++} GqlArgument;
++
++typedef struct GqlField {
++    char *name;
++    char *alias;
++    GqlArgument *arguments;
++    struct GqlField *children;
++    struct GqlField *next;
++} GqlField;
++
++typedef struct GqlOperation {
++    GqlOperationType type;
++    char *name;
++    GqlField *selection_set;
++    struct GqlOperation *next;
++} GqlOperation;
++
++typedef struct GraphQLDocument {
++    GqlOperation *operations;
++} GraphQLDocument;
++
++typedef struct GraphQLRequestItem {
++    char *query;
++    char *operation_name;
++    char *variables_json;
++    GraphQLDocument *document;
++    GqlError *error;
++    struct GraphQLRequestItem *next;
++} GraphQLRequestItem;
++
++typedef enum {
++    GRAPHQL_REQUEST_SINGLE = 0,
++    GRAPHQL_REQUEST_BATCH,
++} GraphQLRequestKind;
++
++typedef struct GraphQLRequest {
++    GraphQLRequestKind kind;
++    union {
++        GraphQLRequestItem single;
++        struct {
++            GraphQLRequestItem *items;
++            size_t count;
++        } batch;
++    } as;
++} GraphQLRequest;
++
+ /*───────────────────────────
+  *        Public API
+  *───────────────────────────*/
+@@ -227,16 +298,15 @@ sp_gql_status_t
+ sp_gql_validate(const sp_gql_doc_t *doc,
+                 sp_gql_error_t     *out_err);
+ 
+-/* Deep-free the entire AST document allocated by sp_gql_parse(). */
+ void sp_gql_doc_free(sp_gql_doc_t *doc);
+-
+-/*───────────────────────────
+- *    Debug / Introspection
+- *───────────────────────────*/
+-
+-/* Emit a human-readable representation of the AST – for debug use only */
++GraphQLDocument *graphql_parse(const char *query, GqlError **out_err);
++GraphQLRequest *graphql_parse_request(const char *json_payload, size_t payload_len, GqlError **out_err);
++void graphql_request_free(GraphQLRequest *request);
++void graphql_doc_free(GraphQLDocument *doc);
++void graphql_doc_debug_print(const GraphQLDocument *doc);
+ void sp_gql_dump(const sp_gql_doc_t *doc, FILE *stream);
+ 
++
+ /*─────────────────────────────────────────────────────────────────────────────
+  *            Optional Single-File Implementation Section
+  *───────────────────────────────────────────────────────────────────────────*/

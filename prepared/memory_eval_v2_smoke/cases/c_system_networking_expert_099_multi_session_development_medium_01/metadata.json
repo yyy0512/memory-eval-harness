@@ -1,0 +1,51 @@
+{
+  "scenario_id": "c_system_networking_expert_099_multi_session_development_medium_01",
+  "case_id": "c_system_networking_expert_099",
+  "title": "Implement UDP Packet Loss Metric Collection",
+  "description": "The NetPlay Orchestrator is a C-based, high-performance network management tool used to balance traffic, deploy services, and monitor network health in real-time. A key feature is its performance metrics system. Currently, it tracks generic metrics like bandwidth and packet counts. To better diagnose issues with real-time applications (e.g., VoIP, game streaming), we need to add a more specific metric: UDP packet loss percentage. This task requires the agent to modify the existing system to calculate, store, and report this new metric, which will involve changes across configuration, data structures, core packet processing, and testing modules.",
+  "difficulty": "medium",
+  "project_spec": {
+    "unique_id": "c_system_networking_expert_099",
+    "name": "NetPlay Orchestrator",
+    "description": "NetPlay Orchestrator is a component-based expert-level system-networking framework designed to power large-scale interactive entertainment experiences—think live online game shows, synchronized second-screen events at stadiums, and pop-up AR concerts that must reliably connect tens of thousands of mobile clients in real time. Every functional concern—session matchmaking, adaptive media streaming, crowd interaction, analytics, and fail-safe recovery—is implemented as a self-contained, hot-swappable component that can be wired together using clearly defined contracts and runtime discovery. \n\nBuilt around an event-driven, service-mesh backbone, NetPlay Orchestrator routes high-frequency player events through a chain-of-responsibility that performs security scanning, rules enforcement, and dynamic load-balancing before dispatching commands to pluggable gameplay services via the command and strategy patterns. Observers publish rich telemetry to a log-aggregation bus, where dedicated monitoring components compute performance metrics and trigger alerting or automated rollback. The entertainment focus shows up in specialized “Showrunner” modules that choreograph audience participation segments, dynamic leaderboards, and on-the-fly level streaming, all while the underlying system handles configuration management, blue-green deployment automation, backup recovery, and continuous security assessment without interrupting the show.",
+    "domain": "system_networking",
+    "complexity": "expert",
+    "language": "c",
+    "architecture": "component_based",
+    "theme": "entertainment",
+    "target_file_count": 81,
+    "target_token_count": 976974,
+    "features": [
+      "configuration_management",
+      "performance_metrics",
+      "security_scanning",
+      "load_balancing",
+      "deployment_automation",
+      "alerting",
+      "system_monitoring",
+      "backup_recovery",
+      "log_aggregation"
+    ],
+    "architecture_patterns": [
+      "Event_Driven",
+      "Service_Mesh",
+      "Command_Pattern",
+      "Chain_of_Responsibility",
+      "Observer_Pattern",
+      "Strategy_Pattern"
+    ],
+    "dependencies": [
+      "libuv (event loop & async I/O)",
+      "ZeroMQ (high-throughput messaging across components)",
+      "protobuf-c (schema-driven network serialization)",
+      "OpenSSL (TLS mutual authentication & encryption)",
+      "libcurl (HTTP/2 control-plane and configuration fetch)",
+      "cJSON (lightweight config & manifest parsing)",
+      "Prometheus C Client (metrics exposition and alert hooks)",
+      "libbpf/ebpf helpers (in-kernel monitoring & packet filtering)",
+      "zlib (stream compression for media payloads)",
+      "uthash (intrusive hash maps used in command routing tables)"
+    ],
+    "seed": 1688
+  }
+}

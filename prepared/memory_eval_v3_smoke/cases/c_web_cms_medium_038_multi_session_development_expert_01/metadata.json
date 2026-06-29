@@ -1,0 +1,52 @@
+{
+  "scenario_id": "c_web_cms_medium_038_multi_session_development_expert_01",
+  "case_id": "c_web_cms_medium_038",
+  "title": "Implement Time-Based One-Time Password (TOTP) Two-Factor Authentication (2FA)",
+  "description": "To enhance the security of the CogStack Utility CMS, a new feature for Two-Factor Authentication (2FA) using the TOTP standard (RFC 6238) is required. This is a significant feature that will be developed over multiple sessions. The agent must modify the user data model, add new configuration settings, implement the core cryptographic logic for TOTP, and integrate it securely into the existing authentication middleware. This task requires a deep understanding of the application's architecture, particularly the interplay between user models, configuration, and authentication flows.",
+  "difficulty": "expert",
+  "project_spec": {
+    "unique_id": "c_web_cms_medium_038",
+    "name": "CogStack Utility CMS",
+    "description": "CogStack Utility CMS is a medium-sized, performance-oriented content-management system written entirely in C that targets organisations that need a practical, light-footprint utility for publishing SOPs, micro-documentation, and internal tools. Instead of chasing the typical marketing-driven CMS feature set, CogStack focuses on day-to-day operational needs: quick file uploads, friction-free search, and an admin panel that surfaces system health metrics right beside content metrics. Every sub-system—caching, logging, authentication, and API delivery—has been built to run well on constrained embedded or on-premise hardware while still providing a modern, responsive web interface.\n\nThe project embraces the MVVM architecture to keep server-side concerns (Model), HTTP views (View), and the orchestration logic that feeds data to the browser (ViewModel) cleanly separated. REST API endpoints written with Ulfius expose the Model through JSON; a thin C-based ViewModel layer performs data-validation, caching, and business rules before handing the result to lightweight CTemplate views or to the reactive front-end. This separation allows teams to swap the UI (mobile-first Bootstrap templates, kiosk layouts, or a SPA) without touching core logic, true to the utility principle of doing one thing well while staying adaptable.\n\nBecause CogStack is compiled and runs with minimal runtime overhead, it can be deployed on anything from a Raspberry Pi to an enterprise VM cluster. Social logins, JWT-based sessions, and a plug-in logging system make it production-ready out of the box, yet the codebase remains approachable thanks to a consistent MVVM layering style and extensive in-code documentation.",
+    "domain": "web_cms",
+    "complexity": "medium",
+    "language": "c",
+    "architecture": "mvvm",
+    "theme": "utility",
+    "target_file_count": 38,
+    "target_token_count": 150954,
+    "features": [
+      "responsive_design",
+      "api_endpoints",
+      "social_login",
+      "caching",
+      "user_authentication",
+      "file_upload",
+      "data_validation",
+      "frontend_interface",
+      "search_functionality",
+      "logging_system",
+      "admin_panel"
+    ],
+    "architecture_patterns": [
+      "Database_ORM",
+      "REST_API",
+      "MVC",
+      "Authentication_Middleware"
+    ],
+    "dependencies": [
+      "Ulfius 2.x – minimalist REST API framework in C (MVC controller layer)",
+      "Jansson – fast JSON serialization/deserialization for API payloads",
+      "SQLite3 – embeddable SQL database; paired with the KVS ORM micro-library for Database_ORM pattern",
+      "Google CTemplate – server-side HTML templating to generate responsive views",
+      "libjwt – stateless JWT generation/validation for authentication middleware",
+      "libbcrypt – secure password hashing for user_authentication",
+      "libcurl – OAuth2 flows for social_login (Google, GitHub, etc.)",
+      "uthash/utarray – in-memory structures used by the caching subsystem",
+      "zlog – high-performance structured logging system",
+      "libmagic – MIME type detection during file_upload processing",
+      "Bootstrap 5 (front-end CSS/JS) – responsive_design baseline (consumed by View layer)"
+    ],
+    "seed": 33149
+  }
+}

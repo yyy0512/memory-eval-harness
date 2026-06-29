@@ -1,0 +1,47 @@
+{
+  "scenario_id": "c_desktop_productivity_medium_019_multi_session_development_expert_01",
+  "case_id": "c_desktop_productivity_medium_019",
+  "category": "extended_development_projects",
+  "original_task_category": "multi_session_development",
+  "project_source": "/home/yyy/projects/LoCoBench-Agent/.claude/worktrees/memory-eval-harness/data/generated/c_desktop_productivity_medium_019",
+  "project_name": "BeatBoard Studio",
+  "language": "c",
+  "complexity": "medium",
+  "session_count": 3,
+  "turns": [
+    {
+      "session": 1,
+      "file": "turns/session_1.jsonl",
+      "turn_count": 1
+    },
+    {
+      "session": 2,
+      "file": "turns/session_2.jsonl",
+      "turn_count": 1
+    },
+    {
+      "session": 3,
+      "file": "turns/session_3.jsonl",
+      "turn_count": 1
+    }
+  ],
+  "prompts_for_review": [
+    {
+      "session": 1,
+      "file": "prompts/session_1.txt"
+    },
+    {
+      "session": 2,
+      "file": "prompts/session_2.txt"
+    },
+    {
+      "session": 3,
+      "file": "prompts/session_3.txt"
+    }
+  ],
+  "hashes": {
+    "scenario_json_sha256": "df6d65dfc432f33eedf78a45e26376b30d177c9eb5fd91add9142752c2a5a7cb",
+    "project_tree_sha256": "1197a89ec71b4d565a3c69d43dab9c7d3c7fb48a42d72fdd2d2df2fd06a5a032",
+    "prepared_case_sha256": "47a86a99929381dc90ea58465291bc028ec29470a38436e54294e50ecb45fd79"
+  }
+}

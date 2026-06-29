@@ -1,0 +1,10 @@
+You are working in the repository at the current working directory. This is session 3 of a 3-session development task. The previous session has ended and conversation context is unavailable. Use the repository state and your persistent memory if available. Do not ask for previous conversation context. Complete only the requirements for this session. At the end, update memory with decisions and remaining work.
+
+Your overall task is to implement a configurable sync mode. This will be broken down into three distinct development sessions. You must retain context between sessions to complete the full feature.
+
+**Session 3: GUI Integration and Manual Trigger**
+*(You must recall the context from the previous sessions.)*
+
+1.  **Expose Trigger Function:** In `src/services/sync_service.h`, declare a new public function, for example, `void sync_service_trigger_manual_sync(void)`. Implement this function in `sync_service.c` to start a one-time synchronization process.
+2.  **Implement Keyboard Shortcut:** In `src/main.c` (or wherever the main event loop and keyboard input are handled), implement a new keyboard shortcut.
+3.  **Bind Shortcut:** When the user presses `Ctrl+S`, it should call the new `sync_service_trigger_manual_sync()` function. This should only trigger a sync if one is not already in progress.

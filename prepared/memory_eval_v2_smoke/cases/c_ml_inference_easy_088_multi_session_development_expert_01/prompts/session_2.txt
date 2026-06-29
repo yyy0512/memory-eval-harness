@@ -1,0 +1,13 @@
+You are working in the repository at the current working directory. This is session 2 of a 3-session development task. The previous session has ended and conversation context is unavailable. Use the repository state and your persistent memory if available. Do not ask for previous conversation context. Complete only the requirements for this session. At the end, update memory with decisions and remaining work.
+
+You are tasked with implementing an A/B testing feature. This will require significant changes across the backend and frontend. The work will be broken down into three distinct development sessions.
+
+**Session 2: Backend Implementation**
+Your plan has been approved. Now, implement the backend logic for the A/B testing feature. 
+
+1.  Implement the data structure changes you proposed in `shared/data_types.h`.
+2.  Modify `model/registry_factory.c` to allow fetching two models (champion and challenger).
+3.  Update `model/pipeline.c` to execute the two models on the same input data.
+4.  Adapt `model/monitoring.c` to collect and store comparative metrics for both models in the new data structures.
+
+During this session, you should focus exclusively on the `model` and `shared` components. The application must still compile successfully at the end of this session, but the new functionality does not need to be exposed in the UI yet.

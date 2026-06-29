@@ -1,0 +1,257 @@
+diff --git a/merchant_matrix_suite/.github/workflows/ci.yml b/merchant_matrix_suite/.github/workflows/ci.yml
+index fec4f72..7379f3e 100644
+--- a/merchant_matrix_suite/.github/workflows/ci.yml
++++ b/merchant_matrix_suite/.github/workflows/ci.yml
+@@ -1,4 +1,3 @@
+-```yaml
+ # File: .github/workflows/ci.yml
+ #
+ # MerchantMatrix Core Micro-service Suite – Continuous-Integration Pipeline
+@@ -95,19 +94,23 @@ jobs:
+       # ----------------------------------------------------------
+       - name: "Run CMake configure"
+         run: |
+-          cmake -B build \
++          cmake -S merchant_matrix_suite -B build \
+                 -G "${{ env.CMAKE_GENERATOR }}" \
+                 -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} \
+                 -DCMAKE_C_COMPILER=${CC} \
+                 -DCMAKE_CXX_COMPILER=${CXX} \
+                 -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+                 -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
++                -DMM_BUILD_ORDER_SERVICE=ON \
+                 -DENABLE_SANITIZERS=ON \
+                 -DENABLE_TEST_COVERAGE=ON
+ 
+       - name: "Build targets"
+         run: cmake --build build --target all -j $(nproc)
+ 
++      - name: "Build order service"
++        run: cmake --build build --target order_service_daemon test_order_model -j $(nproc)
++
+       # ----------------------------------------------------------
+       # Static-analysis (clang-tidy)
+       # ----------------------------------------------------------
+@@ -297,5 +300,4 @@ jobs:
+         with:
+           tag_name: ${{ github.ref_name }}
+           name: "Coverage Report"
+-          files: artifacts/**/coverage.info
+-```
+\ No newline at end of file
++          files: artifacts/**/coverage.info
+\ No newline at end of file
+diff --git a/merchant_matrix_suite/api_gateway/config.json b/merchant_matrix_suite/api_gateway/config.json
+index 1733e0c..f500318 100644
+--- a/merchant_matrix_suite/api_gateway/config.json
++++ b/merchant_matrix_suite/api_gateway/config.json
+@@ -148,7 +148,7 @@
+         "perTryTimeoutMs": 1700
+       }
+     },
+-    "orders": {
++    "order_service": {
+       "protocol": "http",
+       "host": "orders-svc.internal",
+       "port": 7003,
+diff --git a/merchant_matrix_suite/api_gateway/src/main.c b/merchant_matrix_suite/api_gateway/src/main.c
+index 2aae681..5426749 100644
+--- a/merchant_matrix_suite/api_gateway/src/main.c
++++ b/merchant_matrix_suite/api_gateway/src/main.c
+@@ -20,6 +20,8 @@
+  *********************************************************************/
+ 
+ #include <ctype.h>
++#include <errno.h>
++#include <netdb.h>
+ #include <signal.h>
+ #include <stdarg.h>
+ #include <stdbool.h>
+@@ -27,7 +29,9 @@
+ #include <stdio.h>
+ #include <stdlib.h>
+ #include <string.h>
++#include <sys/socket.h>
+ #include <time.h>
++#include <unistd.h>
+ 
+ /* Third-party libraries ---------------------------------------------------- */
+ #include "mongoose.h"
+@@ -44,16 +48,24 @@
+ #define PROM_METRIC_PATH   "/metrics"
+ #define HEALTH_PATH        "/healthz"
+ #define GRAPHQL_PATH       "/v1/graphql"
++#define ORDERS_PATH        "/v1/orders"
++#define DEFAULT_ORDER_SERVICE_HOST "orders-svc.internal"
++#define DEFAULT_ORDER_SERVICE_PORT "7003"
++#define UPSTREAM_RESPONSE_MAX 8192U
+ 
+ typedef struct {
+     char  bind_addr[128];
+     char  log_level[16];
++    char  order_service_host[128];
++    char  order_service_port[16];
+     int   rl_requests_per_sec;       /* Rate-limit: default allowed RPS */
+ } app_config_t;
+ 
+ static app_config_t g_cfg = {
+     .bind_addr = DEFAULT_BIND_ADDR,
+     .log_level = "INFO",
++    .order_service_host = DEFAULT_ORDER_SERVICE_HOST,
++    .order_service_port = DEFAULT_ORDER_SERVICE_PORT,
+     .rl_requests_per_sec = 30,
+ };
+ 
+@@ -225,6 +237,93 @@ static void handle_pricing_quote(struct mg_connection *c,
+     cJSON_Delete(root);
+ }
+ 
++static int connect_upstream(const char *host, const char *port) {
++    struct addrinfo hints;
++    struct addrinfo *result = NULL;
++    struct addrinfo *it;
++    int fd = -1;
++
++    memset(&hints, 0, sizeof(hints));
++    hints.ai_family = AF_UNSPEC;
++    hints.ai_socktype = SOCK_STREAM;
++
++    if (getaddrinfo(host, port, &hints, &result) != 0) {
++        return -1;
++    }
++
++    for (it = result; it; it = it->ai_next) {
++        fd = socket(it->ai_family, it->ai_socktype, it->ai_protocol);
++        if (fd < 0) {
++            continue;
++        }
++        if (connect(fd, it->ai_addr, it->ai_addrlen) == 0) {
++            break;
++        }
++        close(fd);
++        fd = -1;
++    }
++
++    freeaddrinfo(result);
++    return fd;
++}
++
++static void handle_create_order_proxy(struct mg_connection *c,
++                                      struct mg_http_message *hm) {
++    char request[12288];
++    char response[UPSTREAM_RESPONSE_MAX + 1U];
++    ssize_t nread;
++    int fd;
++    int request_len;
++
++    if (hm->method.len != 4 || strncasecmp(hm->method.ptr, "POST", 4) != 0) {
++        send_text(c, 405, "Orders endpoint expects POST");
++        return;
++    }
++
++    fd = connect_upstream(g_cfg.order_service_host, g_cfg.order_service_port);
++    if (fd < 0) {
++        slog(LL_ERROR, "orders", "failed to connect to order_service at %s:%s",
++             g_cfg.order_service_host, g_cfg.order_service_port);
++        send_text(c, 502, "Order service unavailable");
++        return;
++    }
++
++    request_len = snprintf(request, sizeof(request),
++                           "POST %s HTTP/1.1\r\n"
++                           "Host: %s:%s\r\n"
++                           "Content-Type: application/json\r\n"
++                           "Content-Length: %zu\r\n"
++                           "Connection: close\r\n\r\n"
++                           "%.*s",
++                           ORDERS_PATH,
++                           g_cfg.order_service_host,
++                           g_cfg.order_service_port,
++                           hm->body.len,
++                           (int)hm->body.len,
++                           hm->body.ptr);
++    if (request_len <= 0 || (size_t)request_len >= sizeof(request)) {
++        close(fd);
++        send_text(c, 413, "Order request is too large");
++        return;
++    }
++
++    if (send(fd, request, (size_t)request_len, 0) != request_len) {
++        close(fd);
++        send_text(c, 502, "Order service request failed");
++        return;
++    }
++
++    nread = recv(fd, response, UPSTREAM_RESPONSE_MAX, 0);
++    close(fd);
++    if (nread <= 0) {
++        send_text(c, 502, "Order service returned no response");
++        return;
++    }
++
++    response[nread] = '\0';
++    mg_send(c, response, (size_t)nread);
++}
++
+ static void handle_graphql(struct mg_connection *c,
+                            struct mg_http_message *hm) {
+     /* Only accepts POST with JSON payload containing { "query": "..."}
+@@ -297,6 +396,9 @@ static void fn_http(struct mg_connection *c, int ev, void *ev_data,
+     else if (mg_http_match_uri(hm, "/v1/pricing/quote")) {
+         handle_pricing_quote(c, hm);
+     }
++    else if (mg_http_match_uri(hm, ORDERS_PATH)) {
++        handle_create_order_proxy(c, hm);
++    }
+     else if (mg_http_match_uri(hm, GRAPHQL_PATH)) {
+         handle_graphql(c, hm);
+     }
+@@ -318,6 +420,12 @@ static void load_env_cfg(void) {
+     if ((p = getenv("MMX_LOG_LEVEL")))
+         strncpy(g_cfg.log_level, p, sizeof g_cfg.log_level - 1);
+ 
++    if ((p = getenv("MMX_ORDER_SERVICE_HOST")))
++        strncpy(g_cfg.order_service_host, p, sizeof g_cfg.order_service_host - 1);
++
++    if ((p = getenv("MMX_ORDER_SERVICE_PORT")))
++        strncpy(g_cfg.order_service_port, p, sizeof g_cfg.order_service_port - 1);
++
+     if ((p = getenv("MMX_RPS_LIMIT")))
+         g_cfg.rl_requests_per_sec = atoi(p);
+ 
+diff --git a/merchant_matrix_suite/api_gateway/src/routing.c b/merchant_matrix_suite/api_gateway/src/routing.c
+index 52e6d5b..3009c9f 100644
+--- a/merchant_matrix_suite/api_gateway/src/routing.c
++++ b/merchant_matrix_suite/api_gateway/src/routing.c
+@@ -36,6 +36,9 @@
+ #define MAX_PATH_SEGMENTS  32U           /* /a/b/c/d/e/f is considered insane */
+ #define MAX_PATH_LENGTH    256U          /* reject anything beyond this limit */
+ #define MAX_VERSION_LENGTH 16U
++#define ORDER_SERVICE_ROUTE_PATH "/v1/orders"
++#define ORDER_SERVICE_ROUTE_VERSION "v1"
++#define ORDER_SERVICE_UPSTREAM_URL "http://orders-svc.internal:7003"
+ 
+ typedef struct segment {
+     char raw[MMX_PATH_SEGMENT_MAX];  /* unchanged string literal */
+@@ -397,6 +400,21 @@ routing_register_graphql(const char *operation_name,
+     return routing_register(buf, HTTP_POST, version, handler);
+ }
+ 
++int
++routing_register_order_service(route_handler_t handler)
++{
++    return routing_register_rest(ORDER_SERVICE_ROUTE_PATH,
++                                 HTTP_POST,
++                                 ORDER_SERVICE_ROUTE_VERSION,
++                                 handler);
++}
++
++const char *
++routing_order_service_upstream(void)
++{
++    return ORDER_SERVICE_UPSTREAM_URL;
++}
++
+ /* ------------------------------------------------------------------------- */
+ /*                     Rate-limiting integration (optional)                  */
+ /* ------------------------------------------------------------------------- */

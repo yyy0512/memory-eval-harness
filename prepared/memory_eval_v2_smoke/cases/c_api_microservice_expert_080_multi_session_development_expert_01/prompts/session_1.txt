@@ -1,0 +1,19 @@
+You are working in the repository at the current working directory. This is session 1 of a multi-session development task. Complete only the requirements for this session. At the end, save any useful project-specific memory for future sessions.
+
+Your task is to implement a conditional cache bypass mechanism over multiple development sessions.
+
+### Session 1: Analysis and Planning
+Your first goal is to thoroughly analyze the existing codebase to understand the request flow, caching, and logging systems. Identify the key files and functions that will need to be modified. Create a detailed implementation plan.
+
+### Session 2: Core Feature Implementation
+Based on your plan, implement the core logic for the cache bypass. The specific requirements are:
+1.  Modify the request handling logic to detect the presence of the `X-Cache-Bypass: true` HTTP header in incoming requests.
+2.  If the header is present and its value is `true`, the system must skip any cache lookups and serve the response directly from the backend logic.
+3.  If the cache is bypassed due to this header, a log entry must be generated using the existing logging system. The log entry must contain a specific tag, `CACHE_BYPASS`, and the request ID for traceability.
+
+### Session 3: Testing and Verification
+In your final session, you must ensure the new feature is working correctly and hasn't introduced any regressions.
+1.  Locate the test suite file, `tests/test_main.txt`.
+2.  Add new test cases to validate the cache bypass functionality. You must test that a request *with* the header is not served from the cache.
+3.  Add a regression test to ensure that requests *without* the header continue to be cached as before.
+4.  Verify that the `CACHE_BYPASS` log is correctly generated when expected.

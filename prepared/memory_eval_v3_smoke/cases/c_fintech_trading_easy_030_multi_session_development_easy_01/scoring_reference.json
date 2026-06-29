@@ -1,0 +1,28 @@
+{
+  "scenario_id": "c_fintech_trading_easy_030_multi_session_development_easy_01",
+  "ground_truth": {
+    "description": "The final state should have modifications in two files: `database.h` and `services/settlement.c`. The key changes are the new enum value, the new function stub, and the updated case in the settlement processing logic.",
+    "file_changes": [
+      {
+        "file_path": "trade_utility_onebox/src/core/database.h",
+        "change_description": "Addition of the `TRADE_STATUS_PENDING_REVIEW` to the `TradeStatus` enum.",
+        "expected_code_snippet": "typedef enum {\n    TRADE_STATUS_PENDING,\n    TRADE_STATUS_EXECUTED,\n    TRADE_STATUS_SETTLED,\n    TRADE_STATUS_FAILED,\n    TRADE_STATUS_CANCELLED,\n    TRADE_STATUS_PENDING_REVIEW, // New status\n    TRADE_STATUS_COUNT\n} TradeStatus;"
+      },
+      {
+        "file_path": "trade_utility_onebox/src/services/settlement.c",
+        "change_description": "Addition of the `notify_compliance_team` stub and the new logic within `process_settlement`.",
+        "expected_code_snippet": "/* New function stub */\nvoid notify_compliance_team(const char* trade_id) {\n    // TODO: Implement compliance notification logic\n}\n\n/* ... inside process_settlement function ... */\n        switch (trade->status) {\n            // ... other cases\n            case TRADE_STATUS_PENDING_REVIEW:\n                notify_compliance_team(trade->id);\n                printf(\"INFO: Trade %s is pending review and will not be settled.\\n\", trade->id);\n                break;\n            // ... other cases\n        }"
+      }
+    ]
+  },
+  "expected_approach": "An expert developer would approach this incrementally, maintaining context between sessions.\n\n1.  **Session 1 Analysis:** The developer would first use a search tool (like `grep` or IDE search) for 'TradeStatus' to locate its definition. This would lead them to `database.h`. They would identify the `enum TradeStatus` and determine the correct place to add a new member, likely before the count/max value. They would then present only the modified enum as requested.\n\n2.  **Session 2 Implementation:** Recalling the previous session's goal, the developer would first apply the change to `database.h`. Then, they would open `services/settlement.c` and navigate to the `process_settlement` function. They would find the `switch` statement or `if-else` block that handles different trade statuses. They would add a new `case TRADE_STATUS_PENDING_REVIEW:` block, insert the required logging statement (e.g., using `printf`), and use a `break;` or `return;` to ensure the trade is not processed further.\n\n3.  **Session 3 Refinement:** Remembering the logic added in Session 2, the developer would first add the new `void notify_compliance_team(const char* trade_id)` function stub to `services/settlement.c`, likely near the top of the file with other function prototypes or definitions. They would then navigate back to the `case TRADE_STATUS_PENDING_REVIEW:` block inside `process_settlement` and add a call to `notify_compliance_team(current_trade->id)` before the existing logging statement.",
+  "evaluation_criteria": [
+    "**Context Retention:** Does the agent correctly build upon the work of previous sessions without needing to be reminded of the overall goal or previous changes?",
+    "**Code Comprehension:** Did the agent correctly identify the relevant `enum` in `database.h` and the `switch` statement in `settlement.c`?",
+    "**Correctness (Session 1):** Did the agent correctly propose adding the new enum member to `TradeStatus` in `database.h` and nothing more?",
+    "**Correctness (Session 2):** Did the agent correctly modify `database.h` and add the new `case` to `process_settlement` with the specified logging and control flow (i.e., skipping further processing)?",
+    "**Correctness (Session 3):** Did the agent correctly create the `notify_compliance_team` function stub and integrate the call into the logic from Session 2 in the correct order?",
+    "**Adherence to Instructions:** Did the agent follow the session-by-session instructions precisely, for example, by not implementing logic in Session 1?",
+    "**File Handling:** Did the agent correctly apply changes to the specified files (`database.h`, `services/settlement.c`) without introducing extraneous modifications?"
+  ]
+}

@@ -1,0 +1,38 @@
+{
+  "scenario_id": "c_web_blog_medium_004_multi_session_development_easy_01",
+  "case_id": "c_web_blog_medium_004",
+  "category": "extended_development_projects",
+  "original_task_category": "multi_session_development",
+  "project_source": "/home/yyy/projects/LoCoBench-Agent/.claude/worktrees/memory-eval-harness/data/generated/c_web_blog_medium_004",
+  "project_name": "ProdBlog-C: Turbo Productivity Blogging Suite",
+  "language": "c",
+  "complexity": "medium",
+  "session_count": 2,
+  "turns": [
+    {
+      "session": 1,
+      "file": "turns/session_1.jsonl",
+      "turn_count": 1
+    },
+    {
+      "session": 2,
+      "file": "turns/session_2.jsonl",
+      "turn_count": 1
+    }
+  ],
+  "prompts_for_review": [
+    {
+      "session": 1,
+      "file": "prompts/session_1.txt"
+    },
+    {
+      "session": 2,
+      "file": "prompts/session_2.txt"
+    }
+  ],
+  "hashes": {
+    "scenario_json_sha256": "b5248b4b114baa9d1b2f9f50f5dce0e87976dbeaa21e3f7ea22a706453094b4e",
+    "project_tree_sha256": "4218d3edb71164ee31839a7931ed6071e000f577dd5552e893a0a93a5b5a0011",
+    "prepared_case_sha256": "ed2a6b64ef53eebe6341be8bf2c7a19c8486f1e55a567adc4a4f448cbe5842f8"
+  }
+}

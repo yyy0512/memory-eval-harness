@@ -1,0 +1,47 @@
+{
+  "scenario_id": "c_ml_inference_easy_088_multi_session_development_expert_01",
+  "case_id": "c_ml_inference_easy_088",
+  "category": "extended_development_projects",
+  "original_task_category": "multi_session_development",
+  "project_source": "/home/yyy/projects/LoCoBench-Agent/.claude/worktrees/memory-eval-harness/data/generated/c_ml_inference_easy_088",
+  "project_name": "BizSight Inference Dashboard",
+  "language": "c",
+  "complexity": "easy",
+  "session_count": 3,
+  "turns": [
+    {
+      "session": 1,
+      "file": "turns/session_1.jsonl",
+      "turn_count": 1
+    },
+    {
+      "session": 2,
+      "file": "turns/session_2.jsonl",
+      "turn_count": 1
+    },
+    {
+      "session": 3,
+      "file": "turns/session_3.jsonl",
+      "turn_count": 1
+    }
+  ],
+  "prompts_for_review": [
+    {
+      "session": 1,
+      "file": "prompts/session_1.txt"
+    },
+    {
+      "session": 2,
+      "file": "prompts/session_2.txt"
+    },
+    {
+      "session": 3,
+      "file": "prompts/session_3.txt"
+    }
+  ],
+  "hashes": {
+    "scenario_json_sha256": "680ccfebe880a0b229815d45e9578579cee450cc5da45637f2eb60ec7e2c6a8f",
+    "project_tree_sha256": "89d1a4c7077dc3009c9cc54399fde795a22038e74acab27964f5d7e7429a1361",
+    "prepared_case_sha256": "eaeb5741d8a1053bb8ef7e5526354d5f15ac0b4c6ce958e911fac63b5e745591"
+  }
+}

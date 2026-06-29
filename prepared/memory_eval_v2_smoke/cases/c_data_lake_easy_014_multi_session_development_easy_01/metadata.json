@@ -1,0 +1,42 @@
+{
+  "scenario_id": "c_data_lake_easy_014_multi_session_development_easy_01",
+  "case_id": "c_data_lake_easy_014",
+  "title": "Implement and Integrate a Configurable Record Size Validator",
+  "description": "The StreamScoop Utility Lake is a simple C-based tool for ingesting streams of data. A new requirement has emerged to ensure data quality by preventing oversized records from entering the data lake. This task involves adding a new, configurable data validation feature over two development sessions. The first session will focus on setting up the configuration and data structures. The second session will implement the validation logic and integrate it into the main data processing pipeline.",
+  "difficulty": "easy",
+  "project_spec": {
+    "unique_id": "c_data_lake_easy_014",
+    "name": "StreamScoop Utility Lake",
+    "description": "StreamScoop Utility Lake is a lightweight C-based data-lake helper designed for operations engineers who need a fast, single-binary utility to ingest, validate, transform, and quickly inspect small-to-medium data streams on the edge or in test environments. The tool ingests CSV/JSON lines from files, sockets, or pipes, validates rows against user-supplied schemas, optionally transforms them (projection, simple math, string ops), and stores the results in a local embeddable SQLite lake partitioned by date. A text-mode dashboard renders live stream statistics and quick summaries so operators can verify the health of their pipelines without spinning up heavyweight analytics stacks.\n\nBuilt in a classic layered architecture, the CLI/UI layer (ncurses) publishes user events, while the ingestion layer (libcurl / POSIX I/O) pushes record events onto an internal event bus. Observer components (validator, transformer, storage writer, visualizer) subscribe to those events, enabling clean separation and easy extension—perfect for a utility that might be dropped into any stage of a DevOps tool-chain. Because everything is in C and relies on battle-tested libraries, the binary stays tiny, portable, and suitable for container side-cars, embedded boxes, or on-prem servers where installing large runtimes is not an option.",
+    "domain": "data_lake",
+    "complexity": "easy",
+    "language": "c",
+    "architecture": "layered",
+    "theme": "utility",
+    "target_file_count": 12,
+    "target_token_count": 54551,
+    "features": [
+      "data_ingestion",
+      "data_storage",
+      "data_visualization",
+      "data_validation",
+      "stream_processing",
+      "data_transformation"
+    ],
+    "architecture_patterns": [
+      "Observer_Pattern",
+      "Event_Streaming",
+      "Data_Lake"
+    ],
+    "dependencies": [
+      "libcurl (HTTP/HTTPS and websocket ingestion & streaming)",
+      "SQLite3 (embedded relational store acting as the local lake zone)",
+      "cJSON (lightweight JSON parsing for ingestion & validation)",
+      "uthash (in-memory hash utilities for fast schema lookup & deduplication)",
+      "ncurses (text-mode visualization dashboard)",
+      "zlib (optional compression of lake partitions)",
+      "pthread (concurrency for event streaming & observers)"
+    ],
+    "seed": 523585
+  }
+}

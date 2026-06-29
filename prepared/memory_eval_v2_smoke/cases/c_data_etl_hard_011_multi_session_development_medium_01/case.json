@@ -1,0 +1,47 @@
+{
+  "scenario_id": "c_data_etl_hard_011_multi_session_development_medium_01",
+  "case_id": "c_data_etl_hard_011",
+  "category": "extended_development_projects",
+  "original_task_category": "multi_session_development",
+  "project_source": "/home/yyy/projects/LoCoBench-Agent/.claude/worktrees/memory-eval-harness/data/generated/c_data_etl_hard_011",
+  "project_name": "SpotLight Streams ETL Forge",
+  "language": "c",
+  "complexity": "hard",
+  "session_count": 3,
+  "turns": [
+    {
+      "session": 1,
+      "file": "turns/session_1.jsonl",
+      "turn_count": 1
+    },
+    {
+      "session": 2,
+      "file": "turns/session_2.jsonl",
+      "turn_count": 1
+    },
+    {
+      "session": 3,
+      "file": "turns/session_3.jsonl",
+      "turn_count": 1
+    }
+  ],
+  "prompts_for_review": [
+    {
+      "session": 1,
+      "file": "prompts/session_1.txt"
+    },
+    {
+      "session": 2,
+      "file": "prompts/session_2.txt"
+    },
+    {
+      "session": 3,
+      "file": "prompts/session_3.txt"
+    }
+  ],
+  "hashes": {
+    "scenario_json_sha256": "2c987a0063f27036d90a80fc7e5f9a1d16a3b5eff1726600ab81f225ba67eed0",
+    "project_tree_sha256": "acf6556f1c1faebedb7f59f68bdf35ec6fbd443a14a7a8c7e18e442a737b3173",
+    "prepared_case_sha256": "4b6a1b1206dccbd74a4cdae4d6f8dbdb99df072e603bb5654ab136ccab163230"
+  }
+}

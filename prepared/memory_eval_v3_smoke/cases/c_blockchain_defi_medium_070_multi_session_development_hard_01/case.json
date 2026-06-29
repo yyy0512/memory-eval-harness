@@ -1,0 +1,29 @@
+{
+  "scenario_id": "c_blockchain_defi_medium_070_multi_session_development_hard_01",
+  "case_id": "c_blockchain_defi_medium_070",
+  "category": "extended_development_projects",
+  "original_task_category": "multi_session_development",
+  "project_source": "/home/yyy/projects/LoCoBench-Agent/.claude/worktrees/memory-eval-harness/data/generated/c_blockchain_defi_medium_070",
+  "project_name": "UtiliChain Core Suite",
+  "language": "c",
+  "complexity": "medium",
+  "session_count": 1,
+  "turns": [
+    {
+      "session": 1,
+      "file": "turns/session_1.jsonl",
+      "turn_count": 1
+    }
+  ],
+  "prompts_for_review": [
+    {
+      "session": 1,
+      "file": "prompts/session_1.txt"
+    }
+  ],
+  "hashes": {
+    "scenario_json_sha256": "185f084303afe1ead5f2a257fc6585c50da5dcd04cb1c76aca634f54bbdfa598",
+    "project_tree_sha256": "e8982e7c409e7000c3022bcb50a0bcfbfad4f603868bb303f231b9686a60d86e",
+    "prepared_case_sha256": "f9bdcea09163095d3de1cca632a620b36607609ee4ad0d39a4ff0cfb84bd63f8"
+  }
+}

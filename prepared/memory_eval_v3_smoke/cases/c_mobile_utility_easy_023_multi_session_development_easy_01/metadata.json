@@ -1,0 +1,40 @@
+{
+  "scenario_id": "c_mobile_utility_easy_023_multi_session_development_easy_01",
+  "case_id": "c_mobile_utility_easy_023",
+  "title": "MusePulse Lite: Implement Persistent Dark Mode Setting",
+  "description": "This scenario evaluates an agent's ability to perform incremental feature development over multiple sessions. The agent is tasked with adding a persistent Dark Mode setting to the 'MusePulse Lite' application, a simple mobile utility for capturing daily thoughts. The task is broken into three sessions: updating the data model, creating the UI control, and implementing the visual change. This requires the agent to retain context between sessions, understand the project's architecture (Model-ViewModel-View), and modify multiple C files.",
+  "difficulty": "easy",
+  "project_spec": {
+    "unique_id": "c_mobile_utility_easy_023",
+    "name": "MusePulse Lite",
+    "description": "MusePulse Lite is a pocket-sized \"creative trigger\" utility that lets users capture micro-ideas (text, color, audio snippets) in under three seconds and instantly resurface them later when a matching creative mood is detected. Every interaction—tapping the record button, tilting the phone, receiving a push reminder—fires lightweight events that ripple through an Observer/MVVM graph written entirely in C.  \n\nThe app turns everyday phone gestures into stimulus: a quick shake snapshots the current screen palette, an incoming notification can open a previously saved \"idea capsule,\" and a single tap shares it to social feeds. Local storage (SQLite) preserves capsules offline, while a tiny crash-reporting singleton guards stability. Despite its simplicity, MusePulse Lite showcases how an event-driven core can transform an ordinary note-taker into an inspiring, responsive companion for creators on the go.",
+    "domain": "mobile_utility",
+    "complexity": "easy",
+    "language": "c",
+    "architecture": "event_driven",
+    "theme": "creative",
+    "target_file_count": 13,
+    "target_token_count": 31749,
+    "features": [
+      "local_storage",
+      "push_notifications",
+      "social_sharing",
+      "crash_reporting",
+      "responsive_ui"
+    ],
+    "architecture_patterns": [
+      "Observer_Pattern",
+      "MVVM",
+      "Singleton"
+    ],
+    "dependencies": [
+      "libuv – portable event loop (core observer dispatch & async I/O)",
+      "SDL2 – cross-platform input/gesture layer and responsive UI primitives",
+      "SQLite3 – local_storage of “idea capsules”",
+      "cURL + cJSON – REST bridge for push_notifications & social_sharing endpoints",
+      "Sentry-Native – lightweight crash_reporting client for C",
+      "nanovg – vector UI rendering for fluid layouts (responsive_ui)"
+    ],
+    "seed": 687073
+  }
+}

@@ -1,0 +1,52 @@
+{
+  "scenario_id": "c_blockchain_nft_expert_035_multi_session_development_easy_01",
+  "case_id": "c_blockchain_nft_expert_035",
+  "title": "Add Transaction Memo Field for Enhanced Auditability",
+  "description": "The HoloVerse Showtime Ledger is a complex C-based blockchain application for managing NFT-based event tickets. A recent governance proposal, detailed in `governance_model.md`, has been approved. It requires adding a human-readable text 'memo' field to every transaction to improve on-chain auditability and provide context for transfers. This task is divided into two development sessions. The first session focuses on the core data structure and cryptographic integrity. The second session focuses on exposing this new feature through the user-facing command-line interface.",
+  "difficulty": "easy",
+  "project_spec": {
+    "unique_id": "c_blockchain_nft_expert_035",
+    "name": "HoloVerse Showtime Ledger",
+    "description": "HoloVerse Showtime Ledger is an expert-level, entertainment-centric blockchain NFT platform written entirely in C that allows theme-park operators, game studios, live-event organizers, and virtual concert promoters to mint immersive \"showtime tokens\" and dynamic NFTs that evolve with audience interaction. Each NFT can embed real-time performance stats, backstage feeds, or alternate story branches, transforming spectators into co-creators who influence narratives through staking, voting, and in-show achievements. \n\nBuilt with a strict Clean Architecture layering, core business rules for token management, staking, and governance are isolated from low-level cryptographic and network concerns. The domain layer models entertainment artifacts—shows, seasons, roles, branching story arcs—while application services orchestrate NFT minting, DeFi royalty streams, and audience governance votes via event-driven handlers and state machines. Infrastructure adapters implement a custom Proof-of-Applause consensus mechanism that rewards nodes based on verified crowd reactions captured from IoT applause meters and second-screen app telemetry, guaranteeing that block production mirrors real-world audience engagement. Observers monitor live events to trigger proxy contracts that stream bonuses to performers, while strategy patterns select optimal DeFi yield routes for unclaimed staking pools. The result is a fluid, modular chain that turns every show into a programmable, community-owned economy.",
+    "domain": "blockchain_nft",
+    "complexity": "expert",
+    "language": "c",
+    "architecture": "clean_architecture",
+    "theme": "entertainment",
+    "target_file_count": 96,
+    "target_token_count": 954171,
+    "features": [
+      "token_management",
+      "governance",
+      "staking",
+      "nft_minting",
+      "consensus_mechanism",
+      "smart_contracts",
+      "transaction_processing",
+      "cryptographic_functions",
+      "wallet_integration",
+      "defi_protocols"
+    ],
+    "architecture_patterns": [
+      "Observer_Pattern",
+      "State_Machine",
+      "Event_Driven",
+      "Proxy_Pattern",
+      "Factory_Pattern",
+      "Strategy_Pattern"
+    ],
+    "dependencies": [
+      "OpenSSL (ECC curves, SHA-3) – cryptographic primitives",
+      "libsodium – high-level crypto wrappers",
+      "libuv – asynchronous, event-driven I/O core",
+      "libevent – high-performance networking for P2P layer",
+      "ZeroMQ – message bus between application and infrastructure boundaries",
+      "SQLite / LevelDB – pluggable lightweight storage adapters",
+      "cJSON – fast JSON serialization for wallet and API gateways",
+      "tinyfsm – embedded friendly state-machine library",
+      "uthash – in-memory hash maps for mempool and cache",
+      "Google Test / CMocka – unit testing across domain and application layers"
+    ],
+    "seed": 225853
+  }
+}

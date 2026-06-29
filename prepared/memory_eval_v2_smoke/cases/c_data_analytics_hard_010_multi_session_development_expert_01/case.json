@@ -1,0 +1,29 @@
+{
+  "scenario_id": "c_data_analytics_hard_010_multi_session_development_expert_01",
+  "case_id": "c_data_analytics_hard_010",
+  "category": "extended_development_projects",
+  "original_task_category": "multi_session_development",
+  "project_source": "/home/yyy/projects/LoCoBench-Agent/.claude/worktrees/memory-eval-harness/data/generated/c_data_analytics_hard_010",
+  "project_name": "PulseStream Insight Engine",
+  "language": "c",
+  "complexity": "hard",
+  "session_count": 1,
+  "turns": [
+    {
+      "session": 1,
+      "file": "turns/session_1.jsonl",
+      "turn_count": 1
+    }
+  ],
+  "prompts_for_review": [
+    {
+      "session": 1,
+      "file": "prompts/session_1.txt"
+    }
+  ],
+  "hashes": {
+    "scenario_json_sha256": "829201fcbd96ed3587ccec134924e4ba30f67a3fd18b24e393947cca53fef973",
+    "project_tree_sha256": "161ed932c7656a95cf1194c319aa2524e3d323cd8367de6550fb859d15c71d6b",
+    "prepared_case_sha256": "728c0972a6cdd9d3bfbfdee653203d29342173d05bf0a2d8080097deb730bd23"
+  }
+}

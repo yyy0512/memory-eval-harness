@@ -1,0 +1,53 @@
+{
+  "scenario_id": "c_system_security_expert_028_multi_session_development_hard_01",
+  "case_id": "c_system_security_expert_028",
+  "title": "Implement a Threat Response Automation (TRA) Service",
+  "description": "The ProdSecure Orchestrator can currently detect security threats via its `scan_service` and monitor system state. However, responding to these threats is a manual process. This task involves implementing a new Threat Response Automation (TRA) service. This service will listen for threat events and automatically execute pre-configured actions, such as isolating a node or triggering an emergency backup. This is a multi-session task designed to simulate a feature development lifecycle, requiring the agent to build upon its work from previous sessions.",
+  "difficulty": "hard",
+  "project_spec": {
+    "unique_id": "c_system_security_expert_028",
+    "name": "ProdSecure Orchestrator",
+    "description": "ProdSecure Orchestrator (Project ID: c_system_security_expert_028) is a high-throughput, MVVM-driven command-and-control suite that turns routine security chores—back-ups, scanning, monitoring, and automated deployments—into streamlined productivity workflows. Operators interact through a declarative dashboard (View) that surfaces real-time performance metrics, aggregated logs, and AI-assisted remediation steps, while a dynamic Model layer consolidates configuration state, threat intelligence, and topology metadata coming from service-mesh sidecars. The ViewModel exposes intent-based commands—backup, balance, scan, deploy—using the Command and Strategy patterns so power users can chain, schedule, and reuse complex security tasks as one-click “productivity macros.” \n\nDistinct from traditional system-security consoles, this project treats security operations as reusable building blocks that can be composed, version-controlled, and batch-executed just like productivity scripts. Event-driven pipelines push telemetry to observers that update dashboards, trigger alerts, or adjust load-balancers without human latency, letting security engineers focus on higher-value optimization instead of repetitive maintenance. The complete toolchain is designed for 95 modular source files, enabling granular ownership and continuous delivery while maintaining a clear MVVM separation of concerns.",
+    "domain": "system_security",
+    "complexity": "expert",
+    "language": "c",
+    "architecture": "mvvm",
+    "theme": "productivity",
+    "target_file_count": 95,
+    "target_token_count": 951028,
+    "features": [
+      "backup_recovery",
+      "load_balancing",
+      "system_monitoring",
+      "security_scanning",
+      "performance_metrics",
+      "deployment_automation",
+      "configuration_management",
+      "alerting",
+      "log_aggregation"
+    ],
+    "architecture_patterns": [
+      "Service_Mesh",
+      "Event_Driven",
+      "Strategy_Pattern",
+      "Chain_of_Responsibility",
+      "Command_Pattern",
+      "Observer_Pattern"
+    ],
+    "dependencies": [
+      "GLib/GObject (core object system & signal dispatch for MVVM bindings)",
+      "GTK4 (UI toolkit for the View layer; property bindings to GObjects)",
+      "libevent or libuv (event-driven IO underpinning Service Mesh sidecar communication)",
+      "OpenSSL (encryption, certificate handling for secure channels)",
+      "libcurl (HTTP/2 client for pulling remote configs and pushing metrics)",
+      "protobuf-c (schema-first message contracts across micro-services)",
+      "cJSON (lightweight config & state serialization)",
+      "ZMQ or NATS C client (high-volume pub/sub telemetry bus)",
+      "SQLite & libbtrfsutil (local snapshot/backup catalog)",
+      "Prometheus C client & StatsD exporter (performance metrics)",
+      "Systemd-dbus (deployment automation & service supervision)",
+      "spdlog-c or zlog (structured, aggregated logging)"
+    ],
+    "seed": 40721
+  }
+}

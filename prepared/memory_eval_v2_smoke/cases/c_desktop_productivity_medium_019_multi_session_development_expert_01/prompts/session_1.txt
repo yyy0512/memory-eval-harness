@@ -1,0 +1,12 @@
+You are working in the repository at the current working directory. This is session 1 of a multi-session development task. Complete only the requirements for this session. At the end, save any useful project-specific memory for future sessions.
+
+You will implement the 'Project Template' feature for BeatBoard Studio. This task is divided into several sessions. After each session, your work will be saved, and you will resume in the next session.
+
+**Session 1: Data Model and Persistence Layer**
+Your first task is to design and implement the core data structures and file I/O for project templates. 
+1.  Analyze `src/models/app_state.h` to understand the complete application state.
+2.  Define a new data structure, `ProjectTemplate`, in a new header file (`src/models/project_template.h`). This struct should only contain the *shareable* parts of the application state (e.g., `bpm`, `time_signature`, track configurations, plugin chain setups). Exclude session-specific data like `last_saved_path` or window dimensions.
+3.  In `src/components/persistence_component.c`, implement two new functions: `int persistence_save_as_template(const char* filepath, const AppState* current_state)` and `ProjectTemplate* persistence_load_template(const char* filepath)`.
+4.  The save function should extract the relevant data from the `AppState` and serialize it to a file. The load function should deserialize the file into a new `ProjectTemplate` struct. Use a simple binary format for serialization. Ensure you handle file I/O errors gracefully.
+
+*(The agent should complete this session. In a real evaluation, the environment would be reset, and the agent would be given the next prompt with the files it just modified.)*

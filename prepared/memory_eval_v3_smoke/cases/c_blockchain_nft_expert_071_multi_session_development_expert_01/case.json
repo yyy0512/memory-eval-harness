@@ -1,0 +1,56 @@
+{
+  "scenario_id": "c_blockchain_nft_expert_071_multi_session_development_expert_01",
+  "case_id": "c_blockchain_nft_expert_071",
+  "category": "extended_development_projects",
+  "original_task_category": "multi_session_development",
+  "project_source": "/home/yyy/projects/LoCoBench-Agent/.claude/worktrees/memory-eval-harness/data/generated/c_blockchain_nft_expert_071",
+  "project_name": "HoloCanvas: A Micro-Gallery Blockchain for Generative Artifacts",
+  "language": "c",
+  "complexity": "expert",
+  "session_count": 4,
+  "turns": [
+    {
+      "session": 1,
+      "file": "turns/session_1.jsonl",
+      "turn_count": 1
+    },
+    {
+      "session": 2,
+      "file": "turns/session_2.jsonl",
+      "turn_count": 1
+    },
+    {
+      "session": 3,
+      "file": "turns/session_3.jsonl",
+      "turn_count": 1
+    },
+    {
+      "session": 4,
+      "file": "turns/session_4.jsonl",
+      "turn_count": 1
+    }
+  ],
+  "prompts_for_review": [
+    {
+      "session": 1,
+      "file": "prompts/session_1.txt"
+    },
+    {
+      "session": 2,
+      "file": "prompts/session_2.txt"
+    },
+    {
+      "session": 3,
+      "file": "prompts/session_3.txt"
+    },
+    {
+      "session": 4,
+      "file": "prompts/session_4.txt"
+    }
+  ],
+  "hashes": {
+    "scenario_json_sha256": "475905fa0cac00ecfd3001868cd3fd62ab73f238b625d3dcd5a40ab835c60410",
+    "project_tree_sha256": "6ae9506ee2710c6013f46f9665a831983696a1e140c6754ea8af82e569f4c317",
+    "prepared_case_sha256": "75adab7398e3c6a245ce01090fcc9a784b0e0e9c3751cc352b89dd822b6a430e"
+  }
+}

@@ -1,0 +1,493 @@
+diff --git a/UtiliREST_EchoHub/Makefile b/UtiliREST_EchoHub/Makefile
+index ee95d30..4b58713 100644
+--- a/UtiliREST_EchoHub/Makefile
++++ b/UtiliREST_EchoHub/Makefile
+@@ -16,7 +16,7 @@ VERSION       = $(shell cat VERSION 2>/dev/null || echo "dev")
+ 
+ # Directory layout
+ ROOT_DIR      = $(abspath .)
+-SRC_DIRS      = src src/model src/viewmodel src/http src/repository
++SRC_DIRS      = src src/model src/viewmodel src/http src/repository src/storage
+ TEST_DIR      = tests
+ BUILD_DIR     = build
+ OBJ_DIR       = $(BUILD_DIR)/obj
+@@ -43,7 +43,7 @@ OPT_DEBUG      = -O0 -g3
+ STD            = -std=c11
+ DEFINES        = -DPROJECT_VERSION=\"$(VERSION)\"
+ 
+-CFLAGS_COMMON  = $(STD) $(WARNINGS) $(DEFINES) -fPIC
++CFLAGS_COMMON  = $(STD) $(WARNINGS) $(DEFINES) -Iinclude -I. -fPIC
+ LDFLAGS_COMMON =
+ 
+ # Libraries discovered via pkg-config
+@@ -90,8 +90,9 @@ JOBS ?= $(shell nproc 2>/dev/null || echo 4)
+ SRC  := $(foreach dir,$(SRC_DIRS),$(wildcard $(dir)/*.c))
+ OBJ  := $(patsubst %.c,$(OBJ_DIR)/%.o,$(SRC))
+ 
+-TEST_SRC := $(wildcard $(TEST_DIR)/*.c)
+-TEST_OBJ := $(patsubst %.c,$(OBJ_DIR)/%.o,$(TEST_SRC))
++TEST_SRC := tests/test_rate_limiter.c
++TEST_SUPPORT_SRC := src/rate_limiter.c src/storage/in_memory_rate_storage.c
++TEST_OBJ := $(patsubst %.c,$(OBJ_DIR)/%.o,$(TEST_SRC) $(TEST_SUPPORT_SRC))
+ 
+ #------------------------------------------------------------------------------
+ # Default target
+@@ -122,7 +123,7 @@ test: $(UNIT_TEST_BIN)
+ 	@echo "Running unit tests…"
+ 	@./$(UNIT_TEST_BIN)
+ 
+-$(UNIT_TEST_BIN): $(OBJ) $(TEST_OBJ)
++$(UNIT_TEST_BIN): $(TEST_OBJ)
+ 	@$(MKDIR_P) $(BIN_DIR)
+ 	$(CC) $^ $(LDFLAGS) -o $@
+ 
+diff --git a/UtiliREST_EchoHub/config.h b/UtiliREST_EchoHub/config.h
+index c7d0c9b..e6d34b1 100644
+--- a/UtiliREST_EchoHub/config.h
++++ b/UtiliREST_EchoHub/config.h
+@@ -87,6 +87,9 @@ typedef enum
+ #define EH_DEFAULT_SQLITE_POOL_SIZE    4u
+ #define EH_DEFAULT_SLOW_QUERY_MS       1000u            /* 1 second */
+ 
++#define RATE_LIMIT_WINDOW_SECONDS      60
++#define RATE_LIMIT_MAX_REQUESTS        100
++
+ /*----------------------------------------------------------------------
+  *  Configuration structure
+  *--------------------------------------------------------------------*/
+diff --git a/UtiliREST_EchoHub/docs/api/v1.openapi.yaml b/UtiliREST_EchoHub/docs/api/v1.openapi.yaml
+index fb57726..4e4fe73 100644
+--- a/UtiliREST_EchoHub/docs/api/v1.openapi.yaml
++++ b/UtiliREST_EchoHub/docs/api/v1.openapi.yaml
+@@ -85,6 +85,12 @@ paths:
+               description: Opaque cursor for the next page.
+               schema:
+                 type: string
++            X-RateLimit-Limit:
++              $ref: "#/components/headers/RateLimitLimit"
++            X-RateLimit-Remaining:
++              $ref: "#/components/headers/RateLimitRemaining"
++            X-RateLimit-Reset:
++              $ref: "#/components/headers/RateLimitReset"
+           content:
+             application/json:
+               schema:
+@@ -92,6 +98,8 @@ paths:
+             application/x-msgpack:
+               schema:
+                 $ref: "#/components/schemas/EchoPage"
++        "429":
++          $ref: "#/components/responses/TooManyRequests"
+         default:
+           $ref: "#/components/responses/GenericError"
+ 
+@@ -116,6 +124,12 @@ paths:
+               description: Newly created resource URI.
+               schema:
+                 type: string
++            X-RateLimit-Limit:
++              $ref: "#/components/headers/RateLimitLimit"
++            X-RateLimit-Remaining:
++              $ref: "#/components/headers/RateLimitRemaining"
++            X-RateLimit-Reset:
++              $ref: "#/components/headers/RateLimitReset"
+           content:
+             application/json:
+               schema:
+@@ -124,6 +138,8 @@ paths:
+           $ref: "#/components/responses/ValidationError"
+         "409":
+           $ref: "#/components/responses/Conflict"
++        "429":
++          $ref: "#/components/responses/TooManyRequests"
+         default:
+           $ref: "#/components/responses/GenericError"
+ 
+@@ -144,12 +160,21 @@ paths:
+       responses:
+         "200":
+           description: Echo found.
++          headers:
++            X-RateLimit-Limit:
++              $ref: "#/components/headers/RateLimitLimit"
++            X-RateLimit-Remaining:
++              $ref: "#/components/headers/RateLimitRemaining"
++            X-RateLimit-Reset:
++              $ref: "#/components/headers/RateLimitReset"
+           content:
+             application/json:
+               schema:
+                 $ref: "#/components/schemas/Echo"
+         "404":
+           $ref: "#/components/responses/NotFound"
++        "429":
++          $ref: "#/components/responses/TooManyRequests"
+         default:
+           $ref: "#/components/responses/GenericError"
+ 
+@@ -168,6 +193,13 @@ paths:
+       responses:
+         "200":
+           description: Echo updated.
++          headers:
++            X-RateLimit-Limit:
++              $ref: "#/components/headers/RateLimitLimit"
++            X-RateLimit-Remaining:
++              $ref: "#/components/headers/RateLimitRemaining"
++            X-RateLimit-Reset:
++              $ref: "#/components/headers/RateLimitReset"
+           content:
+             application/json:
+               schema:
+@@ -178,6 +210,8 @@ paths:
+           $ref: "#/components/responses/NotFound"
+         "412":
+           $ref: "#/components/responses/PreconditionFailed"
++        "429":
++          $ref: "#/components/responses/TooManyRequests"
+         default:
+           $ref: "#/components/responses/GenericError"
+ 
+@@ -190,10 +224,19 @@ paths:
+       responses:
+         "204":
+           description: Echo deleted (No Content).
++          headers:
++            X-RateLimit-Limit:
++              $ref: "#/components/headers/RateLimitLimit"
++            X-RateLimit-Remaining:
++              $ref: "#/components/headers/RateLimitRemaining"
++            X-RateLimit-Reset:
++              $ref: "#/components/headers/RateLimitReset"
+         "404":
+           $ref: "#/components/responses/NotFound"
+         "412":
+           $ref: "#/components/responses/PreconditionFailed"
++        "429":
++          $ref: "#/components/responses/TooManyRequests"
+         default:
+           $ref: "#/components/responses/GenericError"
+ 
+@@ -250,6 +293,25 @@ components:
+       schema:
+         type: string
+ 
++  headers:
++    RateLimitLimit:
++      description: Maximum number of requests allowed per rate-limit window.
++      schema:
++        type: integer
++        example: 100
++    RateLimitRemaining:
++      description: Number of requests remaining for the client in the current window.
++      schema:
++        type: integer
++        minimum: 0
++        example: 99
++    RateLimitReset:
++      description: UTC epoch time in seconds when the current rate-limit window resets.
++      schema:
++        type: integer
++        format: int64
++        example: 1710420000
++
+   responses:
+     HealthOK:
+       description: Service is healthy.
+@@ -296,6 +358,20 @@ components:
+           schema:
+             $ref: "#/components/schemas/Error"
+ 
++    TooManyRequests:
++      description: Too many requests; retry after the current rate-limit window resets.
++      headers:
++        X-RateLimit-Limit:
++          $ref: "#/components/headers/RateLimitLimit"
++        X-RateLimit-Remaining:
++          $ref: "#/components/headers/RateLimitRemaining"
++        X-RateLimit-Reset:
++          $ref: "#/components/headers/RateLimitReset"
++      content:
++        application/json:
++          schema:
++            $ref: "#/components/schemas/Error"
++
+     GenericError:
+       description: Unhandled server error.
+       content:
+diff --git a/UtiliREST_EchoHub/src/http_handler.c b/UtiliREST_EchoHub/src/http_handler.c
+index 697e0fa..f580c7f 100644
+--- a/UtiliREST_EchoHub/src/http_handler.c
++++ b/UtiliREST_EchoHub/src/http_handler.c
+@@ -31,13 +31,16 @@
+ #include <stdbool.h>
+ #include <stddef.h>
+ #include <stdint.h>
++#include <stdio.h>
+ #include <stdlib.h>
+ #include <string.h>
+ 
+ #include "cJSON.h"
+ 
++#include "config.h"
+ #include "echo_query.h"
+ #include "openapi_renderer.h"
++#include "rate_limiter.h"
+ #include "urest_http.h"
+ #include "util_log.h"
+ 
+@@ -48,6 +51,8 @@
+ #define MAX_PAGE_SIZE            250u
+ #define HEADER_ACCEPT            "Accept"
+ #define HEADER_CONTENT_TYPE      "Content-Type"
++#define HEADER_FORWARDED_FOR     "X-Forwarded-For"
++#define HEADER_REAL_IP           "X-Real-IP"
+ #define VND_ECHOHUB_V1           "application/vnd.utilirest.echohub.v1+json"
+ #define MIME_JSON                "application/json"
+ 
+@@ -84,6 +89,22 @@ static uint32_t safe_u32(const char *s, uint32_t def, uint32_t min, uint32_t max
+     return (uint32_t)v;
+ }
+ 
++/* Adds rate limit metadata headers */
++static void add_rate_limit_headers(http_response_t *res, const char *client_ip)
++{
++    char limit[16];
++    char remaining[16];
++    char reset[32];
++
++    snprintf(limit, sizeof limit, "%d", RATE_LIMIT_MAX_REQUESTS);
++    snprintf(remaining, sizeof remaining, "%d", rate_limit_remaining(client_ip));
++    snprintf(reset, sizeof reset, "%ld", rate_limit_reset_epoch(client_ip));
++
++    http_resp_header(res, "X-RateLimit-Limit", limit);
++    http_resp_header(res, "X-RateLimit-Remaining", remaining);
++    http_resp_header(res, "X-RateLimit-Reset", reset);
++}
++
+ /* Adds a standard set of CORS / common headers */
+ static void add_common_headers(http_response_t *res)
+ {
+@@ -94,11 +115,51 @@ static void add_common_headers(http_response_t *res)
+     http_resp_header(res, "Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+ }
+ 
++/* Extracts the best available client IP from forwarding headers */
++static const char *client_ip_address(const http_request_t *req,
++                                     char                *buf,
++                                     size_t               buf_len)
++{
++    const char *forwarded_for = http_req_header(req, HEADER_FORWARDED_FOR);
++    if (forwarded_for && *forwarded_for != '\0') {
++        while (*forwarded_for && isspace((unsigned char)*forwarded_for)) {
++            forwarded_for++;
++        }
++        size_t len = strcspn(forwarded_for, ",");
++        while (len > 0 && isspace((unsigned char)forwarded_for[len - 1])) {
++            len--;
++        }
++        if (len >= buf_len) {
++            len = buf_len - 1;
++        }
++        memcpy(buf, forwarded_for, len);
++        buf[len] = '\0';
++        return buf;
++    }
++
++    const char *real_ip = http_req_header(req, HEADER_REAL_IP);
++    if (real_ip && *real_ip != '\0') {
++        return real_ip;
++    }
++
++    return "unknown";
++}
++
++/* Updates rate limit metadata headers with request-specific client state */
++static void add_request_rate_limit_headers(http_response_t      *res,
++                                           const http_request_t *req)
++{
++    char client_ip[64];
++    add_rate_limit_headers(res, client_ip_address(req, client_ip,
++                                                  sizeof client_ip));
++}
++
+ /* Unified JSON error representation */
+-static void write_error_response(http_response_t *res,
+-                                 uint16_t           status_code,
+-                                 const char        *msg,
+-                                 const char        *details)
++static void write_error_response(const http_request_t *req,
++                                 http_response_t      *res,
++                                 uint16_t              status_code,
++                                 const char           *msg,
++                                 const char           *details)
+ {
+     cJSON *root = cJSON_CreateObject();
+     cJSON *err  = cJSON_AddObjectToObject(root, JSON_KEY_ERROR);
+@@ -111,6 +172,7 @@ static void write_error_response(http_response_t *res,
+     char *json_buf = cJSON_PrintUnformatted(root);
+ 
+     add_common_headers(res);
++    add_request_rate_limit_headers(res, req);
+     http_resp_status(res, status_code);
+     http_resp_header(res, HEADER_CONTENT_TYPE, MIME_JSON);
+     http_resp_body(res, json_buf, strlen(json_buf));
+@@ -179,7 +241,7 @@ static void route_get_echoes(const http_request_t *req, http_response_t *res)
+ {
+     uint8_t api_version = 0;
+     if (!negotiate_version(req, &api_version)) {
+-        write_error_response(res, 406, "Unsupported 'Accept' media type", NULL);
++        write_error_response(req, res, 406, "Unsupported 'Accept' media type", NULL);
+         return;
+     }
+ 
+@@ -196,7 +258,7 @@ static void route_get_echoes(const http_request_t *req, http_response_t *res)
+     echo_query_err_t qerr  = echo_query_page(&opts, &page_data);
+ 
+     if (qerr != ECHO_Q_OK) {
+-        write_error_response(res, 500, "Failed to retrieve echoes",
++        write_error_response(req, res, 500, "Failed to retrieve echoes",
+                              echo_query_err_str(qerr));
+         return;
+     }
+@@ -216,6 +278,7 @@ static void route_get_echoes(const http_request_t *req, http_response_t *res)
+     char *json_buf = cJSON_PrintUnformatted(root);
+ 
+     add_common_headers(res);
++    add_request_rate_limit_headers(res, req);
+     http_resp_status(res, 200);
+     http_resp_header(res, HEADER_CONTENT_TYPE,
+                      api_version == 1 ? VND_ECHOHUB_V1 : MIME_JSON);
+@@ -233,7 +296,7 @@ static void route_get_echo_by_id(const http_request_t *req,
+ {
+     uint8_t api_version = 0;
+     if (!negotiate_version(req, &api_version)) {
+-        write_error_response(res, 406, "Unsupported 'Accept' media type", NULL);
++        write_error_response(req, res, 406, "Unsupported 'Accept' media type", NULL);
+         return;
+     }
+ 
+@@ -241,10 +304,10 @@ static void route_get_echo_by_id(const http_request_t *req,
+     echo_query_err_t err = echo_query_by_id(id, &echo);
+ 
+     if (err == ECHO_Q_NOT_FOUND) {
+-        write_error_response(res, 404, "Echo not found", NULL);
++        write_error_response(req, res, 404, "Echo not found", NULL);
+         return;
+     } else if (err != ECHO_Q_OK) {
+-        write_error_response(res, 500, "Error retrieving echo",
++        write_error_response(req, res, 500, "Error retrieving echo",
+                              echo_query_err_str(err));
+         return;
+     }
+@@ -261,6 +324,7 @@ static void route_get_echo_by_id(const http_request_t *req,
+     char *json_buf = cJSON_PrintUnformatted(root);
+ 
+     add_common_headers(res);
++    add_request_rate_limit_headers(res, req);
+     http_resp_status(res, 200);
+     http_resp_header(res, HEADER_CONTENT_TYPE,
+                      api_version == 1 ? VND_ECHOHUB_V1 : MIME_JSON);
+@@ -279,11 +343,12 @@ static void route_get_openapi(const http_request_t *req, http_response_t *res)
+     size_t len  = 0;
+     char  *doc  = openapi_render(want_yaml ? OPENAPI_YAML : OPENAPI_JSON, &len);
+     if (!doc) {
+-        write_error_response(res, 500, "Unable to render OpenAPI", NULL);
++        write_error_response(req, res, 500, "Unable to render OpenAPI", NULL);
+         return;
+     }
+ 
+     add_common_headers(res);
++    add_request_rate_limit_headers(res, req);
+     http_resp_status(res, 200);
+     http_resp_header(res, HEADER_CONTENT_TYPE,
+                      want_yaml ? "application/yaml" : MIME_JSON);
+@@ -294,8 +359,8 @@ static void route_get_openapi(const http_request_t *req, http_response_t *res)
+ /* OPTIONS * (CORS pre-flight) */
+ static void route_options(const http_request_t *req, http_response_t *res)
+ {
+-    (void)req;
+     add_common_headers(res);
++    add_request_rate_limit_headers(res, req);
+     http_resp_status(res, 204); /* No Content */
+ }
+ 
+@@ -376,6 +441,15 @@ bool http_handle_request(const http_request_t *req, http_response_t *res)
+ {
+     const char *method = http_req_method(req);
+     const char *path   = http_req_path(req);
++    char        client_ip[64];
++
++    const char *rate_limit_ip = client_ip_address(req, client_ip,
++                                                  sizeof client_ip);
++    if (is_rate_limited(rate_limit_ip)) {
++        write_error_response(req, res, 429, "Too Many Requests",
++                             "Rate limit exceeded");
++        return true;
++    }
+ 
+     /* Iterate routing table */
+     for (size_t i = 0; i < ARRAY_SIZE(g_routes); ++i) {
+@@ -399,7 +473,7 @@ bool http_handle_request(const http_request_t *req, http_response_t *res)
+     }
+ 
+     /* Fallback 404 */
+-    write_error_response(res, 404, "Unknown endpoint", path);
++    write_error_response(req, res, 404, "Unknown endpoint", path);
+     return true;
+ }
+ 
+diff --git a/UtiliREST_EchoHub/src/main.c b/UtiliREST_EchoHub/src/main.c
+index db100eb..e576eeb 100644
+--- a/UtiliREST_EchoHub/src/main.c
++++ b/UtiliREST_EchoHub/src/main.c
+@@ -21,7 +21,9 @@
+ #include <time.h>
+ 
+ #include <sqlite3.h>
++#include "in_memory_rate_storage.h"
+ #include "mongoose.h"   /* Single-header embedded web server */
++#include "rate_limiter.h"
+ 
+ #define DEFAULT_HTTP_PORT  "8000"
+ #define DEFAULT_DB_PATH    "echohub.db"
+@@ -269,9 +271,20 @@ int main(int argc, char *argv[])
+     app_ctx_t ctx = {0};
+     g_ctx = &ctx;
+ 
++    in_memory_rate_storage_t *rate_storage = in_memory_rate_storage_create();
++    if (!rate_storage) {
++        fprintf(stderr, "Failed to initialize rate limit storage\n");
++        return EXIT_FAILURE;
++    }
++    rate_limiter_storage_t rate_storage_interface =
++        in_memory_rate_storage_interface(rate_storage);
++    rate_limiter_init(&rate_storage_interface);
++
+     /* Open repository / database */
+     if (repo_open(&ctx.db, db_path) != 0) {
+         fprintf(stderr, "Failed to open database\n");
++        rate_limiter_cleanup();
++        in_memory_rate_storage_destroy(rate_storage);
+         return EXIT_FAILURE;
+     }
+ 
+@@ -285,6 +298,8 @@ int main(int argc, char *argv[])
+         fprintf(stderr, "Cannot listen on %s\n", listen_addr);
+         sqlite3_close(ctx.db);
+         mg_mgr_free(&ctx.mgr);
++        rate_limiter_cleanup();
++        in_memory_rate_storage_destroy(rate_storage);
+         return EXIT_FAILURE;
+     }
+ 
+@@ -302,6 +317,8 @@ int main(int argc, char *argv[])
+     printf("Shutting down...\n");
+     mg_mgr_free(&ctx.mgr);
+     sqlite3_close(ctx.db);
++    rate_limiter_cleanup();
++    in_memory_rate_storage_destroy(rate_storage);
+     return EXIT_SUCCESS;
+ }
+ ```
+\ No newline at end of file

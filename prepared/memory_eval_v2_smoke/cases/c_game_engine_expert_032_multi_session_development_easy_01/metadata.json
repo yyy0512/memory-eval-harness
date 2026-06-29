@@ -1,0 +1,58 @@
+{
+  "scenario_id": "c_game_engine_expert_032_multi_session_development_easy_01",
+  "case_id": "c_game_engine_expert_032",
+  "title": "Implement Level Load Analytics Event in Editor",
+  "description": "The product team for the CloudLedger Engine wants to gather basic usage metrics to understand user behavior within the level editor. The initial requirement is to track every time a user successfully loads a level. This requires integrating with the existing serverless analytics pipeline. The task is broken down into multiple sessions to simulate a typical development workflow of investigation followed by implementation.",
+  "difficulty": "easy",
+  "project_spec": {
+    "unique_id": "c_game_engine_expert_032",
+    "name": "CloudLedger Engine",
+    "description": "CloudLedger Engine is a serverless-native C game-engine platform designed for enterprise-grade interactive simulations, digital twins, and serious-game training products. While it delivers all the expected real-time features—physics, graphics rendering, AI behaviors, networking, scripting, and an extensible level editor—it is architected primarily to empower businesses to build, distribute, and monetize immersive training, sales-enablement, and data-visualization experiences without maintaining monolithic game servers.  \n\nThe engine decomposes traditional runtime responsibilities into stateless micro-services (written in C and compiled for AWS, Azure, or GCP serverless runtimes) that execute on-demand: collision resolution, authoritative state snapshots, analytics ingestion, licensing checks, and save-system persistence. A lightweight client runtime (SDL2 + WebAssembly build) streams resources from S3/Blob Storage, requests simulation ticks through API Gateway/Cloud Functions, and applies delta updates locally via an Entity-Component-System game loop. Because every subsystem—physics, AI, audio mixing, scripting, and input handling—implements publish/subscribe through an Observer Pattern and exposes command queues, teams can hot-patch logic, roll out new business courses, or A/B test UI flows in minutes. Combined with built-in telemetry, CloudLedger Engine turns what was once a pure entertainment toolchain into a scalable, pay-per-use business application platform.",
+    "domain": "game_engine",
+    "complexity": "expert",
+    "language": "c",
+    "architecture": "serverless",
+    "theme": "business",
+    "target_file_count": 81,
+    "target_token_count": 606667,
+    "features": [
+      "level_editor",
+      "physics_simulation",
+      "graphics_rendering",
+      "audio_system",
+      "scripting_system",
+      "ai_behavior",
+      "game_engine",
+      "save_system",
+      "input_handling",
+      "networking",
+      "resource_management"
+    ],
+    "architecture_patterns": [
+      "Object_Pool",
+      "Command_Pattern",
+      "Observer_Pattern",
+      "State_Machine",
+      "Entity_Component_System",
+      "Game_Loop"
+    ],
+    "dependencies": [
+      "AWS Lambda (C Runtime) / Azure Functions for C",
+      "AWS API Gateway / Azure API Management",
+      "AWS DynamoDB / Azure Cosmos DB (save_system, state_machine persistence)",
+      "Amazon S3 / Azure Blob Storage (resource_management, level assets)",
+      "Amazon EventBridge / Azure Event Grid (Observer_Pattern message bus)",
+      "AWS Step Functions / Durable Functions (command orchestration)",
+      "Bullet Physics SDK (physics_simulation)",
+      "SDL2 (cross-platform windowing, input_handling)",
+      "OpenGL ES via ANGLE / WebGL for graphics_rendering",
+      "OpenAL Soft (audio_system)",
+      "LuaJIT (embedded scripting_system)",
+      "ENet (reliable UDP networking)",
+      "cJSON / RapidJSON (state serialization)",
+      "Emscripten (WebAssembly build pipeline for browser delivery)",
+      "Terraform / AWS CDK (IaC for serverless deployment)"
+    ],
+    "seed": 787077
+  }
+}

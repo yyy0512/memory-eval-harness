@@ -1,0 +1,48 @@
+{
+  "scenario_id": "c_system_security_medium_064_multi_session_development_medium_01",
+  "case_id": "c_system_security_medium_064",
+  "title": "Implement Hot-Reloading of Configuration via SIGHUP Signal",
+  "description": "The SentinelLedger SecureOps Suite currently requires a full restart to apply any changes made to its configuration file. This leads to service downtime, which is unacceptable for a high-availability security tool. This task involves implementing a 'hot-reloading' mechanism that allows the running application to reload its configuration and apply changes on-the-fly when it receives a SIGHUP signal, without requiring a restart. This will be a multi-session task, starting with signal handling and progressively implementing the full logic.",
+  "difficulty": "medium",
+  "project_spec": {
+    "unique_id": "c_system_security_medium_064",
+    "name": "SentinelLedger SecureOps Suite",
+    "description": "SentinelLedger SecureOps Suite is a mid-sized, layered C application that provides enterprise-grade security services—load-balancing, log aggregation, backup/recovery, system monitoring, performance metrics, and configuration management—for line-of-business platforms that must comply with stringent audit and uptime requirements. The solution exposes a secured service mesh through which heterogeneous business services (ERP, invoicing, CRM micro-services, etc.) can register and obtain uniform security, telemetry, and disaster-recovery capabilities without rewriting their own code. By separating concerns into Presentation, Service, Domain, and Infrastructure layers and by weaving Chain of Responsibility, Strategy, Command, and Service Mesh patterns throughout, the project delivers modular, testable components that can be selectively reused or replaced as business policies evolve.\n\nWithin the layered stack, a lightweight gateway balances requests across pluggable strategy modules (round-robin, least-connections, geo-aware) while a command-driven scheduler orchestrates backups and recovery tasks according to configurable SLAs stored in the domain layer. A chain-of-responsibility pipeline normalizes and signs audit logs before forwarding them to an encrypted aggregation store, ensuring non-repudiation for financial regulators. Each layer publishes real-time metrics (CPU, TPS, error rate, backup window) to a Prometheus-compatible endpoint, enabling CFOs and IT managers to correlate performance with business cost centers. This single cohesive suite therefore positions IT security not as a cost but as a measurable business enabler.",
+    "domain": "system_security",
+    "complexity": "medium",
+    "language": "c",
+    "architecture": "layered",
+    "theme": "business",
+    "target_file_count": 21,
+    "target_token_count": 136669,
+    "features": [
+      "load_balancing",
+      "log_aggregation",
+      "backup_recovery",
+      "system_monitoring",
+      "performance_metrics",
+      "configuration_management"
+    ],
+    "architecture_patterns": [
+      "Chain_of_Responsibility",
+      "Strategy_Pattern",
+      "Command_Pattern",
+      "Service_Mesh"
+    ],
+    "dependencies": [
+      "OpenSSL (TLS, HMAC signing, envelope encryption)",
+      "libuv (event loop & asynchronous IO)",
+      "libcurl (HTTP/2 client for service mesh peer discovery)",
+      "cJSON (configuration management & service descriptors)",
+      "uthash (in-memory hash tables for routing tables and metrics caches)",
+      "systemd-journal-gateway (native log forwarding integration)",
+      "zlib (compressed log archival and backup payloads)",
+      "SQLite or PostgreSQL client (domain layer policy & SLA repository)",
+      "Prometheus C client library (exporting performance metrics)",
+      "libarchive (multi-format backup packaging)",
+      "ZeroMQ (service mesh messaging substrate)",
+      "Google Test for C (unit tests across layers)"
+    ],
+    "seed": 657721
+  }
+}

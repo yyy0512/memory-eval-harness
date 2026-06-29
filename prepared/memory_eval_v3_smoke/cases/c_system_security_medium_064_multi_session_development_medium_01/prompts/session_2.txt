@@ -1,0 +1,6 @@
+You are working in the repository at the current working directory. This is session 2 of a 4-session development task. The previous session has ended and conversation context is unavailable. Use the repository state and your persistent memory if available. Do not ask for previous conversation context. Complete only the requirements for this session. At the end, update memory with decisions and remaining work.
+
+Your overall goal is to implement configuration hot-reloading. We will build this feature incrementally over several sessions.
+
+**Session 2: Main Loop Integration**
+Building on your previous work, you will now integrate the signal flag into the application's main processing loop. Modify the main loop in `main.c` to periodically check for the reload request flag you created in Session 1. If the flag is set, the application should call a new function, `reload_configuration()`, and then reset the flag. You will need to create a stub for this `reload_configuration()` function in `src/core/config_loader.c` and declare it in a relevant header. The stub function should simply print a log message like `"Configuration reload triggered."` for now.

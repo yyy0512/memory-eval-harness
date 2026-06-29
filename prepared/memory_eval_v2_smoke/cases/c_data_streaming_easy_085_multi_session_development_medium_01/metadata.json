@@ -1,0 +1,42 @@
+{
+  "scenario_id": "c_data_streaming_easy_085_multi_session_development_medium_01",
+  "case_id": "c_data_streaming_easy_085",
+  "title": "Implement a Configurable Maintenance Window for EchoStream Connect",
+  "description": "EchoStream Connect is a C-based data streaming application that processes data in batches and streams. To allow for system maintenance and updates without data loss or corruption, the product team has requested a 'maintenance window' feature. During this configurable time window, all data ingestion and processing tasks should be paused. The task is divided into three sessions to simulate a realistic development workflow. Note: The provided file names with `.txt` extensions should be treated as their C source/header/documentation counterparts (e.g., `src/config.txt` is `src/config.c` or `src/config.h`, `echostream_connect/docs/files` is a markdown file like `docs/configuration.md`).",
+  "difficulty": "medium",
+  "project_spec": {
+    "unique_id": "c_data_streaming_easy_085",
+    "name": "EchoStream Connect",
+    "description": "EchoStream Connect is a lightweight C-based data-streaming platform tailored for community-driven applications such as local-event feeds, neighborhood alerts, or campus chatter boards. The system continuously ingests short social messages (\"echoes\") from multiple sources—mobile apps, web widgets, public IoT kiosks—and delivers them to interested users in real time. It also supports scheduled batch aggregation for daily digests, trend summaries, and archival into a shared data lake. \n\nFollowing Clean Architecture, the project cleanly separates high-level social use-cases (e.g., “Notify nearby friends when a campus-event is posted”) from lower-level technical concerns (TCP ingestion, file-based storage, visualization hooks). Core application rules operate only on plain C structs that represent domain entities such as Echo, User, and Channel. External details—stream transports, batch schedulers, storage engines, or visualization dashboards—are implemented as interchangeable adapters that hinge on Observer and Strategy patterns. This ensures that social behaviours can evolve (adding new reaction types, privacy scopes, or community algorithms) without rewriting the plumbing layers.",
+    "domain": "data_streaming",
+    "complexity": "easy",
+    "language": "c",
+    "architecture": "clean_architecture",
+    "theme": "social",
+    "target_file_count": 15,
+    "target_token_count": 17136,
+    "features": [
+      "batch_processing",
+      "stream_processing",
+      "data_ingestion",
+      "data_visualization",
+      "scheduling",
+      "data_storage"
+    ],
+    "architecture_patterns": [
+      "Observer_Pattern",
+      "Strategy_Pattern",
+      "Data_Lake"
+    ],
+    "dependencies": [
+      "libevent (event-loop for non-blocking IO)",
+      "jansson (lightweight JSON parsing/serializing)",
+      "sqlite3 (embedded relational store for quick prototyping of data lake zones)",
+      "cURL / libcurl (optional HTTP client for remote webhooks)",
+      "cjson_hooks (internal utility for domain <-> transport mapping)",
+      "CMake (cross-platform build orchestration)",
+      "cron-like system timer or librt (for batch-processing scheduler)"
+    ],
+    "seed": 929650
+  }
+}

@@ -1,0 +1,10 @@
+You are working in the repository at the current working directory. This is session 1 of a multi-session development task. Complete only the requirements for this session. At the end, save any useful project-specific memory for future sessions.
+
+You are tasked with implementing a new data enrichment feature in the EduStream Nexus platform. This is a multi-session task. You will be given sequential instructions. Stop after each session and wait for the next prompt.
+
+**Session 1: Scaffolding and Architecture**
+Your first task is to lay the groundwork for the new Data Enrichment feature. You must not implement the core logic yet.
+1.  Analyze the existing component architecture (`EduStreamNexus/src/core/component.h`, `EduStreamNexus/src/core/pipeline_manager.c`, `EduStreamNexus/docs/architecture/component_model.md`) to understand how new pipeline stages are added.
+2.  Define a new contract for enrichment components. Create the file `EduStreamNexus/include/edustream/contracts/enrichment.h`. This contract should define a standard interface for any enrichment component, including a primary function pointer for processing an event (e.g., `enrich_event_func`).
+3.  Create the skeleton files for a Redis-based enricher: `EduStreamNexus/src/components/enrichment/redis_enricher.h` and `EduStreamNexus/src/components/enrichment/redis_enricher.c`. The implementation should include stubs for the standard component lifecycle functions (create, init, process, destroy) but leave the core processing logic empty. Ensure it conforms to the component model.
+4.  Modify the build system (`EduStreamNexus/CMakeLists.txt` and `EduStreamNexus/tests/CMakeLists.txt`) to include these new files. Ensure the project still compiles successfully, even with the empty implementation.

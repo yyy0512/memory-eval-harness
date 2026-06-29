@@ -1,0 +1,54 @@
+{
+  "scenario_id": "cpp_api_gateway_hard_009_multi_session_development_medium_01",
+  "case_id": "cpp_api_gateway_hard_009",
+  "title": "Implement Request Tracing Middleware with Configuration",
+  "description": "ScholarGate Nexus is a high-performance C++ API gateway for a university's academic services. To improve observability and debugging capabilities, the engineering team wants to introduce request tracing. The first step is to implement a middleware that assigns a unique Trace ID to every incoming request, logs the request lifecycle, and adds the ID to the response headers. This feature must be configurable and disabled by default to allow for a phased rollout.",
+  "difficulty": "medium",
+  "project_spec": {
+    "unique_id": "cpp_api_gateway_hard_009",
+    "name": "ScholarGate Nexus",
+    "description": "ScholarGate Nexus is a high-performance C++ API Gateway crafted specifically for large-scale education platforms that need to aggregate, secure, and orchestrate dozens of micro-services—such as student records, curriculum content, assessment engines, and real-time classroom analytics—behind a single programmable entry point. Built with a rigorous component-based architecture, each concern (authentication, rate limiting, version negotiation, monitoring, caching, etc.) is encapsulated in an independent, hot-swappable module that can be reused across different academic deployments (K-12, higher-ed, certification providers). \n\nThe gateway exposes both REST endpoints and a GraphQL schema so that Learning Management Systems (LMS), adaptive-learning apps, and analytics dashboards can query unified data models—courses, lessons, quizzes, badges—while respecting strict FERPA/GDPR requirements through centralized policy enforcement. Features such as response caching, fine-grained rate limiting, automatic pagination, and multi-tenant versioning deliver predictable latency even during peak enrollment periods (e.g., semester starts or MOOC livestreams). Comprehensive structured logging, Prometheus-based monitoring, and detailed error surfaces empower DevOps and instructional technologists to observe learner traffic patterns and optimize educational content delivery in real time.",
+    "domain": "api_gateway",
+    "complexity": "hard",
+    "language": "cpp",
+    "architecture": "component_based",
+    "theme": "education",
+    "target_file_count": 54,
+    "target_token_count": 335912,
+    "features": [
+      "monitoring",
+      "response_caching",
+      "rate_limiting",
+      "rest_endpoints",
+      "versioning",
+      "logging",
+      "error_handling",
+      "graphql_schema",
+      "pagination",
+      "authentication"
+    ],
+    "architecture_patterns": [
+      "API_Gateway",
+      "Command_Query_Separation",
+      "Repository_Pattern",
+      "Service_Layer",
+      "REST_Architecture",
+      "GraphQL_Schema"
+    ],
+    "dependencies": [
+      "Boost.Beast (HTTP/WS server & client)",
+      "Boost.Asio (high-performance async I/O)",
+      "nlohmann/json (JSON serialization)",
+      "graphqlparser + cppgraphqlgen (GraphQL runtime)",
+      "spdlog (structured logging)",
+      "prometheus-cpp (metrics exposition)",
+      "jwt-cpp (JWT/OAuth2 authentication)",
+      "CacheLib (response caching layer)",
+      "libpqxx or SQLiteCpp (repository persistence adapters)",
+      "cpp-httplib (internal service proxy for REST fan-out)",
+      "GoogleTest / Catch2 (unit testing)",
+      "CMake + Conan (build & dependency management)"
+    ],
+    "seed": 456362
+  }
+}

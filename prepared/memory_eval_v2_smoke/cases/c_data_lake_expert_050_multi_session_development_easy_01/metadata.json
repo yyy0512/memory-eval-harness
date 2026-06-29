@@ -1,0 +1,55 @@
+{
+  "scenario_id": "c_data_lake_expert_050_multi_session_development_easy_01",
+  "case_id": "c_data_lake_expert_050",
+  "title": "Implement a Dry-Run Mode for Data Ingestion Pipelines",
+  "description": "The HermesHEAL platform processes large batches of sensitive healthcare data. Operators and data engineers need a way to validate pipeline configurations and preview the ingestion process without actually executing the resource-intensive and data-altering steps. This task involves introducing a '--dry-run' command-line flag that will simulate a pipeline run, printing informational messages about the steps that would be taken.",
+  "difficulty": "easy",
+  "project_spec": {
+    "unique_id": "c_data_lake_expert_050",
+    "name": "HermesHEAL Unified Healthcare Data Lake Platform",
+    "description": "HermesHEAL is an expert-level monolithic C application that consolidates hospital, laboratory, wearable, imaging and pharmacy feeds into a single, regulation-compliant data lake. At its core it implements a high-throughput ETL pipeline that performs real-time data_ingestion from HL7/FHIR streams and nightly batch_processing of EHR extracts. Integrated data_validation, data_quality_checks, error_recovery and data_transformation stages normalize disparate clinical vocabularies (LOINC, SNOMED-CT, ICD-10) and de-identify PHI in compliance with HIPAA. Parallel_processing is achieved with a custom thread-pool and lock-free ring buffers that power stream_processing of telemetry such as ICU vitals, while a scheduler orchestrates long-running genomics loads and retrospective analytics jobs.\n\nA built-in observer-based monitoring subsystem continuously audits ingest latency, transformation accuracy and storage capacity, emitting events to an internal Event_Streaming bus used by the Strategy_Pattern-driven alert engine to trigger automated remediation workflows (e.g., rollback corrupted batches or re-hydrate cold storage). The monolith offers a unified CLI, REST façade and embedded data_visualization dashboards so clinical researchers can explore longitudinal patient cohorts without context-switching across services. By combining Data_Lake, Pipeline_Pattern and ETL_Pipeline concepts inside a single deployable artifact, HermesHEAL eliminates cross-service network hops—crucial for low-latency clinical decision support and strict on-premise deployment policies common in healthcare institutions.",
+    "domain": "data_lake",
+    "complexity": "expert",
+    "language": "c",
+    "architecture": "monolithic",
+    "theme": "healthcare",
+    "target_file_count": 96,
+    "target_token_count": 904718,
+    "features": [
+      "error_recovery",
+      "data_storage",
+      "monitoring",
+      "scheduling",
+      "batch_processing",
+      "stream_processing",
+      "data_transformation",
+      "data_ingestion",
+      "data_validation",
+      "data_visualization",
+      "parallel_processing",
+      "data_quality_checks"
+    ],
+    "architecture_patterns": [
+      "ETL_Pipeline",
+      "Data_Lake",
+      "Pipeline_Pattern",
+      "Strategy_Pattern",
+      "Microservices",
+      "Observer_Pattern",
+      "Event_Streaming"
+    ],
+    "dependencies": [
+      "libpq (PostgreSQL client) – metadata, audit and configuration storage",
+      "Apache Arrow C library – in-memory columnar data representation for fast transformations",
+      "Apache Parquet C++ (linked via C FFI) – efficient columnar file storage inside the lake",
+      "libhv – lightweight HTTP/REST server for admin APIs and visualization feed",
+      "cJSON – fast JSON parsing/serialization for HL7/FHIR payloads",
+      "libevent – high-performance event loop supporting stream_processing and scheduling",
+      "OpenSSL – encrypted data-at-rest and in-transit, TLS termination",
+      "Prometheus C client – time-series metrics export for monitoring",
+      "SQLite – embedded config & local queue persistence for error_recovery buffers",
+      "zstd – compression for cold archival tiers"
+    ],
+    "seed": 329322
+  }
+}

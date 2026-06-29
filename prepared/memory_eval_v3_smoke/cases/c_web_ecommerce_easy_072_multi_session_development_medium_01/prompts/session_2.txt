@@ -1,0 +1,10 @@
+You are working in the repository at the current working directory. This is session 2 of a 3-session development task. The previous session has ended and conversation context is unavailable. Use the repository state and your persistent memory if available. Do not ask for previous conversation context. Complete only the requirements for this session. At the end, update memory with decisions and remaining work.
+
+We need to add support for discount codes to our LambdaCommerce Lite platform. This will be a multi-part task. Please follow these implementation steps in order:
+
+**Part 2: Integrate into Order Service**
+Now, modify the existing order service to apply these discounts.
+- In `src/services/order_service.c`, update the primary function that calculates an order's total price (assume a function like `create_order` or `calculate_order_total` exists).
+- This function should now accept a `discount_code` string as a parameter.
+- Inside the function, use the `get_discount_by_code` function you created. If a valid and active discount code is found, apply the percentage discount to the order's final price. 
+- If the code is invalid or inactive, the price should remain unchanged. Ensure no errors occur.

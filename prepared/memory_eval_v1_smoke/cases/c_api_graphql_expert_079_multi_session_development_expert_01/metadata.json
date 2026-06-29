@@ -1,0 +1,58 @@
+{
+  "scenario_id": "c_api_graphql_expert_079_multi_session_development_expert_01",
+  "case_id": "c_api_graphql_expert_079",
+  "title": "Implement Distributed Tracing for Inter-Service Communication",
+  "description": "The SynestheticCanvas API suite is a complex microservices-based system written in C. As the system scales, debugging requests that traverse multiple services (API Gateway -> backend service) becomes increasingly difficult. To improve observability, a distributed tracing mechanism is required. This involves generating a unique identifier at the start of a request (in the API Gateway) and propagating it through all subsequent Inter-Process Communication (IPC) calls. This 'Trace ID' must then be included in all structured log messages, creating a clear, connected trail for each user request.",
+  "difficulty": "expert",
+  "project_spec": {
+    "unique_id": "c_api_graphql_expert_079",
+    "name": "SynestheticCanvas API Suite",
+    "description": "SynestheticCanvas is an expert-level C microservice constellation that lets digital-art platforms blend data and media in real time through a single, color-coded GraphQL/REST gateway. Every endpoint is treated as a \"brush stroke\" that composers, illustrators, video artists, and interactive-fiction engines can combine to generate living canvases—an ever-evolving artwork that adapts to user input, sensor streams, or AI-generated prompts. \n\nThe system is entirely component-based: each creative capability (palette management, dynamic texture synthesis, audio-reactive animation, narrative branching) is a standalone service communicating through a central API gateway that exposes both GraphQL schemas and REST fallbacks. Versioned schemas, request validators, and repository adapters snap together like LEGO bricks, allowing studios to introduce new art forms or retire outdated ones without touching unrelated modules. Comprehensive logging, monitoring, rate-limiting, and response caching ensure that live exhibitions can scale from a single indie gallery to a global online festival while preserving millisecond-level responsiveness.",
+    "domain": "api_graphql",
+    "complexity": "expert",
+    "language": "c",
+    "architecture": "component_based",
+    "theme": "creative",
+    "target_file_count": 99,
+    "target_token_count": 507383,
+    "features": [
+      "versioning",
+      "logging",
+      "pagination",
+      "monitoring",
+      "request_validation",
+      "authentication",
+      "rate_limiting",
+      "error_handling",
+      "graphql_schema",
+      "api_documentation",
+      "response_caching",
+      "rest_endpoints"
+    ],
+    "architecture_patterns": [
+      "Microservices",
+      "Repository_Pattern",
+      "GraphQL_Schema",
+      "API_Gateway",
+      "Service_Layer",
+      "REST_Architecture",
+      "Command_Query_Separation"
+    ],
+    "dependencies": [
+      "libgraphqlparser (GraphQL parsing/validation in C)",
+      "cJSON or parson (lightweight JSON serialization/deserialization)",
+      "libcurl (HTTP client/server utilities for REST fallbacks and service-to-service calls)",
+      "libmicrohttpd or civetweb (embedded HTTP/HTTPS servers for each microservice)",
+      "jansson (high-performance JSON with schema support for request_validation)",
+      "libuv (asynchronous I/O and event loop for non-blocking microservices)",
+      "OpenTracing + Jaeger C client (distributed tracing & monitoring)",
+      "Prometheus C client library (metrics/monitoring endpoints)",
+      "SQLite/SQLite-mod-spatialite + PostgreSQL libpq (pluggable repositories via Repository_Pattern)",
+      "Redis (response_caching & rate_limiting token buckets)",
+      "OpenSSL or mbedTLS (TLS termination & JWT-based authentication)",
+      "Apache Thrift or gRPC-C (optional high-performance service-to-service RPC)",
+      "Docson + GraphiQL static assets (auto-generated api_documentation explorer)"
+    ],
+    "seed": 913604
+  }
+}

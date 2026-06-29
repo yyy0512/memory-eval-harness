@@ -1,0 +1,40 @@
+{
+  "scenario_id": "c_fintech_banking_easy_031_multi_session_development_hard_01",
+  "case_id": "c_fintech_banking_easy_031",
+  "title": "Implement End-of-Day Settlement Batching System over Multiple Sessions",
+  "description": "The ChromaticLedger system currently processes and settles transactions individually as they occur. To improve efficiency and reduce network overhead, the business requires a new end-of-day (EOD) batch settlement feature. This task involves designing, implementing, and integrating a new settlement module that collects transactions into a batch and processes them upon a specific trigger. The work will be performed over three distinct development sessions, requiring the agent to maintain context and build upon previous work.",
+  "difficulty": "hard",
+  "project_spec": {
+    "unique_id": "c_fintech_banking_easy_031",
+    "name": "ChromaticLedger",
+    "description": "ChromaticLedger weaves everyday banking operations into a \"color-coded\" narrative: each currency, transaction type, and risk class is represented as a hue. Users and demo-visualizers can literally *see* money flow through a spectrum dashboard—blue streams for EUR salary deposits, amber flashes for cross-border FX swaps, red pulses when the fraud-detection engine flags anomalies. Under the hood, a constellation of lightweight C microservices—each named after a color channel—collaborate through an event bus, composing a living, breathing financial kaleidoscope.\n\nDesigned for hackathons and teaching labs, the project keeps scope intentionally small (10 source files) while still showcasing serious fintech patterns: a Payment Prism service does multi-currency conversions, a Fraud Hue engine applies rule-based filtering, and a Settlement Canvas reconciles event streams into an immutable ledger. Every event—from a tap-to-pay request to a final settlement confirmation—is stored as a color-tagged entry, letting educators replay or remix financial journeys the same way DJs remix tracks.",
+    "domain": "fintech_banking",
+    "complexity": "easy",
+    "language": "c",
+    "architecture": "microservices",
+    "theme": "creative",
+    "target_file_count": 10,
+    "target_token_count": 38047,
+    "features": [
+      "fraud_detection",
+      "multi_currency",
+      "payment_processing",
+      "encryption",
+      "settlement"
+    ],
+    "architecture_patterns": [
+      "Audit_Trail",
+      "Event_Sourcing",
+      "Security_by_Design"
+    ],
+    "dependencies": [
+      "gRPC-C (for service-to-service RPC)",
+      "librdkafka (Kafka C client for event sourcing bus)",
+      "OpenSSL (AES-256 + ECC encryption primitives)",
+      "SQLite3 (embedded audit & demo data store)",
+      "cJSON (lightweight JSON serialisation)",
+      "zlog (structured colour-coded logging)"
+    ],
+    "seed": 735530
+  }
+}

@@ -1,0 +1,47 @@
+{
+  "scenario_id": "c_fintech_payment_medium_029_multi_session_development_expert_01",
+  "case_id": "c_fintech_payment_medium_029",
+  "title": "Implement Conditional Settlement Holds for Medium-Risk Transactions",
+  "description": "The PayCircle Connect risk management team requires more granular control over transaction processing. Currently, the fraud detection service provides a binary outcome (approve/reject). This task introduces a third state for medium-risk transactions. Transactions flagged with `MEDIUM_RISK` by the `fraud_detection_service` should not be immediately settled or rejected. Instead, they must be placed in a new `PENDING_MANUAL_REVIEW` state. Subsequently, a new administrative API must be created to allow an operator to manually approve or reject these held transactions. This feature will be implemented incrementally over three development sessions.",
+  "difficulty": "expert",
+  "project_spec": {
+    "unique_id": "c_fintech_payment_medium_029",
+    "name": "PayCircle Connect",
+    "description": "PayCircle Connect is a medium-scale fintech payment platform designed as a social-first money orbit where users form private ‘circles’ to pool, pay, lend, and settle funds together. Every function— from real-time multi-currency chat-payments to group-settlement challenges — is exposed through narrowly scoped C components running as independent micro-processes, enabling community-centric workflows such as shared KYC onboarding for clubs, co-operative fraud flagging, and crowd-auditable settlement trails.\n\nBuilt around a rigorously component_based architecture, each capability (Audit Trail, KYC Verification, Fraud Detection, Encryption Gateway, Currency Router, Settlement Engine, etc.) is packaged as a plug-in shared library with a minimal C ABI and surfaced through gRPC gateways. Social constructs (circles, peer reputation scores, group spending limits) are persisted via CQRS, letting read-optimized community dashboards and write-secured payment flows scale independently. Audit logs stream in real-time to a public immutable ledger so circle members can socially validate every action, reinforcing trust while satisfying stringent regulatory_compliance requirements.\n",
+    "domain": "fintech_payment",
+    "complexity": "medium",
+    "language": "c",
+    "architecture": "component_based",
+    "theme": "social",
+    "target_file_count": 32,
+    "target_token_count": 124988,
+    "features": [
+      "audit_logging",
+      "kyc_verification",
+      "fraud_detection",
+      "settlement",
+      "multi_currency",
+      "encryption",
+      "regulatory_compliance"
+    ],
+    "architecture_patterns": [
+      "Audit_Trail",
+      "Microservices",
+      "Security_by_Design",
+      "CQRS"
+    ],
+    "dependencies": [
+      "glib >= 2.68 (event loop, data structures for component isolation)",
+      "protobuf-c >= 1.4 (gRPC/Protobuf interfaces between C microservices)",
+      "libcurl >= 7.79 (external KYC/Fraud API calls)",
+      "OpenSSL >= 3.0 (AES-GCM encryption, TLS everywhere)",
+      "sqlite3 >= 3.37 (lightweight CQRS command store per microservice)",
+      "json-c >= 0.16 (configuration & audit log serialization)",
+      "ZeroMQ >= 4.3 (high-throughput intra-cluster message bus)",
+      "uthash/utlist (in-memory multi-currency ledger tables)",
+      "jansson (regulatory reporting JSON pipelines)",
+      "libmnl + nftnl (optional kernel-level packet tagging for fraud heuristics)"
+    ],
+    "seed": 495353
+  }
+}

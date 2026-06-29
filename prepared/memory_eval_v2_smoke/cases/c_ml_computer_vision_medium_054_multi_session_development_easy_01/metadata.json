@@ -1,0 +1,48 @@
+{
+  "scenario_id": "c_ml_computer_vision_medium_054_multi_session_development_easy_01",
+  "case_id": "c_ml_computer_vision_medium_054",
+  "title": "Implement Configurable Image Resizing Interpolation",
+  "description": "The PixUtility Vision Stack currently uses a hardcoded interpolation method (Bilinear) for all image resizing operations during data preprocessing. This task requires you to make this behavior configurable. You will introduce a new setting in the configuration file, update the core image processing logic to use this setting, and finally, expose it as a command-line flag to override the configuration for specific runs. This task will require modifications across the configuration, core library, and command-line interface, testing your ability to trace data flow and functionality through the C codebase over multiple development sessions.",
+  "difficulty": "easy",
+  "project_spec": {
+    "unique_id": "c_ml_computer_vision_medium_054",
+    "name": "PixUtility Vision Stack",
+    "description": "PixUtility Vision Stack is a medium-scale, C-based computer-vision utility that exposes a Swiss-army-knife collection of visual analysis tools (resize, denoise, detect, classify, annotate) through a single CLI, a lightweight REST/gRPC micro-service, and a shared library.  Where typical vision projects concentrate on a single model or task, PixUtility is purposely built as a **general-purpose system utility** that sys-admins, DevOps engineers, and other applications can script or embed in larger pipelines. \n\nThe codebase is organized as a strict **layered architecture**: (1) an I/O layer for image/video ingestion supporting files, stdin/stdout, and RTSP streams; (2) a preprocessing & feature-engineering layer that standardises colour spaces, crops, augments, and extracts domain-agnostic features; (3) a model layer hosting multiple ONNX/TFLite models with Factory-Pattern instantiation and Model-Registry versioning; (4) a service layer exposing gRPC/REST endpoints with Observer hooks for experiment tracking and model monitoring; and (5) a utility CLI layer offering Unix-style sub-commands (`pixutil detect`, `pixutil eval`, `pixutil tune`).  Integrated experiment tracking, automated hyper-parameter sweeps, and continuous model monitoring make the toolkit production-ready while maintaining the light footprint expected from a C utility.",
+    "domain": "ml_computer_vision",
+    "complexity": "medium",
+    "language": "c",
+    "architecture": "layered",
+    "theme": "utility",
+    "target_file_count": 19,
+    "target_token_count": 164545,
+    "features": [
+      "model_versioning",
+      "feature_engineering",
+      "data_preprocessing",
+      "model_serving",
+      "model_evaluation",
+      "experiment_tracking",
+      "hyperparameter_tuning",
+      "model_monitoring"
+    ],
+    "architecture_patterns": [
+      "Model_Registry",
+      "Factory_Pattern",
+      "MLOps_Architecture",
+      "Observer_Pattern"
+    ],
+    "dependencies": [
+      "OpenCV (core, imgproc, dnn)",
+      "ONNX Runtime C API",
+      "protobuf + gRPC-C",
+      "SQLite3 (local Model_Registry & experiment DB)",
+      "libcurl (remote artifact fetching)",
+      "cJSON (config and experiment manifests)",
+      "ZeroMQ (Observer pattern event bus)",
+      "CBLAS / OpenBLAS (optional optimized math)",
+      "CMake (build orchestration)",
+      "pkg-config (layered dependency resolution)"
+    ],
+    "seed": 370217
+  }
+}

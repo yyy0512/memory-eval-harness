@@ -1,0 +1,55 @@
+{
+  "scenario_id": "c_desktop_productivity_expert_091_multi_session_development_expert_01",
+  "case_id": "c_desktop_productivity_expert_091",
+  "title": "Implement a Global Undo/Redo System for ShowRunner Studio",
+  "description": "ShowRunner Studio is a feature-rich desktop application for managing live productions. A critical missing feature, frequently requested by users, is a robust Undo/Redo capability. Accidental changes to the Sceneboard or Scriptpad can be destructive and disrupt workflow. This task involves architecting and implementing a global, stack-based Undo/Redo system that can be incrementally adopted by various plugins. The implementation will be done over multiple development sessions, starting with the core framework and then integrating it into a specific plugin.",
+  "difficulty": "expert",
+  "project_spec": {
+    "unique_id": "c_desktop_productivity_expert_091",
+    "name": "ShowRunner Studio",
+    "description": "ShowRunner Studio is an expert-level, microservice-driven desktop productivity suite that helps streamers, podcasters, game casters, and live-show producers plan, script, cue, and live-switch all facets of an entertainment broadcast from a single multi-window workspace.  Each workspace pane (ScriptPad, SceneBoard, AssetVault, HotKeyDeck, and LiveTimeline) is a separate micro-frontend talking to dedicated back-end services over an event bus, allowing producers to juggle cues, trigger soundboards, reorder scenes, and manage on-the-fly audience interactions without interrupting the live flow.\n\nThe platform ships with an extensible plug-in store where third-party developers can drop specialized show gadgets—like adaptive lighting controllers or real-time meme generators—into the runtime without recompiling the core.  A command-pattern action layer, fed through an event-driven state machine, guarantees that every cut, fade, and media swap is undoable and scriptable, while the built-in crash-reporting and auto-update services keep the high-pressure production environment stable and current.",
+    "domain": "desktop_productivity",
+    "complexity": "expert",
+    "language": "c",
+    "architecture": "microservices",
+    "theme": "entertainment",
+    "target_file_count": 85,
+    "target_token_count": 594166,
+    "features": [
+      "auto_updates",
+      "multi_window",
+      "settings_configuration",
+      "file_management",
+      "crash_reporting",
+      "plugin_system",
+      "keyboard_shortcuts",
+      "drag_drop",
+      "themes",
+      "user_preferences",
+      "gui_interface"
+    ],
+    "architecture_patterns": [
+      "Event_Driven",
+      "Command_Pattern",
+      "MVC",
+      "Plugin_Architecture",
+      "MVVM",
+      "State_Machine",
+      "Observer_Pattern"
+    ],
+    "dependencies": [
+      "GTK4 / libadwaita – native multi-window GUI",
+      "gRPC-C – high-performance inter-service RPC",
+      "ZeroMQ – low-latency event bus for real-time cue routing",
+      "SQLite + libsqlcipher – encrypted local project storage",
+      "jansson – lightweight JSON serialization for settings and plugins",
+      "libcurl – auto-update downloads and crash-report uploads",
+      "libuv – cross-platform async I/O foundation",
+      "CMocka – unit-testing framework for plug-in CI",
+      "CEF (Chromium Embedded Framework) – optional web-rendered overlays",
+      "libarchive – drag-drop project import/export",
+      "OpenSSL – secure plug-in signing and update verification"
+    ],
+    "seed": 646132
+  }
+}

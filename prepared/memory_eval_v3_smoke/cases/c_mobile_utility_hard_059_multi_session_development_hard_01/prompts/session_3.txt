@@ -1,0 +1,10 @@
+You are working in the repository at the current working directory. This is session 3 of a 3-session development task. The previous session has ended and conversation context is unavailable. Use the repository state and your persistent memory if available. Do not ask for previous conversation context. Complete only the requirements for this session. At the end, update memory with decisions and remaining work.
+
+Your overall goal is to implement the 'Check-in Quest' feature. We will build this incrementally.
+
+**Session 3: Camera Integration and Finalization**
+Now, let's integrate the camera and complete the workflow.
+1. Continuing in `bq_task_runner_viewmodel.c`, if the location check from Session 2 passes, you must now invoke the camera component (`cam_component`).
+2. Use the camera component to allow the user to take a picture. This process is asynchronous; you will need to handle the callback or message that provides the file path of the captured image.
+3. Once you receive the image path, store it in the `bq_task_t` model instance using the field you created in Session 1. Ensure you manage memory for the string path correctly using the project's memory utilities (`bq_memory.h`).
+4. Only after the photo path is successfully stored should you proceed with the original logic to mark the task as complete and save it via the repository.

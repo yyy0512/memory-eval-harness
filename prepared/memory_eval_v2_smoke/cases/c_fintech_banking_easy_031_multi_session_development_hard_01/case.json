@@ -1,0 +1,47 @@
+{
+  "scenario_id": "c_fintech_banking_easy_031_multi_session_development_hard_01",
+  "case_id": "c_fintech_banking_easy_031",
+  "category": "extended_development_projects",
+  "original_task_category": "multi_session_development",
+  "project_source": "/home/yyy/projects/LoCoBench-Agent/.claude/worktrees/memory-eval-harness/data/generated/c_fintech_banking_easy_031",
+  "project_name": "ChromaticLedger",
+  "language": "c",
+  "complexity": "easy",
+  "session_count": 3,
+  "turns": [
+    {
+      "session": 1,
+      "file": "turns/session_1.jsonl",
+      "turn_count": 1
+    },
+    {
+      "session": 2,
+      "file": "turns/session_2.jsonl",
+      "turn_count": 1
+    },
+    {
+      "session": 3,
+      "file": "turns/session_3.jsonl",
+      "turn_count": 1
+    }
+  ],
+  "prompts_for_review": [
+    {
+      "session": 1,
+      "file": "prompts/session_1.txt"
+    },
+    {
+      "session": 2,
+      "file": "prompts/session_2.txt"
+    },
+    {
+      "session": 3,
+      "file": "prompts/session_3.txt"
+    }
+  ],
+  "hashes": {
+    "scenario_json_sha256": "dd3ea0b7b61a52f1807dcd00edf71bf4940e57de625673b637f79c7d3eeac735",
+    "project_tree_sha256": "f625ebf690b4d11ed282803c1d4683c1dbb0ceaa09df8c893ad3eb34744dcf1a",
+    "prepared_case_sha256": "9b4488f451b44b2d252841278731ebff2abb6c5560ed14d48cff1620fc4d62d0"
+  }
+}

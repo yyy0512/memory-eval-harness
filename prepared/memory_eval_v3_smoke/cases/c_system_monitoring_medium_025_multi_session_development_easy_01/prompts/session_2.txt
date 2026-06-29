@@ -1,0 +1,8 @@
+You are working in the repository at the current working directory. This is session 2 of a 3-session development task. The previous session has ended and conversation context is unavailable. Use the repository state and your persistent memory if available. Do not ask for previous conversation context. Complete only the requirements for this session. At the end, update memory with decisions and remaining work.
+
+You will be guided through a multi-session development task. Each session builds upon the previous one.
+
+**Session 2: Populate the New Field**
+Welcome back. In the previous session, you added the `memory_type` field. Now, you need to populate it at the source.
+
+*Action:* Modify the `src/infrastructure/collectors/memory_collector.c` file. Find where the memory metric is created and populated. For the purpose of this task, you should hardcode the `memory_type` field to the string "Physical". Ensure this new field is correctly set before the metric is dispatched.

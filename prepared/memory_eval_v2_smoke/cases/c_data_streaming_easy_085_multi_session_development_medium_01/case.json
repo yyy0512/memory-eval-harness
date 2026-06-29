@@ -1,0 +1,47 @@
+{
+  "scenario_id": "c_data_streaming_easy_085_multi_session_development_medium_01",
+  "case_id": "c_data_streaming_easy_085",
+  "category": "extended_development_projects",
+  "original_task_category": "multi_session_development",
+  "project_source": "/home/yyy/projects/LoCoBench-Agent/.claude/worktrees/memory-eval-harness/data/generated/c_data_streaming_easy_085",
+  "project_name": "EchoStream Connect",
+  "language": "c",
+  "complexity": "easy",
+  "session_count": 3,
+  "turns": [
+    {
+      "session": 1,
+      "file": "turns/session_1.jsonl",
+      "turn_count": 1
+    },
+    {
+      "session": 2,
+      "file": "turns/session_2.jsonl",
+      "turn_count": 1
+    },
+    {
+      "session": 3,
+      "file": "turns/session_3.jsonl",
+      "turn_count": 1
+    }
+  ],
+  "prompts_for_review": [
+    {
+      "session": 1,
+      "file": "prompts/session_1.txt"
+    },
+    {
+      "session": 2,
+      "file": "prompts/session_2.txt"
+    },
+    {
+      "session": 3,
+      "file": "prompts/session_3.txt"
+    }
+  ],
+  "hashes": {
+    "scenario_json_sha256": "a906b4bcac74e6a585d44e6a86973255b45f4c3ea4e6e129abf8eaf805a8ac44",
+    "project_tree_sha256": "6ff0fad1ba5e8aa004fb420b1e9e48ef78d7cf7624cf43e122e01659243fd6de",
+    "prepared_case_sha256": "abf10ccd4c8fd326ea9cffd28eb6775d9a6fbb465c5416256b532d2a41385e05"
+  }
+}

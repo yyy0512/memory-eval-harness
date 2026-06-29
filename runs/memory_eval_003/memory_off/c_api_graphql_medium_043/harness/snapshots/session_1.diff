@@ -1,0 +1,452 @@
+diff --git a/pulsestream_showtime_api/src/api/websocket_handler.c b/pulsestream_showtime_api/src/api/websocket_handler.c
+index 02bfd1e..5c31bfd 100644
+--- a/pulsestream_showtime_api/src/api/websocket_handler.c
++++ b/pulsestream_showtime_api/src/api/websocket_handler.c
+@@ -20,6 +20,7 @@
+ #include <stdlib.h>
+ #include <string.h>
+ #include <stdint.h>
++#include <stdbool.h>
+ #include <inttypes.h>
+ #include <pthread.h>
+ #include <signal.h>
+@@ -27,6 +28,9 @@
+ #include <errno.h>
+ 
+ #include <libwebsockets.h>
++#include <jansson.h>
++
++#include "uthash.h"
+ 
+ #include "logger.h"         /* Project-internal structured logging API      */
+ #include "jwt.h"            /* Small wrapper around libjwt                  */
+@@ -45,14 +49,94 @@
+ #define WS_RING_BUFFER_COUNT        256          /* outbound message backlog   */
+ #define RATE_LIMIT_DEFAULT_MSGS     50           /* msgs / 10s                */
+ #define RATE_LIMIT_DEFAULT_WINDOW_S 10
++#define WS_SUBSCRIPTION_ID_MAX      128
+ 
+ #define LWS_TO_PSTREAM(conn)  ((pstream_ws_client_t *)lws_wsi_user(conn))
+ 
+ /* ────────────────────────────────────────────────────────────────────────── */
+ 
+ /*
+- * Per-connection data
++ * Minimal GraphQL parser public surface used to classify WebSocket messages.
++ * The parser implementation lives in src/core/graphql_parser.c; a dedicated
++ * header can replace these declarations when the parser API is formalized.
++ */
++typedef enum {
++    GQL_VALUE_NULL,
++    GQL_VALUE_INT,
++    GQL_VALUE_STRING,
++    GQL_VALUE_BOOL,
++    GQL_VALUE_VARIABLE
++} gql_value_kind_t;
++
++typedef struct {
++    gql_value_kind_t kind;
++    union {
++        int64_t   int_v;
++        bool      bool_v;
++        char     *str_v;
++        char     *var_v;
++    };
++} gql_value_t;
++
++typedef struct gql_argument {
++    char       *name;
++    gql_value_t value;
++} gql_argument_t;
++
++typedef struct gql_field gql_field_t;
++
++struct gql_field {
++    char            *name;
++    gql_argument_t  *args;
++    size_t           arg_cnt;
++    gql_field_t     *children;
++    size_t           child_cnt;
++};
++
++typedef enum {
++    GQL_OP_QUERY,
++    GQL_OP_MUTATION,
++    GQL_OP_SUBSCRIPTION
++} gql_operation_kind_t;
++
++typedef struct {
++    gql_operation_kind_t kind;
++    char                *name;
++    gql_field_t         *selection_set;
++    size_t               selection_cnt;
++} gql_operation_t;
++
++typedef struct {
++    gql_operation_t *operations;
++    size_t           op_cnt;
++} gql_document_t;
++
++int graphql_parse_document(const char *src,
++                           gql_document_t *out,
++                           char *errbuf,
++                           size_t errcap);
++void graphql_free_document(gql_document_t *doc);
++
++/* ────────────────────────────────────────────────────────────────────────── */
++
++/*
++ * Subscription registry entry. Each active WebSocket subscription is keyed by
++ * the client connection pointer plus the GraphQL WS message id.
+  */
++typedef struct pstream_ws_subscription {
++    char                 key[WS_SUBSCRIPTION_ID_MAX + 32];
++    char                 id[WS_SUBSCRIPTION_ID_MAX];
++    struct lws          *wsi;
++    uint64_t             user_id;
++    gql_document_t       document;
++    char                *query;
++    char                *variables_json;
++    UT_hash_handle       hh;
++} pstream_ws_subscription_t;
++
++/* ────────────────────────────────────────────────────────────────────────── */
++
++
+ typedef struct
+ {
+     struct lws    *wsi;               /* WebSocket instance (owned by lws)     */
+@@ -79,6 +163,8 @@ static struct
+     struct lws_context *ctx;
+     pthread_mutex_t     lock;
+ 
++    pstream_ws_subscription_t *subscriptions;
++
+     /* mapping announcement => ring broadcast list would live here in a real
+      * production system. For simplicity we broadcast to every open socket. */
+ } g_ws;
+@@ -95,6 +181,14 @@ static void schedule_ping(pstream_ws_client_t *client, unsigned int sec);
+ static void event_bus_listener(const char *topic,
+                                const uint8_t *payload, size_t len,
+                                void *user_data);
++static int  handle_graphql_ws_message(pstream_ws_client_t *client,
++                                      const uint8_t *payload, size_t len);
++static int  register_subscription(pstream_ws_client_t *client,
++                                  const char *id,
++                                  const char *query,
++                                  json_t *variables);
++static void remove_subscription(pstream_ws_client_t *client, const char *id);
++static void remove_client_subscriptions(pstream_ws_client_t *client);
+ 
+ /* ────────────────────────────────────────────────────────────────────────── */
+ 
+@@ -223,16 +317,15 @@ ws_callback(struct lws            *wsi,
+             return -1;
+         }
+ 
+-        /* TODO: parse GraphQL WS message and register/unregister subscription
+-         * For brevity we only log */
+-        log_debug("websocket: received %zu bytes from uid=%"PRIu64,
+-                  len, client->claims.user_id);
++        if (handle_graphql_ws_message(client, (const uint8_t *)in, len) != 0)
++            return -1;
+         break;
+     }
+ 
+     case LWS_CALLBACK_CLOSED:
+     case LWS_CALLBACK_CLIENT_CONNECTION_ERROR: {
+         client->closed = true;
++        remove_client_subscriptions(client);
+         rate_limiter_destroy(&client->rl);
+ 
+         if (client->ring)
+@@ -252,7 +345,238 @@ ws_callback(struct lws            *wsi,
+ }
+ 
+ /* ────────────────────────────────────────────────────────────────────────── */
+-/* Helper: JWT authentication                                               */
++/* GraphQL WS message processing and subscription registry                    */
++
++static void
++make_subscription_key(struct lws *wsi, const char *id, char *out, size_t out_cap)
++{
++    snprintf(out, out_cap, "%p:%s", (void *)wsi, id ? id : "");
++}
++
++static void
++free_subscription(pstream_ws_subscription_t *sub)
++{
++    if (!sub)
++        return;
++
++    graphql_free_document(&sub->document);
++    free(sub->query);
++    free(sub->variables_json);
++    free(sub);
++}
++
++static const char *
++operation_kind_name(gql_operation_kind_t kind)
++{
++    switch (kind) {
++    case GQL_OP_QUERY:        return "query";
++    case GQL_OP_MUTATION:     return "mutation";
++    case GQL_OP_SUBSCRIPTION: return "subscription";
++    default:                  return "unknown";
++    }
++}
++
++static int
++send_ws_error(pstream_ws_client_t *client, const char *id, const char *message)
++{
++    json_t *root = json_pack("{s:s, s:s}", "type", "error", "message", message);
++    if (!root)
++        return -1;
++
++    if (id)
++        json_object_set_new(root, "id", json_string(id));
++
++    char *payload = json_dumps(root, JSON_COMPACT);
++    json_decref(root);
++    if (!payload)
++        return -1;
++
++    int rc = queue_outbound_json(client, (const uint8_t *)payload, strlen(payload));
++    free(payload);
++    return rc;
++}
++
++static int
++register_subscription(pstream_ws_client_t *client,
++                      const char *id,
++                      const char *query,
++                      json_t *variables)
++{
++    if (!id || id[0] == '\0' || strlen(id) >= WS_SUBSCRIPTION_ID_MAX)
++        return send_ws_error(client, id, "Subscription id is required");
++    if (!query || query[0] == '\0')
++        return send_ws_error(client, id, "Subscription query is required");
++
++    pstream_ws_subscription_t *sub = calloc(1, sizeof(*sub));
++    if (!sub)
++        return send_ws_error(client, id, "Unable to allocate subscription");
++
++    strncpy(sub->id, id, sizeof(sub->id) - 1);
++    make_subscription_key(client->wsi, id, sub->key, sizeof(sub->key));
++    sub->wsi = client->wsi;
++    sub->user_id = client->claims.user_id;
++    sub->query = strdup(query);
++    if (!sub->query) {
++        free_subscription(sub);
++        return send_ws_error(client, id, "Unable to allocate subscription query");
++    }
++
++    char errbuf[256];
++    if (graphql_parse_document(query, &sub->document, errbuf, sizeof(errbuf)) != 0) {
++        free_subscription(sub);
++        return send_ws_error(client, id, errbuf[0] ? errbuf : "Invalid GraphQL document");
++    }
++
++    if (sub->document.op_cnt == 0 ||
++        sub->document.operations[0].kind != GQL_OP_SUBSCRIPTION) {
++        free_subscription(sub);
++        return send_ws_error(client, id, "GraphQL operation is not a subscription");
++    }
++
++    if (variables) {
++        sub->variables_json = json_dumps(variables, JSON_COMPACT);
++        if (!sub->variables_json) {
++            free_subscription(sub);
++            return send_ws_error(client, id, "Unable to serialize variables");
++        }
++    }
++
++    pthread_mutex_lock(&g_ws.lock);
++
++    pstream_ws_subscription_t *existing = NULL;
++    HASH_FIND_STR(g_ws.subscriptions, sub->key, existing);
++    if (existing) {
++        HASH_DEL(g_ws.subscriptions, existing);
++        free_subscription(existing);
++    }
++
++    HASH_ADD_STR(g_ws.subscriptions, key, sub);
++    pthread_mutex_unlock(&g_ws.lock);
++
++    log_info("websocket: registered subscription id=%s uid=%"PRIu64,
++             id, client->claims.user_id);
++    return 0;
++}
++
++static void
++remove_subscription(pstream_ws_client_t *client, const char *id)
++{
++    if (!id)
++        return;
++
++    char key[WS_SUBSCRIPTION_ID_MAX + 32];
++    make_subscription_key(client->wsi, id, key, sizeof(key));
++
++    pthread_mutex_lock(&g_ws.lock);
++    pstream_ws_subscription_t *sub = NULL;
++    HASH_FIND_STR(g_ws.subscriptions, key, sub);
++    if (sub) {
++        HASH_DEL(g_ws.subscriptions, sub);
++        log_info("websocket: removed subscription id=%s uid=%"PRIu64,
++                 id, client->claims.user_id);
++    }
++    pthread_mutex_unlock(&g_ws.lock);
++
++    free_subscription(sub);
++}
++
++static void
++remove_client_subscriptions(pstream_ws_client_t *client)
++{
++    pstream_ws_subscription_t *sub, *tmp;
++
++    pthread_mutex_lock(&g_ws.lock);
++    HASH_ITER(hh, g_ws.subscriptions, sub, tmp) {
++        if (sub->wsi == client->wsi) {
++            HASH_DEL(g_ws.subscriptions, sub);
++            free_subscription(sub);
++        }
++    }
++    pthread_mutex_unlock(&g_ws.lock);
++}
++
++static int
++handle_graphql_ws_message(pstream_ws_client_t *client,
++                          const uint8_t *payload,
++                          size_t len)
++{
++    char *text = malloc(len + 1);
++    if (!text)
++        return -1;
++
++    memcpy(text, payload, len);
++    text[len] = '\0';
++
++    json_error_t jerr;
++    json_t *root = json_loads(text, 0, &jerr);
++    free(text);
++    if (!root) {
++        log_warn("websocket: malformed json at line %d: %s", jerr.line, jerr.text);
++        send_ws_error(client, NULL, "Malformed JSON message");
++        return 0;
++    }
++
++    const char *type = json_string_value(json_object_get(root, "type"));
++    const char *id = json_string_value(json_object_get(root, "id"));
++
++    if (type && strcmp(type, "stop") == 0) {
++        remove_subscription(client, id);
++        json_decref(root);
++        return 0;
++    }
++
++    if (type && strcmp(type, "terminate") == 0) {
++        remove_client_subscriptions(client);
++        json_decref(root);
++        return -1;
++    }
++
++    if (type && strcmp(type, "start") != 0 && strcmp(type, "subscribe") != 0) {
++        log_debug("websocket: ignoring graphql-ws message type=%s from uid=%"PRIu64,
++                  type, client->claims.user_id);
++        json_decref(root);
++        return 0;
++    }
++
++    json_t *request = json_object_get(root, "payload");
++    if (!json_is_object(request))
++        request = root;
++
++    const char *query = json_string_value(json_object_get(request, "query"));
++    if (!query || query[0] == '\0') {
++        int rc = send_ws_error(client, id, "GraphQL query is required");
++        json_decref(root);
++        return rc;
++    }
++
++    gql_document_t doc;
++    char errbuf[256];
++    if (graphql_parse_document(query, &doc, errbuf, sizeof(errbuf)) != 0) {
++        int rc = send_ws_error(client, id, errbuf[0] ? errbuf : "Invalid GraphQL document");
++        json_decref(root);
++        return rc;
++    }
++
++    gql_operation_kind_t kind = doc.op_cnt > 0
++                              ? doc.operations[0].kind
++                              : GQL_OP_QUERY;
++    graphql_free_document(&doc);
++
++    if (kind != GQL_OP_SUBSCRIPTION) {
++        log_debug("websocket: received %s operation over ws from uid=%"PRIu64,
++                  operation_kind_name(kind), client->claims.user_id);
++        json_decref(root);
++        return 0;
++    }
++
++    json_t *variables = json_object_get(request, "variables");
++    int rc = register_subscription(client, id, query, variables);
++
++    json_decref(root);
++    return rc;
++}
++
++
+ 
+ static int
+ authenticate_client(struct lws *wsi, pstream_ws_client_t *client)
+diff --git a/pulsestream_showtime_api/src/core/graphql_parser.c b/pulsestream_showtime_api/src/core/graphql_parser.c
+index b4b0133..03c4a50 100644
+--- a/pulsestream_showtime_api/src/core/graphql_parser.c
++++ b/pulsestream_showtime_api/src/core/graphql_parser.c
+@@ -36,7 +36,8 @@ typedef enum {
+     GQL_VALUE_NULL,
+     GQL_VALUE_INT,
+     GQL_VALUE_STRING,
+-    GQL_VALUE_BOOL
++    GQL_VALUE_BOOL,
++    GQL_VALUE_VARIABLE
+ } gql_value_kind_t;
+ 
+ typedef struct {
+@@ -45,6 +46,7 @@ typedef struct {
+         int64_t   int_v;
+         bool      bool_v;
+         char     *str_v;   /* malloc-owned, NULL-terminated */
++        char     *var_v;   /* malloc-owned, NULL-terminated */
+     };
+ } gql_value_t;
+ 
+@@ -508,6 +510,18 @@ static gql_value_t parse_value(parser_t *ps)
+     memset(&v, 0, sizeof(v));
+ 
+     switch (ps->lx.current.kind) {
++        case TOK_VARIABLE:
++            v.kind = GQL_VALUE_VARIABLE;
++            lexer_next(&ps->lx);
++            if (ps->lx.current.kind != TOK_NAME) {
++                parser_error(ps, "Expected variable name (line %zu col %zu)",
++                             ps->lx.current.line, ps->lx.current.col);
++                break;
++            }
++            v.var_v = xstrdup(ps->lx.current.lexeme,
++                              strlen(ps->lx.current.lexeme));
++            lexer_next(&ps->lx);
++            break;
+         case TOK_INT:
+             v.kind   = GQL_VALUE_INT;
+             v.int_v  = ps->lx.current.int_val;
+@@ -599,7 +613,7 @@ static void parse_document(parser_t *ps, gql_document_t *doc)
+ 
+ static void free_value(gql_value_t *v)
+ {
+-    if (v->kind == GQL_VALUE_STRING)
++    if (v->kind == GQL_VALUE_STRING || v->kind == GQL_VALUE_VARIABLE)
+         free(v->str_v);
+ }
+ 

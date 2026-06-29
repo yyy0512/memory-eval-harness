@@ -1,0 +1,450 @@
+diff --git a/EduGate_ScholarLink/Makefile b/EduGate_ScholarLink/Makefile
+index 7f07044..f5a9f7e 100644
+--- a/EduGate_ScholarLink/Makefile
++++ b/EduGate_ScholarLink/Makefile
+@@ -83,6 +83,7 @@ endif
+ # ---------------------------------------------------------------------------
+ SRC_CORE        := \
+     src/main.c \
++    src/rate_limiter.c \
+     src/router/router.c \
+     src/validator/validator.c \
+     src/graphql/schema_registry.c \
+@@ -146,16 +147,17 @@ build/%.o: %.c
+ # Unit tests
+ # ---------------------------------------------------------------------------
+ TEST_DIR        := tests
+-TEST_BIN        := build/tests_runner
++RATE_LIMIT_VERSION_TEST_BIN := build/test_rate_limiter_versions
+ 
+ .PHONY: test
+-test: $(TEST_BIN)
+-	@echo "  RUN     $<"
+-	@$(TEST_BIN)
++test: $(RATE_LIMIT_VERSION_TEST_BIN)
++	@echo "  RUN     $(RATE_LIMIT_VERSION_TEST_BIN)"
++	@$(RATE_LIMIT_VERSION_TEST_BIN)
+ 
+-$(TEST_BIN): $(STATIC_LIB) $(wildcard $(TEST_DIR)/*.c)
+-	@echo "  CC      $(TEST_DIR)/*.c"
+-	@$(CC) $(CFLAGS) $(TEST_DIR)/*.c -o $@ $(LIBS_INTERNAL) $(LIBS_EXTERNAL)
++$(RATE_LIMIT_VERSION_TEST_BIN): $(TEST_DIR)/test_rate_limiter_versions.c src/rate_limiter.c src/rate_limiter.h
++	@echo "  CC      $<"
++	@$(MKDIR_P) $(dir $@)
++	@$(CC) $(CFLAGS) $(TEST_DIR)/test_rate_limiter_versions.c src/rate_limiter.c -o $@ -lpthread
+ 
+ # ---------------------------------------------------------------------------
+ # Code coverage
+diff --git a/EduGate_ScholarLink/config/gateway.conf b/EduGate_ScholarLink/config/gateway.conf
+index 8e559fc..5d4a01b 100644
+--- a/EduGate_ScholarLink/config/gateway.conf
++++ b/EduGate_ScholarLink/config/gateway.conf
+@@ -22,6 +22,7 @@
+ 
+ /* ---- Standard Library ---------------------------------------------------- */
+ #include <stddef.h>
++#include <stdbool.h>
+ 
+ /* ---- Gateway Core Abstractions ------------------------------------------ */
+ /*
+@@ -80,6 +81,13 @@ typedef struct {
+     /* Monitoring */
+     unsigned metrics_push_interval_sec;
+     unsigned circuit_breaker_half_life_sec;
++
++    /* Global per-IP rate limiting */
++    bool     rate_limit_enabled;
++    unsigned rate_limit_requests;
++    unsigned rate_limit_window_seconds;
++    rate_limit_t rate_limit_v1;
++    rate_limit_t rate_limit_v2;
+ } gateway_conf_t;
+ 
+ /* ------------------------------------------------------------------------- */
+@@ -114,7 +122,7 @@ static const upstream_service_t G_UPSTREAM_SERVICES[] = {
+ 
+ /* Convenience macro for rate-limit units:
+  * “requests per enrolled student” → multiply by N at runtime. */
+-#define RL(r, w)  (rate_limit_t){ .quota = (r), .window_sec = (w) }
++#define RL(r, w)  { .quota = (r), .window_sec = (w) }
+ 
+ /* ------------------------------------------------------------------------- */
+ /*  Route Table                                                              */
+@@ -199,7 +207,12 @@ static const gateway_conf_t G_GATEWAY_CONF = {
+     .services                        = G_UPSTREAM_SERVICES,
+     .routes                          = G_ROUTES,
+     .metrics_push_interval_sec       = 10,   /* Push metrics every 10 s   */
+-    .circuit_breaker_half_life_sec   = 30    /* Half-open after 30 s      */
++    .circuit_breaker_half_life_sec   = 30,   /* Half-open after 30 s      */
++    .rate_limit_enabled              = true,
++    .rate_limit_requests             = 100,
++    .rate_limit_window_seconds       = 60,
++    .rate_limit_v1                   = RL(60, 60),
++    .rate_limit_v2                   = RL(500, 60)
+ };
+ 
+ /* ------------------------------------------------------------------------- */
+diff --git a/EduGate_ScholarLink/docs/API_GUIDE.md b/EduGate_ScholarLink/docs/API_GUIDE.md
+index dcbd0ad..75e4387 100644
+--- a/EduGate_ScholarLink/docs/API_GUIDE.md
++++ b/EduGate_ScholarLink/docs/API_GUIDE.md
+@@ -22,8 +22,9 @@ EDD-compliant learning applications, CLI utilities, or embedded devices.
+ 6. Request Validation
+ 7. Error Handling
+ 8. Monitoring & Metrics
+-9. Code Examples (libcurl / POSIX)
+-10. Appendix – JSON Schemas & GraphQL SDL
++9. Rate Limiting
++10. Code Examples (libcurl / POSIX)
++11. Appendix – JSON Schemas & GraphQL SDL
+ 
+ ---
+ 
+@@ -228,7 +229,35 @@ Grafana dashboards located under `./ops/grafana/*`.
+ 
+ ---
+ 
+-## 9. Code Examples (libcurl, POSIX)
++## 9. Rate Limiting
++
++EduGate applies a per-client-IP rate limit before routing validation. The limiter first looks for a version-specific policy such as `rate_limit_v1` or `rate_limit_v2`; if none is configured for the request version, it falls back to the deprecated global default. Configure limits in `config/gateway.conf` and rebuild the gateway.
++
++```c
++static const gateway_conf_t G_GATEWAY_CONF = {
++    .rate_limit_enabled        = true,
++    .rate_limit_requests       = 100, /* default fallback */
++    .rate_limit_window_seconds = 60,  /* default fallback */
++    .rate_limit_v1             = RL(60, 60),
++    .rate_limit_v2             = RL(500, 60)
++};
++```
++
++| Key | Type | Description |
++|-----|------|-------------|
++| `rate_limit_enabled` | `true`/`false` | Enables or disables gateway-wide rate limiting. |
++| `rate_limit_v1` | `rate_limit_t` | v1-specific requests/window policy, e.g. `RL(60, 60)`. |
++| `rate_limit_v2` | `rate_limit_t` | v2-specific requests/window policy, e.g. `RL(500, 60)`. |
++| `rate_limit_requests` | integer | Deprecated default maximum per client IP when no version-specific limit exists. |
++| `rate_limit_window_seconds` | integer | Deprecated default window length when no version-specific limit exists. |
++
++When the limit is exceeded, the gateway returns **429 Too Many Requests** with a
++JSON error body. The HTTP handler also emits a `Retry-After` header matching
++`rate_limit_window_seconds`.
++
++---
++
++## 10. Code Examples (libcurl, POSIX)
+ 
+ The following C snippet performs a secure enrollment
+ (`POST /courses/{id}/enroll`) while handling gateway-specific throttling and
+@@ -320,9 +349,9 @@ int main(int argc, char **argv)
+ 
+ ---
+ 
+-## 10. Appendix
++## 11. Appendix
+ 
+-### 10.1 Student Profile JSON Schema `student_v1.schema.json`
++### 11.1 Student Profile JSON Schema `student_v1.schema.json`
+ 
+ ```json
+ {
+@@ -346,7 +375,7 @@ int main(int argc, char **argv)
+ }
+ ```
+ 
+-### 10.2 GraphQL SDL (excerpt)
++### 11.2 GraphQL SDL (excerpt)
+ 
+ ```graphql
+ type Query {
+diff --git a/EduGate_ScholarLink/src/http_handler.c b/EduGate_ScholarLink/src/http_handler.c
+index b86b1b0..7e01351 100644
+--- a/EduGate_ScholarLink/src/http_handler.c
++++ b/EduGate_ScholarLink/src/http_handler.c
+@@ -23,12 +23,16 @@
+ #include <string.h>
+ #include <stdarg.h>
+ #include <time.h>
++#include <arpa/inet.h>
+ #include <errno.h>
+ #include <inttypes.h>
++#include <netinet/in.h>
+ #include <signal.h>
++#include <sys/socket.h>
+ 
+ #include <microhttpd.h>
+ 
++#include "../config/gateway.conf"
+ #include "router.h"
+ #include "validator.h"
+ #include "metrics.h"
+@@ -36,6 +40,7 @@
+ #include "logger.h"
+ #include "gateway_config.h"
+ #include "backend_proxy.h"
++#include "rate_limiter.h"
+ 
+ /* ------------------------------------------------------------------------- */
+ /* Configuration                                                             */
+@@ -75,6 +80,7 @@ typedef struct
+     unsigned int        resp_status;
+ 
+     /* Tracking */
++    int                 rate_checked;
+     int                 validated;
+     int                 routed;
+ } request_ctx_t;
+@@ -92,6 +98,47 @@ epoch_ms(void)
+     return (uint64_t)ts.tv_sec * 1000ULL + ts.tv_nsec / 1000000ULL;
+ }
+ 
++static const char *
++client_ip_address(struct MHD_Connection *connection, char *buf, size_t buf_size)
++{
++    const union MHD_ConnectionInfo *info =
++        MHD_get_connection_info(connection, MHD_CONNECTION_INFO_CLIENT_ADDRESS);
++
++    if (!info || !info->client_addr)
++        return "unknown";
++
++    const struct sockaddr *addr = info->client_addr;
++    void *src = NULL;
++
++    if (addr->sa_family == AF_INET) {
++        src = &((const struct sockaddr_in *)addr)->sin_addr;
++    } else if (addr->sa_family == AF_INET6) {
++        src = &((const struct sockaddr_in6 *)addr)->sin6_addr;
++    }
++
++    if (!src || !inet_ntop(addr->sa_family, src, buf, (socklen_t)buf_size))
++        return "unknown";
++
++    return buf;
++}
++
++static const char *
++api_version_from_url(const char *url, char *buf, size_t buf_size)
++{
++    if (!url || url[0] != '/' || url[1] == '\0' || buf_size == 0)
++        return NULL;
++
++    const char *start = url + 1;
++    const char *end = strchr(start, '/');
++    size_t len = end ? (size_t)(end - start) : strlen(start);
++    if (len == 0 || len >= buf_size)
++        return NULL;
++
++    memcpy(buf, start, len);
++    buf[len] = '\0';
++    return buf;
++}
++
+ /* Allocate (or grow) the body buffer for streaming payloads */
+ static int
+ reserve_body_buf(request_ctx_t *ctx, size_t desired_cap)
+@@ -230,6 +277,32 @@ http_router_callback(void *cls,
+         return MHD_YES;
+     }
+ 
++    /* -------------------- Rate Limiting ----------------------------------- */
++    if (!ctx->rate_checked) {
++        char ip_buf[INET6_ADDRSTRLEN];
++        char version_buf[32];
++        const char *client_ip = client_ip_address(connection, ip_buf, sizeof(ip_buf));
++        const char *api_version = api_version_from_url(ctx->url, version_buf,
++                                                       sizeof(version_buf));
++        ctx->rate_checked = 1;
++
++        if (!rate_limiter_allow_for_version(client_ip, api_version)) {
++            char retry_after[16];
++            snprintf(retry_after, sizeof(retry_after), "%u",
++                     rate_limiter_window_seconds_for_version(api_version));
++            struct MHD_Response *err_resp =
++                json_error_response(MHD_HTTP_TOO_MANY_REQUESTS,
++                                    "Rate limit exceeded");
++            MHD_add_response_header(err_resp, "Retry-After", retry_after);
++            int ret = MHD_queue_response(connection,
++                                         MHD_HTTP_TOO_MANY_REQUESTS,
++                                         err_resp);
++            MHD_destroy_response(err_resp);
++            ctx->resp_status = MHD_HTTP_TOO_MANY_REQUESTS;
++            return ret;
++        }
++    }
++
+     /* -------------------- Validation ------------------------------------- */
+     if (!ctx->validated) {
+         int vrc = validator_validate_request(connection,
+@@ -332,6 +405,17 @@ http_server_start(const gateway_config_t *cfg)
+ {
+     struct MHD_Daemon *daemon;
+     unsigned int port = cfg ? cfg->listen_port : DEFAULT_HTTP_PORT;
++    const gateway_conf_t *gateway_cfg = gateway_conf_get();
++
++    rate_limiter_configure(gateway_cfg->rate_limit_enabled,
++                           gateway_cfg->rate_limit_requests,
++                           gateway_cfg->rate_limit_window_seconds);
++    rate_limiter_configure_version("v1",
++                                   gateway_cfg->rate_limit_v1.quota,
++                                   gateway_cfg->rate_limit_v1.window_sec);
++    rate_limiter_configure_version("v2",
++                                   gateway_cfg->rate_limit_v2.quota,
++                                   gateway_cfg->rate_limit_v2.window_sec);
+ 
+     daemon = MHD_start_daemon(
+         MHD_USE_AUTO | MHD_USE_INTERNAL_POLLING_THREAD,
+diff --git a/EduGate_ScholarLink/src/main.c b/EduGate_ScholarLink/src/main.c
+index d3ba2b2..b4ebae0 100644
+--- a/EduGate_ScholarLink/src/main.c
++++ b/EduGate_ScholarLink/src/main.c
+@@ -23,6 +23,11 @@
+ 
+ #include <microhttpd.h>
+ 
++#include "../config/gateway.conf"
++#include "rate_limiter.h"
++
++#include <arpa/inet.h>
++#include <netinet/in.h>
+ #include <stdatomic.h>
+ #include <stdbool.h>
+ #include <stdint.h>
+@@ -30,6 +35,7 @@
+ #include <stdlib.h>
+ #include <string.h>
+ #include <signal.h>
++#include <sys/socket.h>
+ #include <time.h>
+ #include <unistd.h>
+ 
+@@ -164,6 +170,30 @@ respond_text(struct MHD_Connection *conn, unsigned int code,
+ /* URI Handlers                                                              */
+ /* ------------------------------------------------------------------------- */
+ 
++static const char *
++client_ip_address(struct MHD_Connection *conn, char *buf, size_t buf_size)
++{
++    const union MHD_ConnectionInfo *info =
++        MHD_get_connection_info(conn, MHD_CONNECTION_INFO_CLIENT_ADDRESS);
++
++    if (!info || !info->client_addr)
++        return "unknown";
++
++    const struct sockaddr *addr = info->client_addr;
++    void *src = NULL;
++
++    if (addr->sa_family == AF_INET) {
++        src = &((const struct sockaddr_in *)addr)->sin_addr;
++    } else if (addr->sa_family == AF_INET6) {
++        src = &((const struct sockaddr_in6 *)addr)->sin6_addr;
++    }
++
++    if (!src || !inet_ntop(addr->sa_family, src, buf, (socklen_t)buf_size))
++        return "unknown";
++
++    return buf;
++}
++
+ /* Health check endpoint */
+ static int
+ handle_health(struct MHD_Connection *conn)
+@@ -257,6 +287,7 @@ typedef enum {
+ 
+ typedef struct {
+     const char    *path;
++    const char    *version;
+     route_type_t   type;
+     int (*handler)(struct MHD_Connection *conn,
+                    const char *method,
+@@ -270,10 +301,10 @@ typedef struct {
+  * In a full implementation this could be dynamic or loaded from config.
+  */
+ static const route_t g_routes[] = {
+-    { "/health",      ROUTE_TYPE_SIMPLE,   NULL,                handle_health },
+-    { "/admin/metrics", ROUTE_TYPE_SIMPLE, NULL,                handle_metrics },
+-    { "/v1/course",   ROUTE_TYPE_SIMPLE,   NULL,                handle_course },
+-    { "/v1/quiz",     ROUTE_TYPE_GRAPHQL,  handle_quiz_graphql, NULL          },
++    { "/health",        NULL, ROUTE_TYPE_SIMPLE,   NULL,                handle_health },
++    { "/admin/metrics", NULL, ROUTE_TYPE_SIMPLE,   NULL,                handle_metrics },
++    { "/v1/course",     "v1", ROUTE_TYPE_SIMPLE,   NULL,                handle_course },
++    { "/v1/quiz",       "v1", ROUTE_TYPE_GRAPHQL,  handle_quiz_graphql, NULL          },
+ };
+ 
+ static const size_t g_route_count = sizeof(g_routes) / sizeof(g_routes[0]);
+@@ -295,6 +326,26 @@ ahc_router_cb(void *cls,
+      */
+     bool consumed_upload = (*con_cls != NULL);
+ 
++    const char *matched_version = NULL;
++    for (size_t i = 0; i < g_route_count; ++i) {
++        if (strcmp(url, g_routes[i].path) == 0) {
++            matched_version = g_routes[i].version;
++            break;
++        }
++    }
++
++    /* Apply per-version, per-IP rate limit before validation. */
++    if (!*con_cls) {
++        char ip_buf[INET6_ADDRSTRLEN];
++        const char *client_ip = client_ip_address(conn, ip_buf, sizeof(ip_buf));
++        if (!rate_limiter_allow_for_version(client_ip, matched_version)) {
++            atomic_fetch_add_explicit(&g_total_requests, 1, memory_order_relaxed);
++            atomic_fetch_add_explicit(&g_failed_requests, 1, memory_order_relaxed);
++            return respond_json(conn, MHD_HTTP_TOO_MANY_REQUESTS,
++                                "{ \"error\": \"Rate limit exceeded\" }");
++        }
++    }
++
+     /* Dispatch to appropriate route */
+     for (size_t i = 0; i < g_route_count; ++i) {
+         if (strcmp(url, g_routes[i].path) == 0) {
+@@ -367,11 +418,28 @@ main(void)
+     uint16_t listen_port = (uint16_t)(port_env ? atoi(port_env)
+                                               : DEFAULT_LISTEN_PORT);
+ 
++    const gateway_conf_t *gateway_cfg = gateway_conf_get();
++    rate_limiter_configure(gateway_cfg->rate_limit_enabled,
++                           gateway_cfg->rate_limit_requests,
++                           gateway_cfg->rate_limit_window_seconds);
++    rate_limiter_configure_version("v1",
++                                   gateway_cfg->rate_limit_v1.quota,
++                                   gateway_cfg->rate_limit_v1.window_sec);
++    rate_limiter_configure_version("v2",
++                                   gateway_cfg->rate_limit_v2.quota,
++                                   gateway_cfg->rate_limit_v2.window_sec);
++
+     char logbuf[128];
+     snprintf(logbuf, sizeof(logbuf),
+              "Starting EduGate ScholarLink (%s) on port %u",
+              GATEWAY_VERSION, (unsigned int)listen_port);
+     LOG_INFO(logbuf);
++    snprintf(logbuf, sizeof(logbuf),
++             "Rate limiting %s: %u request(s) per %u second(s)",
++             gateway_cfg->rate_limit_enabled ? "enabled" : "disabled",
++             gateway_cfg->rate_limit_requests,
++             gateway_cfg->rate_limit_window_seconds);
++    LOG_INFO(logbuf);
+ 
+     /* Initialize HTTP daemon */
+     struct MHD_Daemon *daemon = MHD_start_daemon(
+diff --git a/EduGate_ScholarLink/src/rate_limiter.h b/EduGate_ScholarLink/src/rate_limiter.h
+index f83ae5f..1255f0c 100644
+--- a/EduGate_ScholarLink/src/rate_limiter.h
++++ b/EduGate_ScholarLink/src/rate_limiter.h
+@@ -3,7 +3,15 @@
+ 
+ #include <stdbool.h>
+ 
++void rate_limiter_configure(bool enabled, unsigned int max_requests,
++                            unsigned int window_seconds);
++void rate_limiter_configure_version(const char *version, unsigned int max_requests,
++                                    unsigned int window_seconds);
++bool rate_limiter_is_enabled(void);
++unsigned int rate_limiter_window_seconds(void);
++unsigned int rate_limiter_window_seconds_for_version(const char *version);
+ bool rate_limiter_allow(const char *client_ip);
++bool rate_limiter_allow_for_version(const char *client_ip, const char *version);
+ void rate_limiter_reset(void);
+ 
+ #endif /* EDUGATE_RATE_LIMITER_H */

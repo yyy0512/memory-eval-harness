@@ -1,0 +1,12 @@
+You are working in the repository at the current working directory. This is session 1 of a multi-session development task. Complete only the requirements for this session. At the end, save any useful project-specific memory for future sessions.
+
+You are tasked with implementing a new batch settlement system for ChromaticLedger. This will be done over three sessions.
+
+**SESSION 1: Analysis and Scaffolding**
+Your first task is to analyze the existing codebase to understand how payments are processed and how system events are handled. Based on your analysis, design a new settlement module. 
+
+**Your deliverables for this session are:**
+1.  Create two new files: `src/settlement.h` and `src/settlement.c`.
+2.  In `src/settlement.h`, define the necessary data structures for a settlement batch (e.g., a struct to hold an array of transactions and a count). 
+3.  In `src/settlement.h`, declare the function prototypes for managing the batch, including functions to initialize the batch, add a transaction to it, and process the entire batch. 
+4.  In `src/settlement.c`, create placeholder (stub) implementations for the functions declared in the header. They should have the correct signature but can have empty bodies for now. Ensure you include the necessary headers.

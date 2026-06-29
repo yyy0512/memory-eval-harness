@@ -1,0 +1,42 @@
+{
+  "scenario_id": "c_data_analytics_easy_082_multi_session_development_easy_01",
+  "case_id": "c_data_analytics_easy_082",
+  "title": "Add Blood Pressure Validation and Update Summary Report",
+  "description": "The PulseETL-Lite project is a serverless C application for processing vital signs data. It consists of two main components: `process_stream` which ingests, validates, and transforms raw data, and `generate_report` which creates a summary from the processed data. Currently, the system lacks a crucial validation step: ensuring that systolic blood pressure readings are logically consistent with diastolic readings. This multi-session task involves first implementing this validation and then updating the reporting module to reflect the new validation metric.",
+  "difficulty": "easy",
+  "project_spec": {
+    "unique_id": "c_data_analytics_easy_082",
+    "name": "PulseETL-Lite: Serverless Vital-Signs Analytics",
+    "description": "PulseETL-Lite is a lightweight, serverless data-analytics pipeline written in C that ingests real-time vital-sign streams (heart rate, SpO₂, temperature) emitted by bedside monitors or wearable devices that expose a FHIR-compatible API. The project applies on-the-fly data validation, transformation, and visualization to help nurses and physicians obtain simple yet actionable insights—such as early warnings of patient deterioration—without requiring any persistent servers.    \n\nThe system is organized as an event-driven ETL pipeline implemented with AWS Lambda custom C runtimes. A Kinesis Data Stream acts as the ingestion layer receiving JSON/FHIR observations. Lambda functions (Observer pattern) subscribe to new stream records, perform schema and range validation, apply selectable transformation strategies (Strategy pattern) like unit normalization (°F→°C) or rolling averages, and then push the cleansed data to S3 and an Amazon QuickSight dataset. A scheduled Lambda executes every 15 minutes to trigger summary report generation and exports SVG/PNG charts produced with gnuplot, making the project an end-to-end, easy-to-deploy analytics solution for small clinics or research prototypes.",
+    "domain": "data_analytics",
+    "complexity": "easy",
+    "language": "c",
+    "architecture": "serverless",
+    "theme": "healthcare",
+    "target_file_count": 10,
+    "target_token_count": 59996,
+    "features": [
+      "data_transformation",
+      "data_validation",
+      "data_visualization",
+      "data_ingestion",
+      "scheduling",
+      "stream_processing"
+    ],
+    "architecture_patterns": [
+      "Observer_Pattern",
+      "Strategy_Pattern",
+      "ETL_Pipeline"
+    ],
+    "dependencies": [
+      "AWS SDK for C (aws-c-sdk)",
+      "AWS Lambda C runtime interface client",
+      "cJSON (lightweight JSON parsing)",
+      "libcurl (HTTPS calls to external FHIR endpoints)",
+      "librdkafka / aws-kinesis-producer C library (stream ingestion)",
+      "gnuplot-iostream (minimal gnuplot interface for visualization)",
+      "cron-lambda (CloudWatch Event Rule for scheduling)"
+    ],
+    "seed": 799066
+  }
+}

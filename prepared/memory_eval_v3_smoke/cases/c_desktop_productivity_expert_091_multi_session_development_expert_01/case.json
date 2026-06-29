@@ -1,0 +1,29 @@
+{
+  "scenario_id": "c_desktop_productivity_expert_091_multi_session_development_expert_01",
+  "case_id": "c_desktop_productivity_expert_091",
+  "category": "extended_development_projects",
+  "original_task_category": "multi_session_development",
+  "project_source": "/home/yyy/projects/LoCoBench-Agent/.claude/worktrees/memory-eval-harness/data/generated/c_desktop_productivity_expert_091",
+  "project_name": "ShowRunner Studio",
+  "language": "c",
+  "complexity": "expert",
+  "session_count": 1,
+  "turns": [
+    {
+      "session": 1,
+      "file": "turns/session_1.jsonl",
+      "turn_count": 1
+    }
+  ],
+  "prompts_for_review": [
+    {
+      "session": 1,
+      "file": "prompts/session_1.txt"
+    }
+  ],
+  "hashes": {
+    "scenario_json_sha256": "da6f0c01ba048c86b5005de6fbf45540a8e0f562f5b6dccb59c176d7b3f9d84f",
+    "project_tree_sha256": "c6d32c88a445b34befe4b6cbae520d8a535fc59df4c4f90fff69a2c946febebb",
+    "prepared_case_sha256": "2892e0db8d45bddaa86084428aa05e3e17c9cfa5a98b77f8d005d84ada7209b4"
+  }
+}

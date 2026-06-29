@@ -1,0 +1,10 @@
+You are working in the repository at the current working directory. This is session 3 of a 3-session development task. The previous session has ended and conversation context is unavailable. Use the repository state and your persistent memory if available. Do not ask for previous conversation context. Complete only the requirements for this session. At the end, update memory with decisions and remaining work.
+
+Your task is to implement an in-memory LRU cache for the Feature Store. This will require modifications across several components, including the feature store manager, the configuration parser, and the addition of new data structures. This task will be completed over three sessions.
+
+**Session 3: Configuration and Observability**
+The final step is to make the cache configurable and add monitoring capabilities.
+
+*   **Action:** Modify `ll_config_parser.h` and `ll_config_parser.c` to parse two new configuration parameters from the orchestrator's config files: `feature_store_cache_enabled` (boolean) and `feature_store_cache_max_size_mb` (integer).
+*   **Action:** In `feature_store_manager.c`, update the initialization logic (`fsm_create`) to read these configuration values. The cache should only be allocated and used if `feature_store_cache_enabled` is true.
+*   **Action:** Integrate logging using the existing `ll_logger` module. Add `ll_log_debug` statements within `fsm_get_feature_vector` to log cache hits and misses. Add an `ll_log_info` statement when an item is evicted from the cache.

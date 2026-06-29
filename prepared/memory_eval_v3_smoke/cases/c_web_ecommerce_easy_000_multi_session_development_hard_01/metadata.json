@@ -1,0 +1,46 @@
+{
+  "scenario_id": "c_web_ecommerce_easy_000_multi_session_development_hard_01",
+  "case_id": "c_web_ecommerce_easy_000",
+  "title": "Implement Time-Limited Flash Sale Feature with Cache Invalidation",
+  "description": "The BusiCart marketing team wants to introduce 'Flash Sales'—time-limited discounts on specific products to drive user engagement. This requires a significant enhancement to the BusiCart Core application. The current system has no concept of temporary or dynamic pricing. This task involves building the feature from the database layer up to the service logic, with a critical focus on performance and caching. The work is broken down over four distinct development sessions, requiring the agent to retain context and build upon its previous work incrementally.",
+  "difficulty": "hard",
+  "project_spec": {
+    "unique_id": "c_web_ecommerce_easy_000",
+    "name": "BusiCart Core",
+    "description": "BusiCart Core is a lightweight, all-in-one e-commerce storefront written entirely in C and tailored for small-to-medium retailers that want tight control over their business processes without the overhead of a distributed system.  The application bundles product catalogue management, customer checkout, payment gateway hand-off, and a back-office admin panel inside one executable, exposing a clean Web UI rendered with embedded HTML templates.  Every feature—from inventory search backed by SQLite FTS5 to configurable tax/discount rules—runs in-process, letting business owners deploy the whole solution on a single VPS with minimal DevOps.\n\nInside the monolith, components are clearly separated via an internal Service Layer: CatalogService, OrderService, AuthService, CacheService, and ReportService.  Requests flow through an Authentication Middleware that validates sessions, then dispatches to the relevant service.  Despite its single-binary packaging, the codebase uses a Component Architecture pattern (distinct folders, clear headers) so teams can reason about features independently while still benefiting from shared memory space and function calls for ultra-low latency.  SSL/TLS is handled directly through OpenSSL, and libmemcached provides in-memory caching of hot product data, ensuring quick page loads even on modest hardware.",
+    "domain": "web_ecommerce",
+    "complexity": "easy",
+    "language": "c",
+    "architecture": "monolithic",
+    "theme": "business",
+    "target_file_count": 11,
+    "target_token_count": 98192,
+    "features": [
+      "database_integration",
+      "search_functionality",
+      "frontend_interface",
+      "admin_panel",
+      "session_management",
+      "caching",
+      "ssl_security",
+      "user_authentication"
+    ],
+    "architecture_patterns": [
+      "Component_Architecture",
+      "Service_Layer",
+      "Authentication_Middleware"
+    ],
+    "dependencies": [
+      "libmicrohttpd (embedded HTTP/HTTPS server)",
+      "SQLite3 with FTS5 extension (relational DB + full-text search)",
+      "jansson (lightweight JSON parsing/serialization)",
+      "libmemcached (caching layer)",
+      "OpenSSL (SSL/TLS termination & crypto)",
+      "uthash / utlist (hash maps & linked lists for in-memory models)",
+      "CTemplate or KCGI Templating (server-side HTML rendering)",
+      "pthread (concurrency)",
+      "libuuid (secure token & order ID generation)"
+    ],
+    "seed": 439605
+  }
+}

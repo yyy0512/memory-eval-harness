@@ -1,0 +1,15 @@
+You are working in the repository at the current working directory. This is session 4 of a 4-session development task. The previous session has ended and conversation context is unavailable. Use the repository state and your persistent memory if available. Do not ask for previous conversation context. Complete only the requirements for this session. At the end, update memory with decisions and remaining work.
+
+You will implement the new Threat Response Automation (TRA) service over four distinct development sessions. You must retain the context and code from the previous session to continue your work.
+
+**Session 4: Testing and Validation**
+1.  **Unit Test:** Create a new test file `tests/unit/test_response_service.c`. Write a unit test that:
+    *   Creates an instance of the `response_service`.
+    *   Uses `response_service_register_rule()` to add a few rules.
+    *   Directly calls your internal `handle_threat_event()` function with mock `event_t` objects.
+    *   Asserts that the correct action type is identified (you may need to use mocks or check log output for this).
+2.  **Integration Test:** Create a new test file `tests/integration/test_response_workflow.c`. This test should verify the end-to-end flow:
+    *   Start a lightweight instance of the orchestrator with the new service.
+    *   Use an HTTP client utility (or mock one) to call the `POST /api/v1/response/rules` endpoint to add a new rule.
+    *   Manually publish a `THREAT_DETECTED` event onto the `event_bus`.
+    *   Verify that the correct downstream service function was called. This may require using function pointers, mocks, or inspecting logs/system state to confirm the action was triggered.

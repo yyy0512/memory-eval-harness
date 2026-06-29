@@ -1,0 +1,8 @@
+You are working in the repository at the current working directory. This is session 1 of a multi-session development task. Complete only the requirements for this session. At the end, save any useful project-specific memory for future sessions.
+
+This task will be completed over multiple sessions. Your goal is to add a 'dry-run' feature to the FlowGauge engine, activated by a command-line flag.
+
+**Session 1: Update Configuration Structure**
+Your first objective is to modify the core data structures to accommodate the new 'dry-run' setting. 
+- **Action:** Locate the main application configuration struct, which is used throughout the pipeline. Add a new boolean (or integer `0`/`1`) flag to this struct named `dry_run`.
+- **Constraint:** Do not modify any other part of the application in this session. Your only change should be the addition of this field to the struct definition.

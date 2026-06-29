@@ -1,0 +1,29 @@
+{
+  "scenario_id": "c_mobile_social_easy_094_multi_session_development_easy_01",
+  "case_id": "c_mobile_social_easy_094",
+  "category": "extended_development_projects",
+  "original_task_category": "multi_session_development",
+  "project_source": "/home/yyy/projects/LoCoBench-Agent/.claude/worktrees/memory-eval-harness/data/generated/c_mobile_social_easy_094",
+  "project_name": "SnapSecure Utility Hub",
+  "language": "c",
+  "complexity": "easy",
+  "session_count": 1,
+  "turns": [
+    {
+      "session": 1,
+      "file": "turns/session_1.jsonl",
+      "turn_count": 1
+    }
+  ],
+  "prompts_for_review": [
+    {
+      "session": 1,
+      "file": "prompts/session_1.txt"
+    }
+  ],
+  "hashes": {
+    "scenario_json_sha256": "554f7e5e5a5b2b1627e3fb828eaeb0dc5590e27376b8a7312b86b5501f07f724",
+    "project_tree_sha256": "0daf125f7ea5f10c9347299a15ca5c8fdc7247498d243863d2506e66a7102b94",
+    "prepared_case_sha256": "a0639d563450ac2d33b6a13dc7a25ed48cb5ef7b56850b1f66128ef5ab9c21c4"
+  }
+}

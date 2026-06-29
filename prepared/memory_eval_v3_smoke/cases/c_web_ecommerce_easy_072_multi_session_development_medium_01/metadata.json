@@ -1,0 +1,49 @@
+{
+  "scenario_id": "c_web_ecommerce_easy_072_multi_session_development_medium_01",
+  "case_id": "c_web_ecommerce_easy_072",
+  "title": "Implement Discount Code Functionality in LambdaCommerce Lite",
+  "description": "This task simulates a common feature request in an e-commerce platform. The marketing team wants to introduce discount codes to drive sales. The agent must implement this feature incrementally, starting with the data model and service layer, then integrating it into the order processing logic, and finally exposing it via an API endpoint. This requires understanding the existing service-oriented structure and modifying multiple files over a series of development sessions, testing the agent's ability to retain context and build upon its previous work.",
+  "difficulty": "medium",
+  "project_spec": {
+    "unique_id": "c_web_ecommerce_easy_072",
+    "name": "LambdaCommerce Lite",
+    "description": "LambdaCommerce Lite is a streamlined serverless e-commerce back-end written in C that targets small-to-medium B2B merchants who need a cost-efficient yet reliable order-processing service. The project demonstrates how traditional business requirements—such as secure order capture, user authentication, social-login onboarding, real-time e-mail notifications, and session-aware shopping carts—can be met without provisioning or managing servers. By combining AWS Lambda custom C runtimes with API Gateway, DynamoDB, and SES, the application scales automatically from one transaction to thousands, allowing merchants to pay only for what they use.\n\nThe solution showcases classic enterprise patterns—MVC for request routing and view rendering, a lightweight Service Layer that orchestrates domain logic (pricing, discount rules, tax calculation), and a tiny Database ORM abstraction that maps C structs to DynamoDB items. Integrated data validation, OpenSSL-based TLS termination, and robust error-handling macros ensure PCI-compliant security. The project’s business angle is highlighted by built-in hooks for business analytics (e.g., conversion tracking) and vendor onboarding workflows, making it distinct from consumer-centric samples.",
+    "domain": "web_ecommerce",
+    "complexity": "easy",
+    "language": "c",
+    "architecture": "serverless",
+    "theme": "business",
+    "target_file_count": 12,
+    "target_token_count": 59283,
+    "features": [
+      "data_validation",
+      "database_integration",
+      "ssl_security",
+      "error_handling",
+      "session_management",
+      "social_login",
+      "user_authentication",
+      "email_notifications"
+    ],
+    "architecture_patterns": [
+      "Service_Layer",
+      "MVC",
+      "Database_ORM"
+    ],
+    "dependencies": [
+      "AWS Lambda Custom Runtime for C (provided.al2)",
+      "AWS API Gateway (REST)",
+      "AWS DynamoDB C SDK (aws-sdk-cpp-core + dynamodb)",
+      "AWS Secrets Manager C SDK (for credential rotation)",
+      "AWS SES SMTP interface (libcurl for SMTP over TLS)",
+      "libjwt or AWS Cognito JWT verifier (for social login tokens)",
+      "OpenSSL (TLS/SSL, request signing)",
+      "libuv (async I/O, optional)",
+      "cJSON (lightweight JSON parsing/serialization)",
+      "uthash/utarray (in-memory session store cache)",
+      "Glibc or musl (static build option)",
+      "CMake (build tooling)"
+    ],
+    "seed": 329390
+  }
+}

@@ -1,0 +1,51 @@
+{
+  "scenario_id": "c_ml_inference_hard_052_multi_session_development_medium_01",
+  "case_id": "c_ml_inference_hard_052",
+  "title": "Implement and Integrate a Logistic Regression Model",
+  "description": "The ChronoBoost Inference Factory is a high-performance MLOps platform written in C. Currently, it excels at time-series forecasting using a linear regression model. To expand its capabilities, a new business requirement mandates support for binary classification tasks, such as predicting customer churn or detecting fraudulent transactions. This task involves implementing a new logistic regression model from scratch and integrating it into the existing training and prediction pipelines. The agent must work across multiple sessions, first understanding the existing architecture, then implementing the new model, and finally integrating it into the factory.",
+  "difficulty": "medium",
+  "project_spec": {
+    "unique_id": "c_ml_inference_hard_052",
+    "name": "ChronoBoost Inference Factory",
+    "description": "ChronoBoost Inference Factory is a serverless-first ML inference framework written in C that turns raw activity streams (calendar events, keystrokes, application focus changes, e-mail metadata, etc.) into real-time productivity insights.  Using a fully managed, event-driven MLOps pipeline, it automatically preprocesses data, engineers temporal and contextual features, trains and versions multiple forecasting/classification models, and then serves the best model at millisecond latency to downstream productivity dashboards, virtual assistants, and workflow automations.\n\nThe project integrates a feature store for reusable time-series features, hyperparameter tuning and experiment tracking to squeeze maximum predictive power from limited user-generated data, and comprehensive model monitoring to detect drift as work patterns evolve.  All heavy lifting—data ingestion, training, evaluation, version promotion, and inference—is orchestrated through serverless components that scale to thousands of knowledge-workers during peak hours and scale to zero overnight, preserving both performance and cost efficiency in a modern productivity SaaS setting.",
+    "domain": "ml_inference",
+    "complexity": "hard",
+    "language": "c",
+    "architecture": "serverless",
+    "theme": "productivity",
+    "target_file_count": 66,
+    "target_token_count": 490850,
+    "features": [
+      "feature_store",
+      "hyperparameter_tuning",
+      "model_training",
+      "model_versioning",
+      "model_monitoring",
+      "model_evaluation",
+      "model_serving",
+      "data_preprocessing",
+      "feature_engineering",
+      "experiment_tracking"
+    ],
+    "architecture_patterns": [
+      "Pipeline_Pattern",
+      "Factory_Pattern",
+      "Strategy_Pattern",
+      "MLOps_Architecture",
+      "Observer_Pattern"
+    ],
+    "dependencies": [
+      "AWS Lambda custom runtime for C (amazonlinux-2, \"provided.al2\")",
+      "AWS SDK for C (DynamoDB, S3, EventBridge, Step Functions, CloudWatch)",
+      "ONNX Runtime C API (serverless-friendly native inference engine)",
+      "libcurl (secure HTTPS calls to external productivity APIs)",
+      "SQLite (local ephemeral storage for mini-batch feature engineering in Lambda)",
+      "OpenBLAS or oneDNN (optional acceleration for matrix ops during training jobs on AWS Batch/Fargate)",
+      "Redis (Elasticache) – low-latency online feature store",
+      "CMake + Ninja – build system for multi-target deployment artifacts",
+      "Git and AWS CodeCommit – repo & version hooks for experiment tracking",
+      "Python 3.x (auxiliary CLI scripts for hyperparameter tuning jobs in AWS SageMaker)"
+    ],
+    "seed": 800870
+  }
+}

@@ -1,0 +1,55 @@
+{
+  "scenario_id": "c_data_warehouse_hard_048_multi_session_development_medium_01",
+  "case_id": "c_data_warehouse_hard_048",
+  "title": "Implement a Scheduled Data Retention Policy for the Data Warehouse",
+  "description": "The MercuryLedger Data Warehouse is accumulating data indefinitely, leading to rising storage costs and degrading query performance. To manage this, a new feature is required to automatically purge old data from the warehouse based on a configurable retention period. This task involves adding the configuration for the retention period, implementing the core data purging logic, and scheduling this logic to run as a daily background job. This will test the agent's ability to work across configuration, data storage, and job scheduling layers of the application over multiple development sessions.",
+  "difficulty": "medium",
+  "project_spec": {
+    "unique_id": "c_data_warehouse_hard_048",
+    "name": "MercuryLedger DW Insight",
+    "description": "MercuryLedger DW Insight is an enterprise-grade data-warehouse solution written in C that equips medium-to-large corporations with a comprehensive view of their operational and financial performance. The project applies the MVVM paradigm to keep a strict separation between rich business rules (Model), real-time warehousing logic (View-Model) and multiple presentation surfaces (CLI dashboards, GTK desktop console, and REST/JSON adapters as ‘Views’). By combining Strategy, Observer, Pipeline, and Event-Streaming patterns, MercuryLedger ingests heterogeneous ERP, CRM and POS feeds into a governed Data Lake, executes high-throughput ETL pipelines with configurable data-quality stages, and produces batch/stream dashboards for executives and analysts.\n\nDesigned for a “hard” complexity level, the codebase spans 74 source/header files (~307 k tokens) and integrates advanced features such as rule-driven data validation, parallel batch orchestration, point-in-time error recovery, and smart scheduling. The business focus is reflected in pre-built financial KPI calculators, compliance checks (SOX/IFRS), and cost-center visualizations rendered directly from curated fact tables. Managers can subscribe to data-quality events, while DevOps teams monitor pipeline health through an Observer-based notification hub exposed via Prometheus exporters and desktop alerts.\n\nMercuryLedger DW Insight not only highlights how MVVM can be achieved in a systems language like C, but also showcases how disciplined layering enables business stakeholders to evolve analytical requirements without touching low-level ingestion engines or storage back-ends.",
+    "domain": "data_warehouse",
+    "complexity": "hard",
+    "language": "c",
+    "architecture": "mvvm",
+    "theme": "business",
+    "target_file_count": 74,
+    "target_token_count": 307443,
+    "features": [
+      "data_ingestion",
+      "data_validation",
+      "data_quality_checks",
+      "data_storage",
+      "batch_processing",
+      "data_visualization",
+      "scheduling",
+      "monitoring",
+      "parallel_processing",
+      "error_recovery"
+    ],
+    "architecture_patterns": [
+      "Strategy_Pattern",
+      "Observer_Pattern",
+      "Data_Lake",
+      "Event_Streaming",
+      "Pipeline_Pattern",
+      "ETL_Pipeline"
+    ],
+    "dependencies": [
+      "GLib/GTK 4 (UI layer for desktop dashboards – View)",
+      "libcurl (HTTP/SFTP data-ingestion adapters – Model)",
+      "protobuf-c (schema-first serialization between Model and ViewModel)",
+      "Apache Arrow C library (in-memory columnar data representation)",
+      "libpq (PostgreSQL driver for Data Lake persistence)",
+      "pthread / OpenMP (parallel ETL and batch jobs)",
+      "ZeroMQ (event streaming bus between pipeline stages)",
+      "Prometheus C Client (metrics & monitoring Observers)",
+      "LibGDA (database abstraction in ViewModel)",
+      "Cairo + gnuplot pipes (data visualization charts in View)",
+      "crontab + libcron C wrapper (scheduling subsystem)",
+      "zstd / lz4 (fast compression during data staging)",
+      "jansson (JSON config & REST adapters)"
+    ],
+    "seed": 78745
+  }
+}

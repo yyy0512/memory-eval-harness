@@ -1,0 +1,29 @@
+{
+  "scenario_id": "c_web_ecommerce_easy_000_multi_session_development_hard_01",
+  "case_id": "c_web_ecommerce_easy_000",
+  "category": "extended_development_projects",
+  "original_task_category": "multi_session_development",
+  "project_source": "/home/yyy/projects/LoCoBench-Agent/.claude/worktrees/memory-eval-harness/data/generated/c_web_ecommerce_easy_000",
+  "project_name": "BusiCart Core",
+  "language": "c",
+  "complexity": "easy",
+  "session_count": 1,
+  "turns": [
+    {
+      "session": 1,
+      "file": "turns/session_1.jsonl",
+      "turn_count": 1
+    }
+  ],
+  "prompts_for_review": [
+    {
+      "session": 1,
+      "file": "prompts/session_1.txt"
+    }
+  ],
+  "hashes": {
+    "scenario_json_sha256": "2f7675b238a66e0b7c504f3253aa08abb4b5eb8c3c8ddb1ff9855a87cf99d059",
+    "project_tree_sha256": "c979ae9bb8b4da6130e82c1ad1b344ba3bbb9a8c2e997de64fd6ae26ef27dd04",
+    "prepared_case_sha256": "b019a0926789c5dac63c3da07875fb40b2d03f4dabbf1e5cf7b9885732321b6a"
+  }
+}

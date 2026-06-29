@@ -1,0 +1,55 @@
+{
+  "scenario_id": "c_data_streaming_hard_013_multi_session_development_easy_01",
+  "case_id": "c_data_streaming_hard_013",
+  "title": "Implement Dynamic Heartbeat Configuration for Ingestion Service",
+  "description": "The PulseSphere platform is a distributed system of microservices. The operations team requires more control over service behavior without needing to recompile and redeploy code. Currently, the `ingestion_service` uses a hardcoded interval for its main processing loop, which acts as a heartbeat and processing trigger. This task involves modifying the service to read this interval from its configuration file, allowing for dynamic tuning in production environments.",
+  "difficulty": "easy",
+  "project_spec": {
+    "unique_id": "c_data_streaming_hard_013",
+    "name": "PulseSphere: Real-Time Social Pulse Streaming Platform",
+    "description": "PulseSphere is a high-throughput, event-driven data-streaming platform written in C that captures, validates, transforms, and disseminates live \"social pulses\" (likes, comments, shares, follows, and reaction emojis) from multiple social networks, community forums, and in-house engagement widgets. Each pulse is modeled as an immutable event and published into a unified event fabric, enabling downstream microservices to continuously compute community sentiment, trending topics, and influence graphs in near real-time.\n\nDesigned around a microservice-oriented Data Lake and Pipeline Pattern, PulseSphere ingests millions of heterogeneous social events per second, performs schema-on-read validation, parallel enrichment (geo-tagging, language detection, toxicity scoring), and streams curated data into analytical sinks for data scientists while simultaneously driving interactive dashboards for moderators. Fault-tolerant batch windows reconcile late and out-of-order events, and Strategy Pattern plug-ins allow rapid experimentation with alternative enrichment, quality-check, and visualization strategies without redeploying the entire system.",
+    "domain": "data_streaming",
+    "complexity": "hard",
+    "language": "c",
+    "architecture": "event_driven",
+    "theme": "social",
+    "target_file_count": 75,
+    "target_token_count": 234678,
+    "features": [
+      "data_storage",
+      "stream_processing",
+      "data_ingestion",
+      "error_recovery",
+      "data_validation",
+      "data_visualization",
+      "batch_processing",
+      "parallel_processing",
+      "data_quality_checks",
+      "data_transformation"
+    ],
+    "architecture_patterns": [
+      "Microservices",
+      "Data_Lake",
+      "Observer_Pattern",
+      "Strategy_Pattern",
+      "Event_Streaming",
+      "Pipeline_Pattern"
+    ],
+    "dependencies": [
+      "librdkafka (C client for Apache Kafka) – Event streaming backbone",
+      "libuv – High-performance event loop & async I/O",
+      "Apache Arrow C Library – In-memory columnar representation for batch and stream interoperability",
+      "Flatbuffers or Google Protobuf-C – Compact, schema-versioned message serialization",
+      "jansson – JSON parsing/validation for schema-on-read",
+      "libpq / PostgreSQL – Metadata & configuration store (Data Lake catalog)",
+      "Redis Streams (hiredis) – Low-latency pub/sub for hot paths (e.g., moderator alert channels)",
+      "OpenSSL – TLS encryption for cross-datacenter event transport",
+      "Prometheus C Client & Grafana – Telemetry, health metrics, and data visualization endpoints",
+      "Parquet-C and libhdfs – Batch off-loads to HDFS-backed Data Lake",
+      "OpenMP / Intel TBB – Parallel processing of transformation stages",
+      "cJSON / RapidJSON C wrappers – Lightweight JSON generation for UI APIs",
+      "libarchive – Compressed batch file handling in cold-storage workflows"
+    ],
+    "seed": 617515
+  }
+}

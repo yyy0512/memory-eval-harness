@@ -1,0 +1,26 @@
+You are working in the repository at the current working directory. This is session 1 of a multi-session development task. Complete only the requirements for this session. At the end, save any useful project-specific memory for future sessions.
+
+### Overall Goal
+Modify the SocialPulse Gateway to support GraphQL request batching. A batched request is a JSON array of standard GraphQL request objects. The server must process each operation in the array and return a JSON array of corresponding responses.
+
+### Session 1: Initial Implementation (Parsing and Data Structures)
+Your first task is to begin the implementation. Focus on modifying the data structures and the GraphQL parser to recognize and parse a batched request. 
+
+**Requirements for this session:**
+1.  In `src/adapters/graphql/graphql_parser.h`, define new data structures to represent a batched request (an array of individual GraphQL requests).
+2.  Update the existing `GraphQLRequest` or a relevant container struct to indicate whether a request is a single operation or a batch.
+3.  In `src/adapters/graphql/graphql_parser.c`, modify the primary parsing function to detect if the incoming JSON payload is an array. 
+4.  If the payload is an array, parse each element into an individual GraphQL request structure and populate your new batch structure.
+5.  You do not need to implement the execution logic in the request handler in this session. The code may not compile or be fully functional at the end of this session, but the parsing logic should be in place.
+
+### Session 2: Resumption and Completion (Execution and Response Aggregation)
+You are resuming the 'GraphQL Request Batching' task. The codebase has been partially modified to parse batched requests but does not yet execute them. 
+
+**Requirements for this session:**
+1.  First, analyze the changes made in the previous session, particularly in `graphql_parser.h` and `graphql_parser.c`, to understand the current state.
+2.  Modify the logic in `src/infrastructure/network/request_handler.h` and its implementation to handle the new batched request structure.
+3.  Implement a loop that iterates through each operation in the parsed batch.
+4.  For each operation, reuse the existing single-query execution logic.
+5.  Aggregate the individual JSON responses from each operation into a single JSON array, which will form the final HTTP response body.
+6.  Ensure robust error handling. If one operation in the batch fails, it should not prevent others from running. The final response array should contain a mix of successful results and error objects, corresponding to each operation in the request batch.
+7.  Pay close attention to memory management. All dynamically allocated memory for the batch, individual requests, and aggregated responses must be properly freed to prevent leaks.

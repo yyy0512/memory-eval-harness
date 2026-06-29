@@ -1,0 +1,10 @@
+You are working in the repository at the current working directory. This is session 1 of a multi-session development task. Complete only the requirements for this session. At the end, save any useful project-specific memory for future sessions.
+
+You will implement a new, configurable heartbeat feature. The task is broken down into three sessions.
+
+**Session 1: Analysis and Planning**
+Your first task is to analyze the existing codebase and create a plan. 
+1.  Examine `SynestheticPulseMesh/src/config.h` and `SynestheticPulseMesh/src/main.c`.
+2.  Propose the necessary changes to `config.h` to support two new configuration directives: `HEARTBEAT_ENABLED` (a boolean toggle) and `HEARTBEAT_INTERVAL_SECONDS` (an integer for the interval).
+3.  Describe where in `main.c` you would add the logic to parse these new configuration values and where in the main application loop you would implement the timer logic to trigger the heartbeat event.
+4.  Do **not** write the implementation code yet. Provide only the plan and a description of the proposed changes.

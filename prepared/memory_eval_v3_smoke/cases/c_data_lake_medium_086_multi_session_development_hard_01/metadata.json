@@ -1,0 +1,48 @@
+{
+  "scenario_id": "c_data_lake_medium_086_multi_session_development_hard_01",
+  "case_id": "c_data_lake_medium_086",
+  "title": "Implement a Dead-Letter Queue (DLQ) for Robust Error Handling",
+  "description": "The HydraLake Utility Orchestrator currently handles processing errors in a simplistic way: it either logs the error and halts the pipeline, or skips the problematic record. This is insufficient for production environments where every piece of data is valuable. This task requires implementing a Dead-Letter Queue (DLQ) mechanism. When a record fails during a transformation or ingestion step, instead of being discarded, it should be routed to a configurable, persistent storage location (a DLQ file) along with metadata about the failure. This allows for later inspection, reprocessing, or alerting without interrupting the main data flow.",
+  "difficulty": "hard",
+  "project_spec": {
+    "unique_id": "c_data_lake_medium_086",
+    "name": "HydraLake Utility Orchestrator",
+    "description": "HydraLake Utility Orchestrator is a medium-scale data-lake backbone written in C that acts as a Swiss-army-knife for enterprise-grade data operations.  It consolidates batch_processing, stream_processing, data_ingestion, data_transformation, parallel_processing, error_recovery, data_storage, and scheduling inside a layered yet pluggable toolkit—perfect for IT teams that need a lean, embeddable solution rather than a heavyweight platform.  Inspired by hexagonal architecture, every external concern (file systems, cloud blobs, message brokers, CLI tools, monitoring agents) connects through clearly defined ports and adapters, making HydraLake eminently scriptable, testable, and replaceable in heterogeneous environments.\n\nUtility is at the project’s core: instead of imposing an end-to-end analytics stack, HydraLake exposes reusable ‘lake utilities’ that can be wired together through the Observer_Pattern, Pipeline_Pattern, and lightweight Microservices launched by the built-in scheduler.  Operators can plug in an S3 adapter for cold storage today, swap it for HDFS tomorrow, or bolt on a Kafka stream without code changes to the business rules.  The command-line façade ships as a collection of small Unix-style tools (ingest, flush, transform, replay, inspect) that all leverage the same internal ports, enabling script-level composability while keeping the core logic clean and domain-centric.",
+    "domain": "data_lake",
+    "complexity": "medium",
+    "language": "c",
+    "architecture": "hexagonal",
+    "theme": "utility",
+    "target_file_count": 38,
+    "target_token_count": 138414,
+    "features": [
+      "batch_processing",
+      "error_recovery",
+      "data_storage",
+      "stream_processing",
+      "data_transformation",
+      "parallel_processing",
+      "data_ingestion",
+      "scheduling"
+    ],
+    "architecture_patterns": [
+      "Data_Lake",
+      "Observer_Pattern",
+      "Microservices",
+      "Pipeline_Pattern"
+    ],
+    "dependencies": [
+      "glib >= 2.56              // core data structures, portability helpers",
+      "libpq >= 14               // PostgreSQL adapter for metadata/catalog storage",
+      "Apache Arrow C library    // columnar in-memory representation for fast transforms",
+      "librdkafka                // high-speed Kafka/Redpanda stream ingestion",
+      "libevent                  // event loop for non-blocking IO and Observer dispatching",
+      "protobuf-c                // schema-first message contracts for ports/adapters",
+      "zlib                      // compression utilities for lake files",
+      "libcurl                   // REST/S3/HDFS over HTTP adapters",
+      "pthreads                  // parallel_processing primitives",
+      "cron-lib (tiny-cron)      // embedded scheduler for recurring jobs"
+    ],
+    "seed": 808451
+  }
+}

@@ -1,0 +1,47 @@
+{
+  "scenario_id": "c_ml_training_hard_051_multi_session_development_medium_01",
+  "case_id": "c_ml_training_hard_051",
+  "category": "extended_development_projects",
+  "original_task_category": "multi_session_development",
+  "project_source": "/home/yyy/projects/LoCoBench-Agent/.claude/worktrees/memory-eval-harness/data/generated/c_ml_training_hard_051",
+  "project_name": "CineWave Maestro: Adaptive Score Training Platform",
+  "language": "c",
+  "complexity": "hard",
+  "session_count": 3,
+  "turns": [
+    {
+      "session": 1,
+      "file": "turns/session_1.jsonl",
+      "turn_count": 1
+    },
+    {
+      "session": 2,
+      "file": "turns/session_2.jsonl",
+      "turn_count": 1
+    },
+    {
+      "session": 3,
+      "file": "turns/session_3.jsonl",
+      "turn_count": 1
+    }
+  ],
+  "prompts_for_review": [
+    {
+      "session": 1,
+      "file": "prompts/session_1.txt"
+    },
+    {
+      "session": 2,
+      "file": "prompts/session_2.txt"
+    },
+    {
+      "session": 3,
+      "file": "prompts/session_3.txt"
+    }
+  ],
+  "hashes": {
+    "scenario_json_sha256": "78e304a265dbfa2f31c22681d92a21e48d3308a4586300213f0a1be269ec6d06",
+    "project_tree_sha256": "7469cc6db8d3c525b80b190efac3782ac5585e8b29b48425fc0f27163c9db25f",
+    "prepared_case_sha256": "643fecfd6001a34b6cb9e13b82f7729b4f8c6b04e8804b2eb6dbefcf15487fb6"
+  }
+}

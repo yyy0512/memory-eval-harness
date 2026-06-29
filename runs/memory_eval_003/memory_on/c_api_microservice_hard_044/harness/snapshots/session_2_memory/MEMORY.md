@@ -1,0 +1,1 @@
+- [Task Dependency multi-session scope](task_dependency_feature_multisession.md) — Sessions 1-2 completed data layer and CQS/business logic.

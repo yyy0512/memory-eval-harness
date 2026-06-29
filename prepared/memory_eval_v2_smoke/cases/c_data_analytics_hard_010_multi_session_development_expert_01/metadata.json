@@ -1,0 +1,53 @@
+{
+  "scenario_id": "c_data_analytics_hard_010_multi_session_development_expert_01",
+  "case_id": "c_data_analytics_hard_010",
+  "title": "Implement Resilient Pipeline State Checkpointing and Recovery",
+  "description": "The PulseStream Insight Engine is a high-performance data analytics platform that processes continuous data streams. A critical weakness is its lack of fault tolerance; if the engine crashes or is restarted, the state of all in-flight processing pipelines is lost, leading to data loss and requiring full reprocessing. This task involves implementing a robust checkpointing mechanism to periodically save the state of active pipelines to disk, allowing the engine to resume from the last known good state upon restart.",
+  "difficulty": "expert",
+  "project_spec": {
+    "unique_id": "c_data_analytics_hard_010",
+    "name": "PulseStream Insight Engine",
+    "description": "PulseStream Insight Engine is an end-to-end healthcare analytics hub designed as a single, self-contained C application that ingests high-frequency physiological signals (e.g., ECG, SpO₂), EHR snapshots, and HL7/FHIR event streams from hospital wards, then cleanses, enriches, analyzes, and visualizes them for clinicians and quality-assurance teams. Operating as a monolith, it embeds an internal ETL Pipeline that lands raw data in an on-disk Data Lake, triggers configurable Strategy-Pattern-based transformation chains (e.g., ICU-specific vs. ambulatory rules), and emits near-real-time dashboards as well as governed research extracts. \n\nThe engine features an internal Scheduler for timed batch loads, a Stream Processing core that parallelizes windowed analytics across CPU cores (POSIX threads + SIMD), and a robust Observer Pattern that propagates state changes—such as new device connections or anomaly detections—through the system for alerting and automated error recovery. Built-in data-quality checks flag missing vitals or malformed HL7 segments, while a monitoring subsystem records performance counters and health metrics to ensure regulatory-grade auditability. A native OpenGL overlay renders ICU trend lines, cohort heatmaps, and predictive risk scores directly from the monolith, eliminating external BI dependencies yet allowing the deployment team to ship a single binary to on-prem clinical data centers.\n\nThis design deliberately avoids runtime service orchestration overhead, instead packaging 60 tightly-coupled modules (files) that compile into one executable (~297k tokens of source) suited for locked-down hospital environments where inter-process communication and network exposure are heavily restricted.",
+    "domain": "data_analytics",
+    "complexity": "hard",
+    "language": "c",
+    "architecture": "monolithic",
+    "theme": "healthcare",
+    "target_file_count": 60,
+    "target_token_count": 296981,
+    "features": [
+      "data_storage",
+      "scheduling",
+      "error_recovery",
+      "parallel_processing",
+      "data_visualization",
+      "data_quality_checks",
+      "monitoring",
+      "data_ingestion",
+      "stream_processing",
+      "data_transformation"
+    ],
+    "architecture_patterns": [
+      "ETL_Pipeline",
+      "Observer_Pattern",
+      "Data_Lake",
+      "Pipeline_Pattern",
+      "Microservices",
+      "Strategy_Pattern"
+    ],
+    "dependencies": [
+      "SQLite3 (embedded relational storage for metadata/catalogs)",
+      "HDF5 C API (columnar Data Lake file format for high-frequency signals)",
+      "libcurl (secure HTTPS ingestion from FHIR/HL7 endpoints)",
+      "libxml2 (HL7 v2.x parsing)",
+      "jansson (JSON handling for FHIR resources)",
+      "czmq (ZeroMQ C bindings for in-process publish/subscribe Observer Pattern)",
+      "OpenMP (parallel for loops in transformation and analytics stages)",
+      "OpenBLAS (vectorized numerical routines for risk-score algorithms)",
+      "OpenGL + GLFW (cross-platform visualization layer)",
+      "libuv (event loop & high-resolution timers for scheduler/stream engine)",
+      "spdlog (file & syslog logging with rotation for audit trail)"
+    ],
+    "seed": 952162
+  }
+}

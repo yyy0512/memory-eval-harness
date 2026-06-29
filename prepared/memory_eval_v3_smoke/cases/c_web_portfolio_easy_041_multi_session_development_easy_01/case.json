@@ -1,0 +1,38 @@
+{
+  "scenario_id": "c_web_portfolio_easy_041_multi_session_development_easy_01",
+  "case_id": "c_web_portfolio_easy_041",
+  "category": "extended_development_projects",
+  "original_task_category": "multi_session_development",
+  "project_source": "/home/yyy/projects/LoCoBench-Agent/.claude/worktrees/memory-eval-harness/data/generated/c_web_portfolio_easy_041",
+  "project_name": "Edufolio Micro-Showcase",
+  "language": "c",
+  "complexity": "easy",
+  "session_count": 2,
+  "turns": [
+    {
+      "session": 1,
+      "file": "turns/session_1.jsonl",
+      "turn_count": 1
+    },
+    {
+      "session": 2,
+      "file": "turns/session_2.jsonl",
+      "turn_count": 1
+    }
+  ],
+  "prompts_for_review": [
+    {
+      "session": 1,
+      "file": "prompts/session_1.txt"
+    },
+    {
+      "session": 2,
+      "file": "prompts/session_2.txt"
+    }
+  ],
+  "hashes": {
+    "scenario_json_sha256": "2c1cb7403a87d289b954b6c18090a80d6413f99c1c1ffedecbf5fe95051749a2",
+    "project_tree_sha256": "42bdcf0856107678a37b8fed2470b3fd9228b7e51cd47a2f57025dbd38890822",
+    "prepared_case_sha256": "f363121133dc0c3a6e54368eb00f6fa11a66bdb7993f5d026c6c54b73a9a7664"
+  }
+}

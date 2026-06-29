@@ -1,0 +1,46 @@
+{
+  "scenario_id": "c_system_automation_medium_062_multi_session_development_expert_01",
+  "case_id": "c_system_automation_medium_062",
+  "title": "Implement a System-Wide 'Dry Run' Mode for All Commands",
+  "description": "The LambdaUtility Orchestrator (LUO) is a C-based system automation tool used for managing cloud infrastructure. It operates by processing commands (e.g., 'deploy', 'backup', 'metrics') via a chain-of-responsibility and command pattern architecture. To enhance safety and enable testing, a system-wide 'dry run' capability is required. This mode will allow operators to see what actions a command *would* perform without actually making any changes to the system. The implementation must be integrated deeply into the existing architecture, touching the core command execution pipeline, individual command logic, and the configuration system.",
+  "difficulty": "expert",
+  "project_spec": {
+    "unique_id": "c_system_automation_medium_062",
+    "name": "LambdaUtility Orchestrator",
+    "description": "LambdaUtility Orchestrator is a medium-scale serverless automation suite written in C that focuses on day-to-day systems utility tasks—alerting, configuration management, automated deployments, centralized log aggregation, scheduled backups, and performance metric harvesting—without requiring a long-running control plane. Each capability is delivered as an independent function, triggered by events such as cron-like schedules, message-bus topics, or direct REST invocations, and then chained together through Command and Chain-of-Responsibility patterns to create complex automation flows on demand.\n\nThe project treats every utility action (e.g., push a new Nginx config, snapshot a database volume, roll out a binary, or aggregate yesterday’s logs) as a discrete, stateless Lambda written in C. An event dispatcher function maps triggers to command objects and pushes them through an Observer pipeline that fans out notifications to the proper targets (Slack, email, or SMS). Because workloads are spiky—heavy during deployments or backup windows but idle most of the day—serverless eliminates idle resource costs while retaining sub-second availability, making LambdaUtility Orchestrator an ideal, cost-efficient backbone for hands-off system automation.",
+    "domain": "system_automation",
+    "complexity": "medium",
+    "language": "c",
+    "architecture": "serverless",
+    "theme": "utility",
+    "target_file_count": 40,
+    "target_token_count": 114469,
+    "features": [
+      "alerting",
+      "configuration_management",
+      "backup_recovery",
+      "deployment_automation",
+      "performance_metrics",
+      "log_aggregation"
+    ],
+    "architecture_patterns": [
+      "Command_Pattern",
+      "Chain_of_Responsibility",
+      "Event_Driven",
+      "Observer_Pattern"
+    ],
+    "dependencies": [
+      "AWS Lambda C Runtime (or OpenFaaS watchdog for C)",
+      "libcurl (HTTPS calls to APIs & webhooks)",
+      "cJSON (lightweight JSON parsing/serialization)",
+      "SQLite (on-disk temp state snapshots inside /tmp)",
+      "zlib (compression for backup streams)",
+      "Prometheus C client (exposing custom metrics via Pushgateway)",
+      "libarchive (tar/zip creation for backup jobs)",
+      "glibc / musl (minimal standard C runtime)",
+      "spdlog-c (syslog/JSON log formatting)",
+      "CMake (cross-platform build & packaging)"
+    ],
+    "seed": 372480
+  }
+}

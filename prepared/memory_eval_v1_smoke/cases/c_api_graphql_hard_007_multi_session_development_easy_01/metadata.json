@@ -1,0 +1,52 @@
+{
+  "scenario_id": "c_api_graphql_hard_007_multi_session_development_easy_01",
+  "case_id": "c_api_graphql_hard_007",
+  "title": "Implement a Configurable Log Level",
+  "description": "The ChromaCanvas API Gateway currently has a basic logging system. Logs are either enabled or disabled globally. To improve observability and debugging, we need to introduce a more granular, level-based logging system. This task involves adding a configuration setting for the log level and then modifying the logger to respect this setting. The task is divided into two sessions to test the agent's ability to retain context and build upon previous work.",
+  "difficulty": "easy",
+  "project_spec": {
+    "unique_id": "c_api_graphql_hard_007",
+    "name": "ChromaCanvas API Gateway",
+    "description": "ChromaCanvas is a vibrant service-oriented platform that lets digital artists, VJ performers, and interactive-installation creators programmatically mix, store, and stream “color stories” (animated palettes, gradient timelines, LUT stacks) in real time. Built in C for raw performance, the system exposes both classic REST endpoints and an expressive GraphQL canvas so front-end tools, IoT light rigs, or game engines can query or mutate visual assets with millisecond latency.    \n\nThe MVC paradigm is woven throughout: Controllers live in a thin HTTP layer (libmicrohttpd) and the GraphQL resolver layer, funneling requests to a Service layer that embodies the application’s creative domain (palette blending, key-frame interpolation, animation sequencing). Models encapsulate storage concerns with PostgreSQL and a high-speed Redis cache, while Views materialize as JSON or GraphQL responses. Microservice boundaries isolate heavy compute tasks such as color-space conversion or video-frame extraction, coordinated via an API Gateway that handles authentication, rate-limiting, and version routing. The result is a maintainable yet highly performant backbone for inventive color-centric applications, markedly different from typical CRUD-style GraphQL demos by elevating artistic data transformations to first-class citizens.\n",
+    "domain": "api_graphql",
+    "complexity": "hard",
+    "language": "c",
+    "architecture": "mvc",
+    "theme": "creative",
+    "target_file_count": 72,
+    "target_token_count": 497622,
+    "features": [
+      "rest_endpoints",
+      "logging",
+      "rate_limiting",
+      "monitoring",
+      "api_documentation",
+      "response_caching",
+      "graphql_schema",
+      "pagination",
+      "versioning",
+      "authentication"
+    ],
+    "architecture_patterns": [
+      "REST_Architecture",
+      "GraphQL_Schema",
+      "Microservices",
+      "Service_Layer",
+      "Command_Query_Separation",
+      "API_Gateway"
+    ],
+    "dependencies": [
+      "libmicrohttpd – lightweight HTTP server for REST controllers",
+      "cgql or graphqlparser-c – minimal C GraphQL parser/validator",
+      "libpq / PostgreSQL – relational store for persistent ‘color stories’",
+      "libredis / hiredis – response caching & distributed rate-limiting buckets",
+      "libjwt – HMAC/RS256 JWT auth tokens",
+      "cJSON or jansson – JSON serialization for REST views",
+      "Prometheus C client – metrics & monitoring",
+      "zlog – structured, high-performance logging",
+      "libuv – async I/O abstraction enabling Microservice workers",
+      "cmocka – unit-testing framework following CQRS boundaries"
+    ],
+    "seed": 559761
+  }
+}

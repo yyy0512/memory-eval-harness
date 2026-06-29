@@ -1,0 +1,11 @@
+You are working in the repository at the current working directory. This is session 3 of a 3-session development task. The previous session has ended and conversation context is unavailable. Use the repository state and your persistent memory if available. Do not ask for previous conversation context. Complete only the requirements for this session. At the end, update memory with decisions and remaining work.
+
+This task is broken into three sessions. You must complete each session before moving to the next, retaining the context of your previous work.
+
+**Session 3: Persist and Retrieve the New Metadata**
+The final step is to ensure this new metadata is saved to disk when a model artifact is created and loaded back correctly. This involves updating the serialization and deserialization logic.
+
+1.  Remember the changes you made in the previous sessions to the metadata struct and the training component.
+2.  Inspect `src/core/artifact_store.c`. This file handles saving and loading model artifacts, likely using the provided `cJSON` library.
+3.  Modify the function responsible for saving model metadata to JSON to include the new `feature_component_name` field.
+4.  Modify the function responsible for loading model metadata from JSON to correctly parse the `feature_component_name` and populate the struct. Ensure your loading logic is robust and doesn't fail if the field is missing (for older model artifacts).

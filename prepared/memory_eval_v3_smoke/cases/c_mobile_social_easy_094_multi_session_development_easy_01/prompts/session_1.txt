@@ -1,0 +1,24 @@
+You are working in the repository at the current working directory. This is session 1 of a multi-session development task. Complete only the requirements for this session. At the end, save any useful project-specific memory for future sessions.
+
+This is a multi-session task. You will be given instructions for each session separately.
+
+**SESSION 1 INSTRUCTIONS:**
+Your first objective is to prepare the application's configuration for the new Ephemeral Snaps feature. 
+1.  Navigate to `snapsecure_utility_hub/src/utils/config_manager.c`.
+2.  Add a new integer configuration setting named `SNAP_LIFETIME_HOURS`.
+3.  Set its default value to `24` (hours).
+4.  Ensure that this new setting is properly initialized and can be retrieved using the existing configuration access functions. Do not modify any other files in this session.
+
+**(Pause for evaluation. The agent will be re-initialized with the updated file state for the next session.)**
+
+**SESSION 2 INSTRUCTIONS:**
+Welcome back. In the previous session, you added the `SNAP_LIFETIME_HOURS` configuration. Now, you will use this setting to implement the core expiration logic.
+1.  In `snapsecure_utility_hub/src/core/snap_manager.c`, locate the primary data structure that defines a 'Snap' (e.g., `struct Snap`).
+2.  Modify this structure to include a field for storing an expiration timestamp (e.g., `expiration_timestamp` of type `long`).
+3.  Update the function responsible for creating new snaps (e.g., `create_snap`).
+4.  Inside this function, after a snap is created, you must:
+    a. Retrieve the `SNAP_LIFETIME_HOURS` value from the configuration manager.
+    b. Get the current system time.
+    c. Calculate the expiration timestamp by adding the lifetime (in seconds) to the current time.
+    d. Store this calculated timestamp in the new field you added to the Snap structure.
+5.  Make sure to include any necessary headers (like `<time.h>`) to support your changes.

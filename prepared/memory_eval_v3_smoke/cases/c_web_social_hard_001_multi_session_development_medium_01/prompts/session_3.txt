@@ -1,0 +1,10 @@
+You are working in the repository at the current working directory. This is session 3 of a 3-session development task. The previous session has ended and conversation context is unavailable. Use the repository state and your persistent memory if available. Do not ask for previous conversation context. Complete only the requirements for this session. At the end, update memory with decisions and remaining work.
+
+You will address this issue over three distinct sessions. Follow the instructions for each session carefully.
+
+**Session 3: Feature Enhancement and Testing**
+Now that the bug is fixed, management wants to introduce a user-friendly 'enrollment grace period'. The new requirement is: if a user drops a course within 24 hours of enrolling, they should never be billed, even if a billing cycle runs in that period. 
+
+Your tasks for this final session are:
+1.  Modify the `billing_service` to implement this 24-hour grace period logic.
+2.  Create a new test file, `services/billing_service/tests/test_payment_service.c`, and add a unit test that specifically verifies the grace period functionality. The test should simulate a user enrolling and then dropping a course within the 24-hour window and assert that no payment is processed.

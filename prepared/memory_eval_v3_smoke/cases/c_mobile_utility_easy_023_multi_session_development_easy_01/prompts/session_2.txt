@@ -1,0 +1,11 @@
+You are working in the repository at the current working directory. This is session 2 of a 3-session development task. The previous session has ended and conversation context is unavailable. Use the repository state and your persistent memory if available. Do not ask for previous conversation context. Complete only the requirements for this session. At the end, update memory with decisions and remaining work.
+
+You will implement a new Dark Mode feature for the MusePulse Lite application over three separate development sessions. You must retain context and build upon your work from the previous session.
+
+**Session 2: UI Control Implementation**
+(Agent is presented with the modified code from Session 1)
+Welcome back. You previously updated the data model. Now, you will create the UI to control this setting.
+1.  In `musepulse_lite//src//viewmodel//main_viewmodel.c`, expose the new setting by creating getter and setter functions: `viewmodel_get_dark_mode_status()` and `viewmodel_set_dark_mode_status(int status)`.
+2.  The setter function should trigger a `SETTINGS_UPDATED` event using the existing event system (`events_trigger_event`).
+3.  In `musepulse_lite//src//main.c`, locate the `draw_settings_page()` function and add a UI checkbox labeled "Enable Dark Mode".
+4.  This checkbox should read its initial state from `viewmodel_get_dark_mode_status()` and call `viewmodel_set_dark_mode_status()` when its state changes.

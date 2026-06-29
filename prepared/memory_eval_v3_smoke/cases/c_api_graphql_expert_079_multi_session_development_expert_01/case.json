@@ -1,0 +1,29 @@
+{
+  "scenario_id": "c_api_graphql_expert_079_multi_session_development_expert_01",
+  "case_id": "c_api_graphql_expert_079",
+  "category": "extended_development_projects",
+  "original_task_category": "multi_session_development",
+  "project_source": "/home/yyy/projects/LoCoBench-Agent/.claude/worktrees/memory-eval-harness/data/generated/c_api_graphql_expert_079",
+  "project_name": "SynestheticCanvas API Suite",
+  "language": "c",
+  "complexity": "expert",
+  "session_count": 1,
+  "turns": [
+    {
+      "session": 1,
+      "file": "turns/session_1.jsonl",
+      "turn_count": 1
+    }
+  ],
+  "prompts_for_review": [
+    {
+      "session": 1,
+      "file": "prompts/session_1.txt"
+    }
+  ],
+  "hashes": {
+    "scenario_json_sha256": "f2a2eecdbb59d9ff7fe2b14408ee579bed75673d11bc208ac8d157fcf0d20c6d",
+    "project_tree_sha256": "612678a28167443b87eaea76d5c3a472dadf15dc07f7f09b6b2e023c271e356f",
+    "prepared_case_sha256": "2c6d3e310ff5098eaa2ef9331783bf9d54e212e2341addb2a0d58b4905d4a4fd"
+  }
+}

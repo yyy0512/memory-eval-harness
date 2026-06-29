@@ -1,0 +1,57 @@
+diff --git a/chromacanvas_api_gateway/src/main.c b/chromacanvas_api_gateway/src/main.c
+index 03d54bc..2b4f198 100644
+--- a/chromacanvas_api_gateway/src/main.c
++++ b/chromacanvas_api_gateway/src/main.c
+@@ -41,6 +41,7 @@
+ /* ---------------------------------------------------------------------------
+  * Logging Utilities
+  * --------------------------------------------------------------------------*/
++#define LOG_LEVEL_DEBUG 0
+ #define LOG_LEVEL_INFO  1
+ #define LOG_LEVEL_WARN  2
+ #define LOG_LEVEL_ERROR 3
+@@ -49,6 +50,24 @@
+ #define LOG_LEVEL LOG_LEVEL_INFO
+ #endif
+ 
++#if defined(__GNUC__) || defined(__clang__)
++extern int cc_cfg_log_level(void) __attribute__((weak));
++#else
++extern int cc_cfg_log_level(void);
++#endif
++
++static int
++configured_log_level(void)
++{
++    if (cc_cfg_log_level) {
++        int level = cc_cfg_log_level();
++        if (level >= LOG_LEVEL_DEBUG && level <= LOG_LEVEL_ERROR)
++            return level;
++    }
++
++    return LOG_LEVEL;
++}
++
+ static const char *
+ timestamp_iso8601(void)
+ {
+@@ -63,8 +82,9 @@ timestamp_iso8601(void)
+ 
+ #define LOG(level, fmt, ...)                                            \
+     do {                                                                \
+-        if (level >= LOG_LEVEL) {                                       \
++        if (level >= configured_log_level()) {                           \
+             const char *lvl_str =                                       \
++                (level == LOG_LEVEL_DEBUG) ? "DEBUG" :                  \
+                 (level == LOG_LEVEL_INFO)  ? "INFO"  :                  \
+                 (level == LOG_LEVEL_WARN)  ? "WARN"  : "ERROR";         \
+             fprintf(stderr, "%s [%s] " fmt "\n",                        \
+@@ -256,6 +276,8 @@ request_handler(void                  *cls,
+                                                         MHD_CONNECTION_VALUE_REMOTE_ADDRESS,
+                                                         NULL);
+ 
++    LOG(LOG_LEVEL_DEBUG, "Handling %s %s from IP %s", method, url, client_ip);
++
+     /* Rate limit check */
+     if (!rate_limit_allow(client_ip)) {
+         LOG(LOG_LEVEL_WARN, "Rate limit exceeded for IP %s", client_ip);

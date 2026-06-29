@@ -1,0 +1,44 @@
+{
+  "scenario_id": "c_game_simulation_medium_033_multi_session_development_easy_01",
+  "case_id": "c_game_simulation_medium_033",
+  "title": "Implement a Master Volume Setting from Configuration",
+  "description": "The 'Quest for Quantum' engine requires a global master volume setting to control all audio output. This setting should be loaded from the main configuration file, `assets/config.json`, at startup. The loaded value must then be propagated through the engine's event system so that subscribed modules (like the audio system) can react accordingly. This task is designed to be completed over multiple sessions, requiring the agent to retain context and build upon previous work.",
+  "difficulty": "easy",
+  "project_spec": {
+    "unique_id": "c_game_simulation_medium_033",
+    "name": "Quest for Quantum: An Event-Driven Physics Playground",
+    "description": "Quest for Quantum is an educational game-simulation that turns middle-school physics lessons into an interactive playground. Learners guide customizable \"Photon\" avatars through puzzle-based levels that visualize real-time concepts such as reflection, refraction, and wave–particle duality. An internal scripting system lets teachers design new scenarios—e.g., tweak refractive indices or add obstacles—without recompiling the C code, fostering rapid curriculum alignment.\n\nBuilt around a fully event-driven core, every gameplay occurrence (key-presses, sensor collisions, AI decisions, timeline triggers) is dispatched as an event object that flows through a Command Pattern bus. The Entity-Component-System (ECS) separates data (mass, velocity, wavelength) from behavior (gravity_system, optics_system), making scientific rules easy to modify or extend. A lightweight level editor empowers students to create their own \"thought experiments,\" reinforcing learning by doing. Features such as resource hot-loading, an Object Pool for particles, and an audio feedback layer (sonifying frequency changes) round out a medium-scale codebase of roughly 40 C source files (~140k tokens).",
+    "domain": "game_simulation",
+    "complexity": "medium",
+    "language": "c",
+    "architecture": "event_driven",
+    "theme": "education",
+    "target_file_count": 40,
+    "target_token_count": 139694,
+    "features": [
+      "input_handling",
+      "scripting_system",
+      "resource_management",
+      "audio_system",
+      "game_engine",
+      "level_editor",
+      "ai_behavior"
+    ],
+    "architecture_patterns": [
+      "Command_Pattern",
+      "Object_Pool",
+      "Entity_Component_System",
+      "Game_Loop"
+    ],
+    "dependencies": [
+      "SDL2 (windowing, input_handling, audio callbacks)",
+      "Lua 5.4 (scripting_system for teacher-authored experiments)",
+      "flecs (header-only ECS in C for Entity_Component_System)",
+      "PhysFS (virtual file system for resource_management and level packages)",
+      "SDL_mixer or PortAudio (cross-platform audio_system)",
+      "cJSON (serialization for level_editor exports/imports)",
+      "stb_image / stb_vorbis (asset loading with minimal footprint)"
+    ],
+    "seed": 348639
+  }
+}

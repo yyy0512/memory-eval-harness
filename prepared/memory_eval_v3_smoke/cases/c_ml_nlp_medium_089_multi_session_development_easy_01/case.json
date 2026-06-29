@@ -1,0 +1,47 @@
+{
+  "scenario_id": "c_ml_nlp_medium_089_multi_session_development_easy_01",
+  "case_id": "c_ml_nlp_medium_089",
+  "category": "extended_development_projects",
+  "original_task_category": "multi_session_development",
+  "project_source": "/home/yyy/projects/LoCoBench-Agent/.claude/worktrees/memory-eval-harness/data/generated/c_ml_nlp_medium_089",
+  "project_name": "LexiLearn Coach: Component-Based NLP Tutor Platform",
+  "language": "c",
+  "complexity": "medium",
+  "session_count": 3,
+  "turns": [
+    {
+      "session": 1,
+      "file": "turns/session_1.jsonl",
+      "turn_count": 1
+    },
+    {
+      "session": 2,
+      "file": "turns/session_2.jsonl",
+      "turn_count": 1
+    },
+    {
+      "session": 3,
+      "file": "turns/session_3.jsonl",
+      "turn_count": 1
+    }
+  ],
+  "prompts_for_review": [
+    {
+      "session": 1,
+      "file": "prompts/session_1.txt"
+    },
+    {
+      "session": 2,
+      "file": "prompts/session_2.txt"
+    },
+    {
+      "session": 3,
+      "file": "prompts/session_3.txt"
+    }
+  ],
+  "hashes": {
+    "scenario_json_sha256": "0259f1682ba7f910b196195e3e697887961c2a2b341e4ca3863c3aacc335af75",
+    "project_tree_sha256": "132531abfff736ac0deeb318b1906475bfdaa864a9b0ffbdd09eb271e3022189",
+    "prepared_case_sha256": "c5260507e81052e971ee2b824a727c62dbda1981b4567a97f91b90fd18835109"
+  }
+}

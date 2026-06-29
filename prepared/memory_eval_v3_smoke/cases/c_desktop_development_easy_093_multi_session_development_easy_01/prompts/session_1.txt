@@ -1,0 +1,11 @@
+You are working in the repository at the current working directory. This is session 1 of a multi-session development task. Complete only the requirements for this session. At the end, save any useful project-specific memory for future sessions.
+
+You will implement the 'Toggle Timestamps' feature. This task is divided into two sessions.
+
+**Session 1: Shortcut and Event Scaffolding**
+Your goal in this session is to register the new keyboard shortcut and have it dispatch a corresponding event. The feature will not be functional yet.
+1.  Examine `chatterdock//src//event_bus.h` and define a new event type called `EVENT_TOGGLE_TIMESTAMP`.
+2.  Examine `chatterdock//src//main.c` to understand how keyboard inputs are processed and events are dispatched.
+3.  Modify `main.c` to detect the `Ctrl+T` key combination.
+4.  When `Ctrl+T` is pressed, your code should dispatch the `EVENT_TOGGLE_TIMESTAMP` event using the application's event bus.
+5.  Ensure the application still compiles and runs. At this point, pressing the shortcut should do nothing visible, which is the expected outcome for this session. Signal that you are pausing your work.

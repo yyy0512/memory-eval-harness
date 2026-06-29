@@ -1,0 +1,10 @@
+You are working in the repository at the current working directory. This is session 1 of a multi-session development task. Complete only the requirements for this session. At the end, save any useful project-specific memory for future sessions.
+
+You will implement this feature over three sessions. Follow the instructions for each session, and remember the context from the previous ones.
+
+**Session 1: API and Initial Scoping**
+Your first task is to define the necessary API changes. Modify the gRPC interface in `bizpulse_hexa_ml_suite/api/grpc/v1/inference_service.proto`. 
+1.  Update the `InferenceRequest` message to include two new optional fields:
+    - A `model_version` string to allow clients to request a specific version.
+    - An `ab_test_key` string (e.g., a user ID or session ID) to ensure a user is consistently routed to the same model (champion or challenger) during an A/B test.
+2. After modifying the file, explain the purpose of your changes and briefly outline which other parts of the system (e.g., server logic, model loading) will need to be updated in subsequent sessions to support this new API contract.

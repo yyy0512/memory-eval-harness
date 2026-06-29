@@ -1,0 +1,51 @@
+{
+  "scenario_id": "c_mobile_utility_hard_059_multi_session_development_hard_01",
+  "case_id": "c_mobile_utility_hard_059",
+  "title": "Implement Geofenced, Photo-Verified Task Completion",
+  "description": "BeatQuest is a gamified productivity application where users complete real-world 'quests' (tasks). To enhance the immersive experience, we are introducing a new type of quest: 'Check-in Quests'. These quests require the user to be physically present at a specific location and take a photo to verify completion. This task involves updating the data model, implementing the geofencing and camera logic, and integrating these features into the existing task completion workflow over several development sessions.",
+  "difficulty": "hard",
+  "project_spec": {
+    "unique_id": "c_mobile_utility_hard_059",
+    "name": "BeatQuest Utility Suite",
+    "description": "BeatQuest Utility Suite is a hard-level mobile utility written in C that transforms ordinary day-to-day phone tasks into an audio-visual adventure game. Daily utility features—such as checking the weather, converting units, scanning documents, or calling a cab—are wrapped in a rhythm-driven, achievement-oriented interface: every completed task triggers animated musical sequences, unlockable mini-games, and real-time leaderboards with friends. \n\nThe application is built as a rigorously component-based system. Functional slices such as Location Services, AR-Camera Capture, Biometric Login, Push Notification Routing, and Analytics are encapsulated as independent loadable components that communicate only through well-defined message buses and data repositories. This clean separation makes it possible to swap a camera rendering engine, for example, without touching the gamified UI or the social-sharing logic. The result is an entertainment-first utility that feels like a rhythm game but behaves like a Swiss-army-knife productivity tool.",
+    "domain": "mobile_utility",
+    "complexity": "hard",
+    "language": "c",
+    "architecture": "component_based",
+    "theme": "entertainment",
+    "target_file_count": 62,
+    "target_token_count": 244450,
+    "features": [
+      "location_services",
+      "responsive_ui",
+      "local_storage",
+      "camera_integration",
+      "push_notifications",
+      "biometric_auth",
+      "crash_reporting",
+      "social_sharing",
+      "analytics"
+    ],
+    "architecture_patterns": [
+      "Observer_Pattern",
+      "Singleton",
+      "Repository_Pattern",
+      "MVVM",
+      "Factory_Pattern"
+    ],
+    "dependencies": [
+      "SDL2 (windowing / responsive UI rendering in C)",
+      "ImGui + cimgui (immediate-mode HUD overlay for gamified UI)",
+      "OpenCV (camera_integration + real-time AR filters)",
+      "SQLite3 (local_storage, offline caches, user progress)",
+      "libcurl (remote REST calls, social sharing)",
+      "Firebase C++ SDK (FCM push_notifications, analytics)",
+      "Sentry-Native (crash_reporting)",
+      "libuv (async IO/event loop backing Observer pattern)",
+      "OpenSSL (secure transport + biometric key storage)",
+      "libbiometric-wrapper (platform abstraction for fingerprint/FaceID)",
+      "cJSON (lightweight serialization for Repository pattern)"
+    ],
+    "seed": 677053
+  }
+}

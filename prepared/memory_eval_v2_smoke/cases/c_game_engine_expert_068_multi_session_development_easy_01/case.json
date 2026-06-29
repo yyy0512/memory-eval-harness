@@ -1,0 +1,47 @@
+{
+  "scenario_id": "c_game_engine_expert_068_multi_session_development_easy_01",
+  "case_id": "c_game_engine_expert_068",
+  "category": "extended_development_projects",
+  "original_task_category": "multi_session_development",
+  "project_source": "/home/yyy/projects/LoCoBench-Agent/.claude/worktrees/memory-eval-harness/data/generated/c_game_engine_expert_068",
+  "project_name": "ProdigiForge Engine",
+  "language": "c",
+  "complexity": "expert",
+  "session_count": 3,
+  "turns": [
+    {
+      "session": 1,
+      "file": "turns/session_1.jsonl",
+      "turn_count": 1
+    },
+    {
+      "session": 2,
+      "file": "turns/session_2.jsonl",
+      "turn_count": 1
+    },
+    {
+      "session": 3,
+      "file": "turns/session_3.jsonl",
+      "turn_count": 1
+    }
+  ],
+  "prompts_for_review": [
+    {
+      "session": 1,
+      "file": "prompts/session_1.txt"
+    },
+    {
+      "session": 2,
+      "file": "prompts/session_2.txt"
+    },
+    {
+      "session": 3,
+      "file": "prompts/session_3.txt"
+    }
+  ],
+  "hashes": {
+    "scenario_json_sha256": "ab3e2390fcd3a4cc960559dc19d2b5638296a85f6da7f03b62bb0bffdf778dce",
+    "project_tree_sha256": "3870590e2a35470cc189e19beb3b5d97cb196bd28c49add9a8c164505ce3fa8c",
+    "prepared_case_sha256": "cb5aaecde6ebdf7bc071a5f7163be650ff63d44c8a371daf13aa49013e858feb"
+  }
+}

@@ -1,0 +1,13 @@
+You are working in the repository at the current working directory. This is session 1 of a multi-session development task. Complete only the requirements for this session. At the end, save any useful project-specific memory for future sessions.
+
+A new policy requires that stipend disbursements be placed on hold if a student has an overdue account balance. Your overall task is to implement this cross-service logic. 
+
+**This is a multi-session task. For this first session, your goal is to conduct a thorough investigation and create a high-level implementation plan.** Do not write or modify any code yet. 
+
+Your plan should detail:
+1. The sequence of operations required to fulfill the new policy, starting from the `disburse_stipend_command`.
+2. The specific services (`bursar_service`, `financial_aid_service`, `projections_service`) that will be modified.
+3. The new queries, commands, and events that will be needed across the services.
+4. The key files (e.g., sagas, aggregates, projectors, documentation) that you anticipate changing or referencing.
+
+Present your plan as a clear, step-by-step description. You will be asked to implement this plan in subsequent sessions.

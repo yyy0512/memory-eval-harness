@@ -1,0 +1,39 @@
+{
+  "scenario_id": "c_desktop_development_easy_093_multi_session_development_easy_01",
+  "case_id": "c_desktop_development_easy_093",
+  "title": "Implement Keyboard Shortcut for Toggling Timestamps",
+  "description": "ChatterDock is a simple C-based desktop application that provides a basic chat-like interface. Users have requested a new quality-of-life feature: the ability to show or hide timestamps next to messages using a keyboard shortcut. This task requires implementing this feature over two separate development sessions, simulating a developer starting a task, pausing, and then resuming work later. The agent must first set up the event infrastructure for the shortcut and then, in a second session, implement the logic that uses this event to change the UI.",
+  "difficulty": "easy",
+  "project_spec": {
+    "unique_id": "c_desktop_development_easy_093",
+    "name": "ChatterDock",
+    "description": "ChatterDock is a lightweight desktop hub that lets users aggregate and interact with multiple social feeds (e-mail, micro-blogs, group chats) from a single, multi-window workspace. The application showcases an event-driven backbone where every inbound message, user action, or plugin signal is converted into an event object that propagates through a non-blocking dispatcher. Features such as user-selectable themes, configurable keyboard shortcuts, and per-window layouts are persisted as user_preferences and re-emitted at runtime so the UI refreshes instantly when settings change.\n\nA built-in plugin_system encourages community extensions—e.g., a “Birthday Notifier” or a “Trending-Hashtag Lens”—by exposing a small C API that registers new commands and subscribes to the global event bus (leveraging the Observer_Pattern). Because each plugin speaks the same Command_Pattern contract, users can bind keyboard shortcuts to trigger plugin commands or core actions alike, giving ChatterDock a social-first yet highly hackable personality.",
+    "domain": "desktop_development",
+    "complexity": "easy",
+    "language": "c",
+    "architecture": "event_driven",
+    "theme": "social",
+    "target_file_count": 11,
+    "target_token_count": 94550,
+    "features": [
+      "user_preferences",
+      "plugin_system",
+      "keyboard_shortcuts",
+      "multi_window",
+      "themes"
+    ],
+    "architecture_patterns": [
+      "Command_Pattern",
+      "Event_Driven",
+      "Observer_Pattern"
+    ],
+    "dependencies": [
+      "GTK 4.x – native widgets, multi_window support, built-in event loop",
+      "GLib/GObject – signal (Observer) framework and main loop integration",
+      "libconfig – lightweight user_preferences storage (INI/JSON)",
+      "libpeas – plugin_system loader for C plugins at runtime",
+      "Cairo/Pango – themable rendering of text and graphics"
+    ],
+    "seed": 434464
+  }
+}

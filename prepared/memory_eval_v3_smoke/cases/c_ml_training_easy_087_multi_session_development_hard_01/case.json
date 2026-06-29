@@ -1,0 +1,47 @@
+{
+  "scenario_id": "c_ml_training_easy_087_multi_session_development_hard_01",
+  "case_id": "c_ml_training_easy_087",
+  "category": "extended_development_projects",
+  "original_task_category": "multi_session_development",
+  "project_source": "/home/yyy/projects/LoCoBench-Agent/.claude/worktrees/memory-eval-harness/data/generated/c_ml_training_easy_087",
+  "project_name": "ChromaticCanvas Trainer",
+  "language": "c",
+  "complexity": "easy",
+  "session_count": 3,
+  "turns": [
+    {
+      "session": 1,
+      "file": "turns/session_1.jsonl",
+      "turn_count": 1
+    },
+    {
+      "session": 2,
+      "file": "turns/session_2.jsonl",
+      "turn_count": 1
+    },
+    {
+      "session": 3,
+      "file": "turns/session_3.jsonl",
+      "turn_count": 1
+    }
+  ],
+  "prompts_for_review": [
+    {
+      "session": 1,
+      "file": "prompts/session_1.txt"
+    },
+    {
+      "session": 2,
+      "file": "prompts/session_2.txt"
+    },
+    {
+      "session": 3,
+      "file": "prompts/session_3.txt"
+    }
+  ],
+  "hashes": {
+    "scenario_json_sha256": "5a068807df7a1914e2e819bbe1ed65d0765a7465e40da6653336b942b1049a3b",
+    "project_tree_sha256": "21b52fa9e8adbb58b3b1f5cce59ac144bbfb616ee97caeffd091c93d156b38ab",
+    "prepared_case_sha256": "90435d514ccd98cbd18fead21fd48d9b1c13960ebb5fbc3d1fe447b720eb8329"
+  }
+}

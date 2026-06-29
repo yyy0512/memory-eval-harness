@@ -1,0 +1,47 @@
+{
+  "scenario_id": "c_mobile_utility_hard_059_multi_session_development_hard_01",
+  "case_id": "c_mobile_utility_hard_059",
+  "category": "extended_development_projects",
+  "original_task_category": "multi_session_development",
+  "project_source": "/home/yyy/projects/LoCoBench-Agent/.claude/worktrees/memory-eval-harness/data/generated/c_mobile_utility_hard_059",
+  "project_name": "BeatQuest Utility Suite",
+  "language": "c",
+  "complexity": "hard",
+  "session_count": 3,
+  "turns": [
+    {
+      "session": 1,
+      "file": "turns/session_1.jsonl",
+      "turn_count": 1
+    },
+    {
+      "session": 2,
+      "file": "turns/session_2.jsonl",
+      "turn_count": 1
+    },
+    {
+      "session": 3,
+      "file": "turns/session_3.jsonl",
+      "turn_count": 1
+    }
+  ],
+  "prompts_for_review": [
+    {
+      "session": 1,
+      "file": "prompts/session_1.txt"
+    },
+    {
+      "session": 2,
+      "file": "prompts/session_2.txt"
+    },
+    {
+      "session": 3,
+      "file": "prompts/session_3.txt"
+    }
+  ],
+  "hashes": {
+    "scenario_json_sha256": "9d758eedde55a007e470f6054faa8f713c61aad1db7e5b42f6ed1999098d49bd",
+    "project_tree_sha256": "261bd231e1b185f5e864afa8300d7b7ee8d0ce6bfa0ad61908351b93cd23cf0f",
+    "prepared_case_sha256": "4cafea5a3fa2d2e8a33384f74ef1164420e8db641a58ac47a1545c0847227e8a"
+  }
+}

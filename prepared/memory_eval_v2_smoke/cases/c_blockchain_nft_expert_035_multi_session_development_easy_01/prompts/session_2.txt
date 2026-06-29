@@ -1,0 +1,6 @@
+You are working in the repository at the current working directory. This is session 2 of a 2-session development task. The previous session has ended and conversation context is unavailable. Use the repository state and your persistent memory if available. Do not ask for previous conversation context. Complete only the requirements for this session. At the end, update memory with decisions and remaining work.
+
+This is a multi-session task. You will be given instructions for the first session. After completing it, you will be brought back for a second session to finish the feature.
+
+**Session 2: CLI Integration**
+Welcome back. Last time, you added a `memo` field to the transaction struct and updated the hashing logic. Your next task is to expose this feature through the command-line interface (CLI). Update the CLI controller to accept a new argument for the memo and ensure it's passed correctly when a new transaction is created and processed. This will complete the feature implementation.

@@ -1,0 +1,10 @@
+You are working in the repository at the current working directory. This is session 1 of a multi-session development task. Complete only the requirements for this session. At the end, save any useful project-specific memory for future sessions.
+
+You will implement the 'Combo Bonus' feature over three development sessions. The system should adhere to the following rules:
+- A 'combo' is maintained if a user completes a task within 10 minutes of the previous one.
+- The first task in a chain starts a combo (combo count = 1).
+- Each subsequent task in the combo chain grants a stacking 10% XP bonus, capped at a 50% bonus (i.e., at the 6th task in the chain).
+- If a task is completed more than 10 minutes after the last one, the combo is broken, and the new task starts a new combo chain at count 1.
+
+**Session 1:**
+Your first objective is to modify the player's data model to track the state required for the combo system. You need to store the current combo count and the timestamp of the last task completion. Locate the primary player state structure and update it. Ensure the new data is initialized correctly for new players and is part of the data that gets saved and loaded from local storage.

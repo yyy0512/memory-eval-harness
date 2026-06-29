@@ -1,0 +1,1 @@
+- [GraphQL subscriptions feature context](graphql_subscriptions_feature_context.md) — phased feature: schema and WS registration first, event delivery later

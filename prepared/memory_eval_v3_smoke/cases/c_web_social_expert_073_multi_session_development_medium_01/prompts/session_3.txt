@@ -1,0 +1,9 @@
+You are working in the repository at the current working directory. This is session 3 of a 4-session development task. The previous session has ended and conversation context is unavailable. Use the repository state and your persistent memory if available. Do not ask for previous conversation context. Complete only the requirements for this session. At the end, update memory with decisions and remaining work.
+
+You will implement a 'last active' tracking feature and a related 'Consistent Learner' achievement. This task is broken into four parts, simulating development over multiple sessions. You must retain context between each part.
+
+**Part 3: Implement Achievement Event Publishing**
+With the core logic in place, add the achievement-triggering mechanism.
+1.  In the same login function from Part 2, before you update the timestamp, compare the current time with the user's stored `last_active_at` time.
+2.  If the time difference is greater than 24 hours and less than 72 hours, the user has earned the 'Consistent Learner' achievement.
+3.  When this condition is met, publish a new event. The event should be named something like `USER_ACHIEVEMENT_UNLOCKED` and its payload should contain the `user_id` and an achievement identifier (e.g., `"CONSISTENT_LEARNER"`). You will need to find the existing event publishing mechanism within the `user-service` and adapt it for this new event.

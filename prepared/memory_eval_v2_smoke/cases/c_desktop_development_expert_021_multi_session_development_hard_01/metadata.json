@@ -1,0 +1,56 @@
+{
+  "scenario_id": "c_desktop_development_expert_021_multi_session_development_hard_01",
+  "case_id": "c_desktop_development_expert_021",
+  "title": "Implement a Command Macro System for Workflow Automation",
+  "description": "ChatterCanvas is a sophisticated desktop application used by creative professionals. To enhance productivity, users have requested a macro system to automate repetitive sequences of actions. This task involves designing and implementing a system that can record a series of user-initiated commands (e.g., create item, move item, add annotation) and play them back on demand. This feature must be built on top of the existing `command_manager` and `event_bus` architecture and be integrated into the UI and shortcut system. The development will be split into several sessions to simulate a realistic feature implementation lifecycle.",
+  "difficulty": "hard",
+  "project_spec": {
+    "unique_id": "c_desktop_development_expert_021",
+    "name": "ChatterCanvas Desktop Suite",
+    "description": "ChatterCanvas is a next-generation, cross-platform desktop application that lets power-users and community managers curate, remix, and share rich social content in real time. Built natively in C, the suite combines a multi-window timeline composer, drag-and-drop media board, and extensible plugin system so users can aggregate posts from disparate social networks, arrange them visually, and publish collaborative storyboards back to their communities. Every high-value action—posting, commenting, reacting, annotating or moderating—travels through a fleet of purpose-built microservices (identity, media-processing, feed, notification, real-time presence, analytics), enabling the desktop client to stay lean, reactive, and always available even when individual services are upgraded or rolled back. \n\nThe social focus shines through advanced collaboration features: live multi-editor boards, presence indicators, and state-synchronized comment threads powered by an event-driven message bus. A fine-grained permission engine lets users co-author content while “observer” panes instantly reflect changes via the Observer pattern; the MVVM façade keeps domain logic independent of GTK4 views, while a central Command + Event Store guarantees reproducible actions, undo/redo, and verifiable audit trails—critical for community governance. Crash reporting, background auto-updates, theming, robust keyboard shortcuts, and declarative settings give the application the polish expected from expert-grade desktop software. With 97 well-scoped source and build files planned (~825 k tokens), ChatterCanvas serves as a flagship example of how microservice back ends can power rich, cooperative social workflows on the desktop.\n",
+    "domain": "desktop_development",
+    "complexity": "expert",
+    "language": "c",
+    "architecture": "microservices",
+    "theme": "social",
+    "target_file_count": 97,
+    "target_token_count": 825317,
+    "features": [
+      "drag_drop",
+      "multi_window",
+      "crash_reporting",
+      "plugin_system",
+      "keyboard_shortcuts",
+      "themes",
+      "gui_interface",
+      "auto_updates",
+      "user_preferences",
+      "file_management",
+      "settings_configuration"
+    ],
+    "architecture_patterns": [
+      "Command_Pattern",
+      "Event_Driven",
+      "Observer_Pattern",
+      "MVC",
+      "MVVM",
+      "State_Machine",
+      "Plugin_Architecture"
+    ],
+    "dependencies": [
+      "GTK4 (GUI, multi_window, themes, drag_drop)",
+      "gRPC-C (service RPC stubs to Identity, Feed, Notification, Presence, Media, Analytics microservices)",
+      "libcurl (REST fallbacks, auto_updates)",
+      "ZeroMQ / ØMQ (high-speed event bus, Event_Driven messaging)",
+      "SQLite3 (local cache for offline boards, user_preferences)",
+      "Json-c (lightweight config & payload parsing)",
+      "libuv (async I/O underpinning State_Machine & Observer dispatch)",
+      "Crashpad / Breakpad (cross-platform crash_reporting)",
+      "openssl / libsodium (TLS & end-to-end encryption of social payloads)",
+      "dlopen / dlfcn.h (runtime Plugin_Architecture)",
+      "libgit2 (delta downloads & self-patching auto_updates)",
+      "CMake + Conan (build & dependency management)"
+    ],
+    "seed": 731105
+  }
+}

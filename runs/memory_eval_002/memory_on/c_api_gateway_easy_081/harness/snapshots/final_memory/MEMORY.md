@@ -1,0 +1,1 @@
+- [Health endpoint plan](health_endpoint_plan.md) — Context for the multi-session EduGateway-C /health endpoint task.

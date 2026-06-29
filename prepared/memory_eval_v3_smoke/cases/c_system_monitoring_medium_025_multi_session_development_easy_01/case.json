@@ -1,0 +1,47 @@
+{
+  "scenario_id": "c_system_monitoring_medium_025_multi_session_development_easy_01",
+  "case_id": "c_system_monitoring_medium_025",
+  "category": "extended_development_projects",
+  "original_task_category": "multi_session_development",
+  "project_source": "/home/yyy/projects/LoCoBench-Agent/.claude/worktrees/memory-eval-harness/data/generated/c_system_monitoring_medium_025",
+  "project_name": "EduSysMon Academy",
+  "language": "c",
+  "complexity": "medium",
+  "session_count": 3,
+  "turns": [
+    {
+      "session": 1,
+      "file": "turns/session_1.jsonl",
+      "turn_count": 1
+    },
+    {
+      "session": 2,
+      "file": "turns/session_2.jsonl",
+      "turn_count": 1
+    },
+    {
+      "session": 3,
+      "file": "turns/session_3.jsonl",
+      "turn_count": 1
+    }
+  ],
+  "prompts_for_review": [
+    {
+      "session": 1,
+      "file": "prompts/session_1.txt"
+    },
+    {
+      "session": 2,
+      "file": "prompts/session_2.txt"
+    },
+    {
+      "session": 3,
+      "file": "prompts/session_3.txt"
+    }
+  ],
+  "hashes": {
+    "scenario_json_sha256": "27ce10625521caac176abe757822b032b3248f166a3f6da3c1226b6b837b5fba",
+    "project_tree_sha256": "6ce5b3265c9b897e74e8893095f335ef2bc4a49d03c5d6cef87b6498ef32fac4",
+    "prepared_case_sha256": "c8a146fdc3fbde23b5be16bc2a71d8d12af7bce48c6b08c7268d2b6308bbc694"
+  }
+}

@@ -1,0 +1,54 @@
+{
+  "scenario_id": "c_data_warehouse_expert_084_multi_session_development_medium_01",
+  "case_id": "c_data_warehouse_expert_084",
+  "title": "Implement a Scheduled Data Retention Policy Manager",
+  "description": "The SwiftSlate data warehouse is continuously ingesting data, leading to significant storage growth. To manage costs and comply with data governance standards, a new automated data retention feature is required. This task involves implementing a new scheduled job within the `scheduler_service` that periodically purges data from the storage layer older than a configurable threshold. This task is broken into several distinct stages to simulate a realistic, multi-session development workflow, testing the agent's ability to retain context and build upon previous work.",
+  "difficulty": "medium",
+  "project_spec": {
+    "unique_id": "c_data_warehouse_expert_084",
+    "name": "SwiftSlate Productivity Warehouse",
+    "description": "SwiftSlate Productivity Warehouse is an expert-grade, C-based data-warehouse solution whose primary mission is to **maximize analyst and engineer throughput**.  By treating every data-handling concern—ingestion, validation, transformation, storage, quality-assurance, analytics, visualization, and monitoring—as first-class layers, SwiftSlate shortens feedback loops and radically reduces the time required to turn raw operational data into actionable insight.\n\nThe system is organized as an end-to-end productivity pipeline: high-velocity event streams enter the *Ingress Layer* (Kafka-like stream façade + bulk batch gateway), traverse the *Validation & Transformation Layer* (plug-in Strategy Pattern for rule sets), settle inside the *Data Lake & Warehouse Layer* (columnar store, hot/cold tiers), and finally surface through the *Productivity Services Layer* (self-service scheduling, visual dashboards, alerting).  Under the hood, an ETL_Pipeline orchestrated by a domain-specific scheduler exploits fine-grained parallel_processing, while the Observer_Pattern notifies downstream micro-services of data_quality_checks and error_recovery events, enabling continuous monitoring and auto-healing.  Together these layers deliver near-real-time insights and dramatically cut the “data-to-decision” latency for knowledge workers.\n\nWith 89 curated C source/header files (≈718 k tokens), the codebase cleanly separates concerns: batch_processing and stream_processing are isolated into micro-services that communicate over event buses; data_storage adapters abstract multiple back ends; a unified monitoring façade aggregates metrics; and extensible Strategy objects empower teams to add new transformations without touching core logic.  The result is a highly productive environment where developers, data engineers, and business users can iterate rapidly without cross-team bottlenecks.",
+    "domain": "data_warehouse",
+    "complexity": "expert",
+    "language": "c",
+    "architecture": "layered",
+    "theme": "productivity",
+    "target_file_count": 89,
+    "target_token_count": 718512,
+    "features": [
+      "batch_processing",
+      "data_storage",
+      "monitoring",
+      "data_ingestion",
+      "stream_processing",
+      "data_transformation",
+      "data_validation",
+      "scheduling",
+      "parallel_processing",
+      "data_quality_checks",
+      "error_recovery",
+      "data_visualization"
+    ],
+    "architecture_patterns": [
+      "ETL_Pipeline",
+      "Pipeline_Pattern",
+      "Event_Streaming",
+      "Observer_Pattern",
+      "Microservices",
+      "Data_Lake",
+      "Strategy_Pattern"
+    ],
+    "dependencies": [
+      "libpq (PostgreSQL C client) – warehouse & metadata catalog",
+      "librdkafka – high-throughput stream_processing interface",
+      "libuv – cross-platform async I/O & scheduling",
+      "OpenMP – parallel_processing within batch jobs",
+      "jansson – JSON parsing for data_ingestion & configuration",
+      "cURL/libcurl – REST hooks for monitoring & visualization layer",
+      "protobuf-c – efficient event schema serialization",
+      "cairo + pango – lightweight data_visualization rendering",
+      "prometheus-c-client – metrics collection for monitoring"
+    ],
+    "seed": 947282
+  }
+}

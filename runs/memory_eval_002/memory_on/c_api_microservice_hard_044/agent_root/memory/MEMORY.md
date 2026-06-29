@@ -1,0 +1,1 @@
+- [Task Dependency feature](task_dependency_feature.md) — completed multi-session ChronoFlow task dependency feature; API exposure added in session 3.

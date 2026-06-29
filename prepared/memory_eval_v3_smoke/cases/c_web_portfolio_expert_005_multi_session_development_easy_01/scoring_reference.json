@@ -1,0 +1,33 @@
+{
+  "scenario_id": "c_web_portfolio_expert_005_multi_session_development_easy_01",
+  "ground_truth": {
+    "description": "The agent must identify the core logging function in `src/utils.txt` and the bio update logic in `src/module_49.txt`. Log event types are defined in `src/config.txt`. The final solution requires coordinated changes across these files plus the test file.",
+    "file_modifications": [
+      {
+        "file_path": "src/config.txt",
+        "change_description": "Add a new macro definition for the bio update log event.",
+        "diff": "--- a/src/config.txt\n+++ b/src/config.txt\n@@ -75,6 +75,7 @@\n DEFINE_LOG_EVENT(LOG_PAYMENT_FAILURE, 103)\n DEFINE_LOG_EVENT(LOG_ADMIN_ACTION, 104)\n // Add new log events here\n+DEFINE_LOG_EVENT(LOG_BIO_UPDATE, 105)\n \n // =====================================\n //       DATABASE CONFIGURATION"
+      },
+      {
+        "file_path": "src/module_49.txt",
+        "change_description": "In the function for updating a user's bio, add a call to the logging system with a formatted message including user ID and new bio length.",
+        "diff": "--- a/src/module_49.txt\n+++ b/src/module_49.txt\n@@ -210,6 +210,13 @@\n     // Pretend this is a database write operation\n     printf(\"DATABASE: Writing new bio for user %d.\\n\", user_id);\n     \n+    // Log the successful update event\n+    if (db_write_successful) {\n+        char log_message[128];\n+        snprintf(log_message, sizeof(log_message), \"User ID %d updated bio. New length: %zu.\", user_id, strlen(new_bio));\n+        log_event(LOG_BIO_UPDATE, log_message);\n+    }\n+\n     return 1; // Success\n }"
+      },
+      {
+        "file_path": "tests/test_main.txt",
+        "change_description": "Add a new test case that simulates a bio update and verifies that the correct log message is written.",
+        "diff": "--- a/tests/test_main.txt\n+++ b/tests/test_main.txt\n@@ -310,6 +310,21 @@\n     assert_string_contains(get_last_log_entry(), \"ADMIN_ACTION\");\n }\n \n+void test_bio_update_logging() {\n+    // Setup\n+    setup_test_environment();\n+    clear_logs();\n+    int test_user_id = 123;\n+    const char* new_bio = \"This is my new expert bio.\";\n+\n+    // Action\n+    update_user_bio(test_user_id, new_bio);\n+\n+    // Verification\n+    const char* last_log = get_last_log_entry();\n+    assert_not_null(last_log);\n+    assert_string_contains(last_log, \"User ID 123 updated bio. New length: 28.\");\n+}\n+\n int main() {\n     // ... existing test calls\n     run_test(test_admin_logging);\n+    run_test(test_bio_update_logging);\n     // ...\n }"
+      }
+    ]
+  },
+  "expected_approach": "An expert developer would approach this incrementally:\n\n1.  **Session 1 (Investigation & Planning):**\n    *   Use a search tool (like `grep`) to find keywords such as `log`, `LOG_EVENT`, `update_profile`, `update_bio` across all files to quickly identify relevant modules.\n    *   Analyze `src/utils.txt` and `src/config.txt` to understand the logging infrastructure. They would likely find a generic `log_event(type, message)` function and a place where log event types are defined (e.g., with enums or macros).\n    *   Locate the portfolio/user management module (e.g., `src/module_49.txt`) to find the function that handles bio updates, like `update_user_bio(int user_id, const char* new_bio)`.\n    *   Formulate a plan: 1. Define a new log event type constant/macro. 2. In the `update_user_bio` function, after the database write is confirmed successful, call the `log_event` function with the new event type.\n\n2.  **Session 2 (Initial Implementation):**\n    *   Recall or review the plan from the previous session.\n    *   Modify the configuration file (e.g., `src/config.txt`) to add the new event type, for example: `DEFINE_LOG_EVENT(LOG_BIO_UPDATE, 105)`.\n    *   Modify the portfolio update function in `src/module_49.txt` to add the `log_event(LOG_BIO_UPDATE, \"User bio updated\");` call in the correct logical place.\n\n3.  **Session 3 (Refinement & Testing):**\n    *   Revisit the code from Session 2.\n    *   Modify the `log_event` call in `src/module_49.txt`. This requires creating a formatted string using `snprintf` to prevent buffer overflows, like `char msg[128]; snprintf(msg, sizeof(msg), \"User ID %d updated bio. New length: %zu.\", user_id, strlen(new_bio)); log_event(LOG_BIO_UPDATE, msg);`.\n    *   Analyze `tests/test_main.txt` to understand the existing test structure.\n    *   Add a new test case, `test_bio_update_logging()`, that calls the bio update function and then inspects the log output (e.g., by reading a temporary log file or checking a mock logging buffer) to assert that the correctly formatted message was generated.",
+  "evaluation_criteria": [
+    "context_retention: Did the agent successfully recall and act upon its plan from session 1 during session 2 and 3?",
+    "codebase_navigation: Was the agent able to efficiently locate the relevant functions and definitions across the multiple, generically named files?",
+    "plan_adherence: Did the agent follow the plan it created in session 1 during the implementation in session 2?",
+    "requirement_adaptation: Did the agent successfully incorporate the new requirement to format the log message with specific data in session 3?",
+    "correctness_implementation: Is the final C code correct, safe (e.g., uses `snprintf`), and placed in the logically correct location within the application flow?",
+    "testing_verification: Did the agent successfully create a new, valid test case in `tests/test_main.txt` that correctly verifies the feature?",
+    "efficiency: Did the agent solve the task with a minimal number of exploratory actions, or did it require excessive trial and error?"
+  ]
+}

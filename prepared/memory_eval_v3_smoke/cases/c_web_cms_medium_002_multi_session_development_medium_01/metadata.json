@@ -1,0 +1,53 @@
+{
+  "scenario_id": "c_web_cms_medium_002_multi_session_development_medium_01",
+  "case_id": "c_web_cms_medium_002",
+  "title": "Implement User Subscription Feature with Payment and Notification",
+  "description": "The MedPortal Serverless CMS wants to monetize premium articles by introducing a paid monthly subscription model. This feature requires a coordinated effort across multiple backend services. The task is to implement the core logic for purchasing a subscription, which involves updating the user's data model, processing a payment, and sending a confirmation notification. The development will be broken down into three logical sessions to simulate an incremental development workflow.",
+  "difficulty": "medium",
+  "project_spec": {
+    "unique_id": "c_web_cms_medium_002",
+    "name": "MedPortal Serverless CMS",
+    "description": "MedPortal Serverless CMS is a medium–scale content-management system designed specifically for outpatient clinics, tele-health providers, and medical information portals. Built entirely in C and deployed as a collection of AWS Lambda functions behind Amazon API Gateway, the platform enables clinical staff to publish HIPAA-compliant articles, manage appointment landing pages, and distribute patient education content without provisioning or managing servers.  \n\nThe solution couples a headless CMS core with healthcare-oriented modules such as ICD-10 code tagging, medication information widgets, and a triage questionnaire builder. A built-in payment-processing workflow allows patients to pay for subscription-based premium articles or tele-consultation vouchers. Because healthcare data must remain secure and auditable, every request passes through authentication middleware that supports both username/password and social logins (e.g., Sign-in with Apple Health Records) while storing detailed audit trails in DynamoDB. File uploads (lab results, imaging PDFs) are routed to S3 with automatic virus scanning, and email notifications are dispatched via Amazon SES to remind patients about expiring prescriptions or newly published content relevant to their conditions.  \n\nUsing the MVC pattern, each Lambda group handles a specific concern: controllers receive API Gateway events, invoke service-layer functions for business logic (billing, tagging, or notification scheduling), and persist data through a lightweight C ORM that targets Amazon Aurora Serverless. Front-end pages are delivered through an S3-backed static site enhanced with responsive design and OAuth-secured session management via CloudFront signed cookies, giving clinicians and patients a seamless, low-latency experience across mobile and desktop devices.",
+    "domain": "web_cms",
+    "complexity": "medium",
+    "language": "c",
+    "architecture": "serverless",
+    "theme": "healthcare",
+    "target_file_count": 16,
+    "target_token_count": 176033,
+    "features": [
+      "payment_processing",
+      "error_handling",
+      "database_integration",
+      "session_management",
+      "frontend_interface",
+      "email_notifications",
+      "file_upload",
+      "responsive_design",
+      "user_authentication",
+      "social_login",
+      "api_endpoints"
+    ],
+    "architecture_patterns": [
+      "MVC",
+      "Service_Layer",
+      "Database_ORM",
+      "Authentication_Middleware"
+    ],
+    "dependencies": [
+      "AWS SDK for C (aws-c-sdk)",
+      "CivetWeb or Crow (lightweight C/C++ HTTP libraries used in local testing)",
+      "libpq (PostgreSQL client) or Aurora Data API C wrapper",
+      "cJSON (JSON serialization/deserialization)",
+      "OpenSSL (TLS and JWT signing/verification)",
+      "Stripe C SDK (payment processing)",
+      "libcurl (fallback HTTP client for third-party APIs)",
+      "libbcrypt or libscrypt (password hashing)",
+      "aws-lambda-c-runtime (entry points for Lambda)",
+      "ImmunIT ClamAV Lambda layer (file-upload virus scanning)",
+      "SQLite3 (local development DB)",
+      "C ORM wrapper such as ORMOLU-C or custom thin-ORM layer"
+    ],
+    "seed": 863055
+  }
+}

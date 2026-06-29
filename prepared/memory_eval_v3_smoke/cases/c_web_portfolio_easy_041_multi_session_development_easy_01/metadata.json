@@ -1,0 +1,51 @@
+{
+  "scenario_id": "c_web_portfolio_easy_041_multi_session_development_easy_01",
+  "case_id": "c_web_portfolio_easy_041",
+  "title": "Implement Artefact Visibility Control (Backend and Frontend)",
+  "description": "This task simulates a common feature request in a web portfolio application. The goal is to add a 'visibility' control to portfolio items, called 'artefacts'. This will allow users to mark their work as either 'public' or 'private'. The task is broken into two distinct sessions to test the agent's ability to retain context and build upon previous work. The first session focuses on backend modifications in C, and the second session focuses on integrating this new feature into the JavaScript frontend.",
+  "difficulty": "easy",
+  "project_spec": {
+    "unique_id": "c_web_portfolio_easy_041",
+    "name": "Edufolio Micro-Showcase",
+    "description": "Edufolio Micro-Showcase is an education-centric web-portfolio platform built in the C language and decomposed into a constellation of lightweight microservices. Instead of a generic personal portfolio, each learner curates *learning artefacts*—course projects, certificates, reflections, and competency badges—inside subject-specific collections. Every artefact is indexed by learning outcomes, enabling educators and recruiters to search, filter, and verify a student’s progress in real time.\n\nThe solution is organised into fourteen C services (e.g., Artefact-API, Search-Indexer, Notification-Sender, Auth-Gateway). A single-page HTML/CSS/JS front-end is served by the UI-Gateway service, which proxies requests through a REST API layer secured with OpenSSL-backed TLS. Social login (Google, Microsoft EDU, GitHub) is handled via an OAuth-Broker microservice that exchanges tokens and stores identities through the Repository Pattern, allowing plug-and-play replacement of backend databases. Email/SSE notifications inform learners when teachers leave feedback, while a Search-Indexer maintains a fast in-memory index of artefact metadata to support instant search. Rigorous data-validation, structured error handling, and component isolation make the system easy to reason about and extend for classroom pilots or hack-day demos.",
+    "domain": "web_portfolio",
+    "complexity": "easy",
+    "language": "c",
+    "architecture": "microservices",
+    "theme": "education",
+    "target_file_count": 14,
+    "target_token_count": 40483,
+    "features": [
+      "frontend_interface",
+      "ssl_security",
+      "email_notifications",
+      "data_validation",
+      "social_login",
+      "search_functionality",
+      "error_handling",
+      "api_endpoints"
+    ],
+    "architecture_patterns": [
+      "Repository_Pattern",
+      "Component_Architecture",
+      "REST_API"
+    ],
+    "dependencies": [
+      "CMake ≥ 3.20 (build orchestration across microservices)",
+      "libevent (high-performance HTTP server/event loop)",
+      "CivetWeb or Mongoose (embedded HTTP/HTTPS)",
+      "OpenSSL ≥ 1.1.1 (TLS/SSL and cert management)",
+      "libcurl (outbound REST calls to external EDU APIs)",
+      "jansson (JSON parsing/serialization)",
+      "libpq (PostgreSQL driver) or SQLite3 (for local dev)",
+      "uthash/utlist (lightweight collections for Repository Pattern)",
+      "czmq + ZeroMQ (in-cluster message bus between services)",
+      "liboauth or oauth2-c (social login token flow)",
+      "SMTP-client-C or libesmtp (transactional email)",
+      "Lucene-C or SphinxAPI (search indexing)",
+      "cmocka (unit testing & contract-first validation)",
+      "Docker & docker-compose (service containerisation and local orchestration)"
+    ],
+    "seed": 84212
+  }
+}

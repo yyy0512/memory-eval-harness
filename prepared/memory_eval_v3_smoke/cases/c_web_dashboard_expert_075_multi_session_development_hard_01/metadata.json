@@ -1,0 +1,61 @@
+{
+  "scenario_id": "c_web_dashboard_expert_075_multi_session_development_hard_01",
+  "case_id": "c_web_dashboard_expert_075",
+  "title": "Implement Asynchronous CSV Export for Event Attendance",
+  "description": "The SpotLytix marketing team requires a feature to export attendance data for past events. This is crucial for their post-event analysis and re-engagement campaigns. The task is to create a new, secure API endpoint that generates a CSV file of attendees for a given event and emails it to the requesting user. Due to potentially large attendee lists, the process must be handled in a non-blocking manner to ensure the dashboard remains responsive.",
+  "difficulty": "hard",
+  "project_spec": {
+    "unique_id": "c_web_dashboard_expert_075",
+    "name": "SpotLytix Arena Dashboard",
+    "description": "SpotLytix Arena Dashboard is an expert-grade, high-performance web dashboard written in C that lets entertainment companies (concert halls, e-sport arenas, cinemas, theme-parks) track real-time visitor engagement, ticket sales, in-venue purchases, and live-stream metrics from a single, visually compelling console. The solution blends responsive data visualisation with advanced audience-interaction widgets such as live polling, trivia leaderboards, and social-media sentiment streams, delivering an immersive control panel for producers and venue managers.\n\nBuilt strictly around Clean Architecture, the codebase separates UI rendering, business rules, and data access into independent layers. This allows the entertainment-specific logic—like show-time demand forecasting, seat heat-mapping, and dynamic merch upselling—to evolve without entangling the networking stack, SSL termination, or payment provider integrations. Rich features such as caching for high-traffic events, robust session and authentication middleware (including social log-ins for staff SSO), file uploads for promotional media, and PCI-compliant payment processing for upsells are all encapsulated behind service interfaces, ensuring that core entertainment use-cases remain testable and platform-agnostic.",
+    "domain": "web_dashboard",
+    "complexity": "expert",
+    "language": "c",
+    "architecture": "clean_architecture",
+    "theme": "entertainment",
+    "target_file_count": 87,
+    "target_token_count": 627056,
+    "features": [
+      "caching",
+      "frontend_interface",
+      "ssl_security",
+      "file_upload",
+      "email_notifications",
+      "data_validation",
+      "user_authentication",
+      "payment_processing",
+      "api_endpoints",
+      "logging_system",
+      "database_integration",
+      "session_management",
+      "responsive_design",
+      "admin_panel",
+      "social_login",
+      "error_handling",
+      "search_functionality"
+    ],
+    "architecture_patterns": [
+      "Service_Layer",
+      "Database_ORM",
+      "MVC",
+      "Repository_Pattern",
+      "Component_Architecture",
+      "Authentication_Middleware",
+      "REST_API"
+    ],
+    "dependencies": [
+      "libmicrohttpd (embedded HTTP/S server, supports REST_API layer)",
+      "jansson (JSON serialization/deserialization for API, cache, logging)",
+      "libpq or sqlite3 (relational database driver; repository pattern)",
+      "libcurl (external REST calls: payment processor, email gateway, social APIs)",
+      "OpenSSL (TLS/SSL, token signing for Authentication_Middleware)",
+      "libjwt-c or jose (JWT handling for session_management)",
+      "libcache (or memcached client) for distributed caching layer",
+      "cairo + librsvg (server-side chart/graph rasterisation for entertainment visuals)",
+      "c_template or cgtemplate (minimalist C HTML templating for MVC View layer)",
+      "zlog (high-throughput logging_system)",
+      "cmocka / Criterion (unit-testing framework for clean_architecture boundaries)"
+    ],
+    "seed": 461316
+  }
+}

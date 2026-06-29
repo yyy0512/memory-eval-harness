@@ -1,0 +1,1 @@
+- [Order service incremental sessions](order_service_incremental_sessions.md) — 3-session order_service baseline is complete; future work should harden gateway forwarding.

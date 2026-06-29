@@ -1,0 +1,10 @@
+You are working in the repository at the current working directory. This is session 2 of a 2-session development task. The previous session has ended and conversation context is unavailable. Use the repository state and your persistent memory if available. Do not ask for previous conversation context. Complete only the requirements for this session. At the end, update memory with decisions and remaining work.
+
+Excellent. The validation logic is now in place. For your second task, you need to update the reporting component to account for these new invalid records.
+
+Modify `src/generate_report/main.c` to:
+1. Read the `invalid_records.log` file that is now created by the `process_stream` component.
+2. Count the total number of entries in this log file.
+3. Add a new line to the final summary report that displays this count. The format must be: `Invalid BP Records: [count]`
+
+Ensure your code gracefully handles the case where `invalid_records.log` does not exist (i.e., all records were valid), in which case the count should be 0.

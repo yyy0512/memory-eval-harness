@@ -1,0 +1,320 @@
+diff --git a/chronoflow_fabric/scripts/init_db.sql b/chronoflow_fabric/scripts/init_db.sql
+index 503d65f..43ca4b4 100644
+--- a/chronoflow_fabric/scripts/init_db.sql
++++ b/chronoflow_fabric/scripts/init_db.sql
+@@ -139,6 +139,17 @@ static const char *SCHEMA_SQL =
+ "    FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE"
+ ");"
+ 
++"CREATE TABLE task_dependencies ("
++"    dependency_id     INTEGER PRIMARY KEY AUTOINCREMENT,"
++"    blocking_task_id  INTEGER NOT NULL,"
++"    dependent_task_id INTEGER NOT NULL,"
++"    created_at        INTEGER NOT NULL,"
++"    FOREIGN KEY (blocking_task_id) REFERENCES tasks(task_id) ON DELETE CASCADE,"
++"    FOREIGN KEY (dependent_task_id) REFERENCES tasks(task_id) ON DELETE CASCADE,"
++"    UNIQUE (blocking_task_id, dependent_task_id),"
++"    CHECK (blocking_task_id <> dependent_task_id)"
++");"
++
+ "-- ------------------------------------------------------------\n"
+ "--  Analytics\n"
+ "-- ------------------------------------------------------------\n"
+@@ -163,6 +174,8 @@ static const char *SCHEMA_SQL =
+ "-- ------------------------------------------------------------\n"
+ "CREATE INDEX idx_events_calendar_id      ON events(calendar_id);\n"
+ "CREATE INDEX idx_tasks_user_status       ON tasks(user_id, status);\n"
++"CREATE INDEX idx_task_deps_dependent     ON task_dependencies(dependent_task_id);\n"
++"CREATE INDEX idx_task_deps_blocking      ON task_dependencies(blocking_task_id);\n"
+ "CREATE INDEX idx_focus_sessions_user_id  ON focus_sessions(user_id);\n"
+ "CREATE INDEX idx_snapshots_user_time     ON analytics_snapshots(user_id, captured_at);\n"
+ 
+diff --git a/chronoflow_fabric/src/domain.h b/chronoflow_fabric/src/domain.h
+index c03a572..bbff9dc 100644
+--- a/chronoflow_fabric/src/domain.h
++++ b/chronoflow_fabric/src/domain.h
+@@ -66,17 +66,23 @@ typedef enum
+ /*---------------------------------------------------------------------
+  *  Strongly-typed Identifiers
+  *--------------------------------------------------------------------*/
++#ifndef CF_ID_T_DEFINED
++#define CF_ID_T_DEFINED
+ typedef struct
+ {
+     uint64_t value;    /* Monotonically increasing identifier issued by DB */
+ } cf_id_t;
++#endif
+ 
++#ifndef CF_ID_HELPERS_DEFINED
++#define CF_ID_HELPERS_DEFINED
+ #define CF_ID_NULL ((cf_id_t){ .value = 0 })
+ 
+ static inline bool cf_id_is_null(cf_id_t id)
+ {
+     return id.value == 0u;
+ }
++#endif
+ 
+ /*---------------------------------------------------------------------
+  *  Priority & Status Enumerations
+@@ -227,6 +233,16 @@ typedef struct
+     bool            completed;
+ } cf_task_t;
+ 
++#ifndef CF_TASK_DEPENDENCY_T_DEFINED
++#define CF_TASK_DEPENDENCY_T_DEFINED
++typedef struct
++{
++    cf_id_t         id;
++    cf_id_t         blocking_task_id;
++    cf_id_t         dependent_task_id;
++} cf_task_dependency_t;
++#endif
++
+ /*---------------------------------------------------------------------
+  *  Validation Helpers
+  *--------------------------------------------------------------------*/
+diff --git a/chronoflow_fabric/src/repository.c b/chronoflow_fabric/src/repository.c
+index 8ca9179..b9a532a 100644
+--- a/chronoflow_fabric/src/repository.c
++++ b/chronoflow_fabric/src/repository.c
+@@ -27,6 +27,7 @@
+ #include <unistd.h>
+ #include <syslog.h>
+ #include <signal.h>
++#include <errno.h>
+ 
+ #include <libpq-fe.h>          /* PostgreSQL client library            */
+ #include "uthash.h"            /* Embedded hash table implementation   */
+@@ -106,6 +107,27 @@ static time_t _to_time_t(const char *iso8601)
+     return mktime(&tm);
+ }
+ 
++static cf_id_t _cf_id_from_db(const char *value)
++{
++    if (!value) {
++        return CF_ID_NULL;
++    }
++
++    errno = 0;
++    char *end = NULL;
++    unsigned long long parsed = strtoull(value, &end, 10);
++    if (errno != 0 || end == value) {
++        return CF_ID_NULL;
++    }
++
++    return (cf_id_t){ .value = (uint64_t)parsed };
++}
++
++static void _cf_id_to_param(cf_id_t id, char *buffer, size_t buffer_len)
++{
++    snprintf(buffer, buffer_len, "%llu", (unsigned long long)id.value);
++}
++
+ /*--------------------------------------------------------------------
+  * Public API
+  *------------------------------------------------------------------*/
+@@ -272,6 +294,148 @@ int cf_repository_upsert_task(const cf_task_t *task)
+     return rc;
+ }
+ 
++/*--------------------------------------------------------------------
++ * CRUD – Task dependencies
++ *------------------------------------------------------------------*/
++cf_error_t create_task_dependency(const cf_task_dependency_t *dependency,
++                                  cf_task_dependency_t *out_created)
++{
++    if (!dependency || !out_created ||
++        cf_id_is_null(dependency->blocking_task_id) ||
++        cf_id_is_null(dependency->dependent_task_id)) {
++        return CF_ERR_BAD_ARGUMENT;
++    }
++
++    const char *sql =
++        "INSERT INTO task_dependencies (blocking_task_id, dependent_task_id, created_at) "
++        "VALUES ($1, $2, EXTRACT(EPOCH FROM NOW())::bigint) "
++        "RETURNING dependency_id, blocking_task_id, dependent_task_id";
++
++    char blocking_id[32];
++    char dependent_id[32];
++    _cf_id_to_param(dependency->blocking_task_id, blocking_id, sizeof blocking_id);
++    _cf_id_to_param(dependency->dependent_task_id, dependent_id, sizeof dependent_id);
++
++    const char *params[2] = { blocking_id, dependent_id };
++
++    struct {
++        int found;
++        cf_task_dependency_t created;
++    } ctx = { .found = 0 };
++
++    int rc = cf_repo_execute(sql, 2, params,
++        [](int row, PGresult *res, void *ud) -> int {
++            (void)row;
++            struct { int found; cf_task_dependency_t created; } *ctx = ud;
++            ctx->created.id = _cf_id_from_db(PQgetvalue(res, row, 0));
++            ctx->created.blocking_task_id = _cf_id_from_db(PQgetvalue(res, row, 1));
++            ctx->created.dependent_task_id = _cf_id_from_db(PQgetvalue(res, row, 2));
++            ctx->found = 1;
++            return 0;
++        },
++        &ctx);
++
++    if (rc != CF_ERR_OK) {
++        return rc;
++    }
++    if (!ctx.found) {
++        return CF_ERR_NOT_FOUND;
++    }
++
++    *out_created = ctx.created;
++    return CF_ERR_OK;
++}
++
++cf_error_t get_blocking_tasks_for_task(cf_id_t task_id,
++                                       cf_task_dependency_t **out_dependencies,
++                                       size_t *out_count)
++{
++    if (cf_id_is_null(task_id) || !out_dependencies || !out_count) {
++        return CF_ERR_BAD_ARGUMENT;
++    }
++
++    *out_dependencies = NULL;
++    *out_count = 0;
++
++    const char *sql =
++        "SELECT dependency_id, blocking_task_id, dependent_task_id "
++        "FROM task_dependencies "
++        "WHERE dependent_task_id = $1 "
++        "ORDER BY dependency_id";
++
++    char dependent_id[32];
++    _cf_id_to_param(task_id, dependent_id, sizeof dependent_id);
++    const char *params[1] = { dependent_id };
++
++    struct {
++        cf_task_dependency_t *items;
++        size_t count;
++        size_t capacity;
++        int failed;
++    } ctx = { .items = NULL, .count = 0, .capacity = 0, .failed = 0 };
++
++    int rc = cf_repo_execute(sql, 1, params,
++        [](int row, PGresult *res, void *ud) -> int {
++            (void)row;
++            struct {
++                cf_task_dependency_t *items;
++                size_t count;
++                size_t capacity;
++                int failed;
++            } *ctx = ud;
++
++            if (ctx->count == ctx->capacity) {
++                size_t next_capacity = ctx->capacity == 0 ? 4 : ctx->capacity * 2;
++                cf_task_dependency_t *next_items = realloc(ctx->items,
++                    next_capacity * sizeof *next_items);
++                if (!next_items) {
++                    ctx->failed = 1;
++                    return -1;
++                }
++                ctx->items = next_items;
++                ctx->capacity = next_capacity;
++            }
++
++            ctx->items[ctx->count++] = (cf_task_dependency_t){
++                .id = _cf_id_from_db(PQgetvalue(res, row, 0)),
++                .blocking_task_id = _cf_id_from_db(PQgetvalue(res, row, 1)),
++                .dependent_task_id = _cf_id_from_db(PQgetvalue(res, row, 2))
++            };
++            return 0;
++        },
++        &ctx);
++
++    if (rc != CF_ERR_OK) {
++        free(ctx.items);
++        return rc;
++    }
++    if (ctx.failed) {
++        free(ctx.items);
++        return CF_ERR_INTERNAL;
++    }
++
++    *out_dependencies = ctx.items;
++    *out_count = ctx.count;
++    return CF_ERR_OK;
++}
++
++cf_error_t delete_dependency(cf_id_t dependency_id)
++{
++    if (cf_id_is_null(dependency_id)) {
++        return CF_ERR_BAD_ARGUMENT;
++    }
++
++    const char *sql =
++        "DELETE FROM task_dependencies "
++        "WHERE dependency_id = $1";
++
++    char id[32];
++    _cf_id_to_param(dependency_id, id, sizeof id);
++    const char *params[1] = { id };
++
++    return cf_repo_execute(sql, 1, params, NULL, NULL);
++}
++
+ /*--------------------------------------------------------------------
+  * Internal – generic execution helper
+  *------------------------------------------------------------------*/
+diff --git a/chronoflow_fabric/src/repository.h b/chronoflow_fabric/src/repository.h
+index 01773d7..0efba8a 100644
+--- a/chronoflow_fabric/src/repository.h
++++ b/chronoflow_fabric/src/repository.h
+@@ -26,6 +26,34 @@
+ #include <stdbool.h>    /* bool         */
+ #include <time.h>       /* time_t       */
+ 
++#ifndef CF_ID_T_DEFINED
++#define CF_ID_T_DEFINED
++typedef struct
++{
++    uint64_t value;
++} cf_id_t;
++#endif
++
++#ifndef CF_ID_HELPERS_DEFINED
++#define CF_ID_HELPERS_DEFINED
++#define CF_ID_NULL ((cf_id_t){ .value = 0 })
++
++static inline bool cf_id_is_null(cf_id_t id)
++{
++    return id.value == 0u;
++}
++#endif
++
++#ifndef CF_TASK_DEPENDENCY_T_DEFINED
++#define CF_TASK_DEPENDENCY_T_DEFINED
++typedef struct
++{
++    cf_id_t id;
++    cf_id_t blocking_task_id;
++    cf_id_t dependent_task_id;
++} cf_task_dependency_t;
++#endif
++
+ #ifdef __cplusplus
+ extern "C" {
+ #endif
+@@ -292,6 +320,15 @@ cf_error_t cf_repository_query_tasks  (cf_repository_t *repo,
+                                        cf_task_state_t  filter_state, /* pass -1 for ALL */
+                                        cf_cursor_t    **out_cursor);
+ 
++cf_error_t create_task_dependency(const cf_task_dependency_t *dependency,
++                                  cf_task_dependency_t       *out_created);
++
++cf_error_t get_blocking_tasks_for_task(cf_id_t                 task_id,
++                                       cf_task_dependency_t  **out_dependencies,
++                                       size_t                *out_count);
++
++cf_error_t delete_dependency(cf_id_t dependency_id);
++
+ 
+ /* -------------------- CRUD – Focus Statistics ---------------------------- */
+ 

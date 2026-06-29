@@ -1,0 +1,38 @@
+{
+  "scenario_id": "c_desktop_media_medium_020_multi_session_development_easy_01",
+  "case_id": "c_desktop_media_medium_020",
+  "category": "extended_development_projects",
+  "original_task_category": "multi_session_development",
+  "project_source": "/home/yyy/projects/LoCoBench-Agent/.claude/worktrees/memory-eval-harness/data/generated/c_desktop_media_medium_020",
+  "project_name": "FocusCast Studio",
+  "language": "c",
+  "complexity": "medium",
+  "session_count": 2,
+  "turns": [
+    {
+      "session": 1,
+      "file": "turns/session_1.jsonl",
+      "turn_count": 1
+    },
+    {
+      "session": 2,
+      "file": "turns/session_2.jsonl",
+      "turn_count": 1
+    }
+  ],
+  "prompts_for_review": [
+    {
+      "session": 1,
+      "file": "prompts/session_1.txt"
+    },
+    {
+      "session": 2,
+      "file": "prompts/session_2.txt"
+    }
+  ],
+  "hashes": {
+    "scenario_json_sha256": "41ebb1a88deaf9e7bcf372ecd67a153e7ca1f83e344db811d5564a10c0acd988",
+    "project_tree_sha256": "c5a572c04a34899d974e22464b576ef26d8ad448ff9f86759396c0ff96c7175e",
+    "prepared_case_sha256": "ce7a7443d3bf350366d0f7ecf88566d0e1e1c69f8b2014894c5c88dbe7425b16"
+  }
+}

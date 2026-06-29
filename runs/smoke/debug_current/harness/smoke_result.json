@@ -1,0 +1,16 @@
+{
+  "status": "fail",
+  "agent_bin": "codeagentcli",
+  "memory_mode": "on",
+  "scenario_id": "c_api_gateway_easy_009_multi_session_development_expert_01",
+  "session": 1,
+  "exit_code": 1,
+  "result_found": true,
+  "is_error": true,
+  "subtype": "success",
+  "has_usage": true,
+  "has_model_usage": false,
+  "has_total_cost_usd": true,
+  "memory_files_count": 0,
+  "duration_ms": 243
+}

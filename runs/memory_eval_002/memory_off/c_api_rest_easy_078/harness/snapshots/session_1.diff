@@ -1,0 +1,58 @@
+diff --git a/UtiliREST_EchoHub/Makefile b/UtiliREST_EchoHub/Makefile
+index ee95d30..f975f15 100644
+--- a/UtiliREST_EchoHub/Makefile
++++ b/UtiliREST_EchoHub/Makefile
+@@ -43,7 +43,7 @@ OPT_DEBUG      = -O0 -g3
+ STD            = -std=c11
+ DEFINES        = -DPROJECT_VERSION=\"$(VERSION)\"
+ 
+-CFLAGS_COMMON  = $(STD) $(WARNINGS) $(DEFINES) -fPIC
++CFLAGS_COMMON  = $(STD) $(WARNINGS) $(DEFINES) -I. -Iinclude -fPIC
+ LDFLAGS_COMMON =
+ 
+ # Libraries discovered via pkg-config
+@@ -88,10 +88,11 @@ JOBS ?= $(shell nproc 2>/dev/null || echo 4)
+ # Source file discovery
+ #------------------------------------------------------------------------------
+ SRC  := $(foreach dir,$(SRC_DIRS),$(wildcard $(dir)/*.c))
++SRC += src/rate_limiter.c
+ OBJ  := $(patsubst %.c,$(OBJ_DIR)/%.o,$(SRC))
+ 
+-TEST_SRC := $(wildcard $(TEST_DIR)/*.c)
+-TEST_OBJ := $(patsubst %.c,$(OBJ_DIR)/%.o,$(TEST_SRC))
++RATE_LIMITER_TEST_SRC = $(TEST_DIR)/test_rate_limiter.c
++RATE_LIMITER_TEST_OBJ = $(patsubst %.c,$(OBJ_DIR)/%.o,$(RATE_LIMITER_TEST_SRC))
+ 
+ #------------------------------------------------------------------------------
+ # Default target
+@@ -122,7 +123,7 @@ test: $(UNIT_TEST_BIN)
+ 	@echo "Running unit tests…"
+ 	@./$(UNIT_TEST_BIN)
+ 
+-$(UNIT_TEST_BIN): $(OBJ) $(TEST_OBJ)
++$(UNIT_TEST_BIN): $(OBJ_DIR)/src/rate_limiter.o $(RATE_LIMITER_TEST_OBJ)
+ 	@$(MKDIR_P) $(BIN_DIR)
+ 	$(CC) $^ $(LDFLAGS) -o $@
+ 
+@@ -145,7 +146,7 @@ CLANG_FORMAT ?= clang-format
+ .PHONY: fmt
+ fmt:
+ 	@echo "Formatting source files…"
+-	@$(CLANG_FORMAT) -i $(SRC) $(TEST_SRC) || true
++	@$(CLANG_FORMAT) -i $(SRC) $(RATE_LIMITER_TEST_SRC) || true
+ 
+ CPPCHECK ?= cppcheck
+ .PHONY: lint
+diff --git a/UtiliREST_EchoHub/config.h b/UtiliREST_EchoHub/config.h
+index c7d0c9b..c501789 100644
+--- a/UtiliREST_EchoHub/config.h
++++ b/UtiliREST_EchoHub/config.h
+@@ -86,6 +86,8 @@ typedef enum
+ #define EH_DEFAULT_MAX_PAYLOAD         (256u * 1024u)   /* 256 KiB */
+ #define EH_DEFAULT_SQLITE_POOL_SIZE    4u
+ #define EH_DEFAULT_SLOW_QUERY_MS       1000u            /* 1 second */
++#define RATE_LIMIT_WINDOW_SECONDS      60
++#define RATE_LIMIT_MAX_REQUESTS        100
+ 
+ /*----------------------------------------------------------------------
+  *  Configuration structure

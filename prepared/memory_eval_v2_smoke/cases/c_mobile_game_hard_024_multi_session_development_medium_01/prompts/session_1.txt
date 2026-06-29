@@ -1,0 +1,16 @@
+You are working in the repository at the current working directory. This is session 1 of a multi-session development task. Complete only the requirements for this session. At the end, save any useful project-specific memory for future sessions.
+
+This task is divided into two sessions. You must retain the context from the first session to successfully complete the second.
+
+**Session 1: Fix Achievement Sync Bug**
+User Bug Report: "I unlocked 3 special achievements while playing on the subway with no internet. When I got home and connected to Wi-Fi, the game synced, but my achievement count only went up by 1. I lost 2 achievements!"
+
+Your goal is to fix this data loss issue. The root cause is likely related to how concurrent changes to the player's state are merged. The `PlayerState` in `src/business_logic/domain.h` currently uses a simple `int` for `special_achievements_unlocked`. This is inadequate for conflict-free merging.
+
+1.  **Analyze:** Investigate `src/data/sync_manager.h`, `src/data/player_repository.h`, and `src/core/crdt/crdt_gcounter.c`. Understand how player state is saved, loaded, and merged.
+2.  **Hypothesize:** Conclude that a simple integer is the wrong data type for a value that can be incremented on multiple devices offline.
+3.  **Implement:** Refactor the `PlayerState` to use the existing `GCounter` (Grow-Only Counter) CRDT from `crdt_gcounter.c` for tracking achievements. This will involve:
+    *   Modifying the `PlayerState` struct in `domain.h`.
+    *   Updating the serialization/deserialization logic in `player_repository.c`.
+    *   Changing the merge logic in `sync_manager.c` to use `gcounter_merge` for the achievement counter.
+    *   Updating any game logic that directly modifies the integer to use the appropriate `gcounter_increment` function.

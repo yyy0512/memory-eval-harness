@@ -1,0 +1,16 @@
+You are working in the repository at the current working directory. This is session 2 of a 2-session development task. The previous session has ended and conversation context is unavailable. Use the repository state and your persistent memory if available. Do not ask for previous conversation context. Complete only the requirements for this session. At the end, update memory with decisions and remaining work.
+
+You are a developer working on the HeartLink Lite app. Your task is to add a mood tracking feature over two sessions.
+
+**SESSION 2: UI & Logic Integration**
+(This prompt is given after the agent has completed Session 1 and the environment has been reset, simulating a developer returning the next day.)
+
+Welcome back. Yesterday, you updated the data model to support mood tracking. Today, you will integrate this feature into the user interface.
+1.  In `heartlink-lite/src/hl_utils.c`, create a new utility function. The function signature should be: `const char* hl_utils_get_mood_string(int mood_value)`. This function should return:
+    - "Happy" when `mood_value` is 1
+    - "Neutral" when `mood_value` is 2
+    - "Sad" when `mood_value` is 3
+    - "Unknown" for any other value.
+2.  You'll also need to declare this function's prototype. Assume a `hl_utils.h` file exists and you should add the prototype there. For this task, you can simply state the change you would make to `hl_utils.h` in a comment or assume it's done.
+3.  In `heartlink-lite/src/hl_vitals_viewmodel.c`, find the `hl_vitals_update_view` function (or a similar function responsible for printing user data).
+4.  Modify this function to display the user's mood. You will need to call your new `hl_utils_get_mood_string` function, passing the `current_mood` value from the viewmodel's data. You may need to add an `#include "hl_utils.h"` at the top of the file.
