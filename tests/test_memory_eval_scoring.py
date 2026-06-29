@@ -1,7 +1,7 @@
 import json
 
 from locobench.memory_eval.io import write_json
-from locobench.memory_eval.scoring import score_runs
+from locobench.memory_eval.scoring import classify_session_failures, score_runs
 
 
 def _write_case(run_dir, case_id, input_tokens, output_tokens, cost):
@@ -26,8 +26,19 @@ def _write_case(run_dir, case_id, input_tokens, output_tokens, cost):
     )
 
 
-def _write_rich_case(run_dir, case_id="case_1", variant=None, permission_denials=None, exit_code=0):
+def _write_rich_case(
+    run_dir,
+    case_id="case_1",
+    variant=None,
+    permission_denials=None,
+    exit_code=0,
+    subtype="success",
+    is_error=None,
+    errors=None,
+):
     variant = variant or run_dir.name
+    is_error = exit_code != 0 if is_error is None else is_error
+    errors = ["failed"] if errors is None and exit_code != 0 else errors or []
     harness = run_dir / case_id / "harness"
     memory_1 = harness / "snapshots" / "session_1_memory"
     memory_2 = harness / "snapshots" / "session_2_memory"
@@ -75,8 +86,9 @@ def _write_rich_case(run_dir, case_id="case_1", variant=None, permission_denials
                 {
                     "session": 2,
                     "exit_code": exit_code,
-                    "is_error": exit_code != 0,
+                    "is_error": is_error,
                     "cli_result_json": "logs/session_2.result.json" if exit_code == 0 else None,
+                    "subtype": subtype,
                     "usage": {
                         "input_tokens": 20,
                         "output_tokens": 7,
@@ -94,7 +106,7 @@ def _write_rich_case(run_dir, case_id="case_1", variant=None, permission_denials
                     "memory_snapshot": "snapshots/session_2_memory",
                     "files_changed": ["src/rate_limiter.c", "tests/test_rate_limiter.c"],
                     "permission_denials": permission_denials or [],
-                    "errors": ["failed"] if exit_code != 0 else [],
+                    "errors": errors,
                 },
             ],
             "final_diff": "snapshots/final.diff",
@@ -197,6 +209,75 @@ def test_score_runs_classifies_failure_profile(tmp_path):
     assert profile["by_reason"]["is_error_flag"] == 1
     assert profile["by_reason"]["permission_denied"] == 1
     assert report["variants"]["memory_on"]["metrics"]["final_task_completion"]["fail_count"] == 1
+
+
+def test_classify_session_failures_can_ignore_nonfatal_memory_off_memory_denials():
+    session = {
+        "session": 2,
+        "exit_code": 0,
+        "is_error": False,
+        "subtype": "success",
+        "cli_result_json": "logs/session_2.result.json",
+        "permission_denials": [
+            {
+                "tool_name": "Write",
+                "tool_input": {"file_path": "/home/user/.cac/projects/example/session_memory.md"},
+            }
+        ],
+        "errors": [],
+    }
+
+    assert classify_session_failures(session) == ["permission_denied"]
+    assert classify_session_failures(
+        session,
+        variant="memory_off",
+        ignore_nonfatal_memory_denials=True,
+    ) == []
+    assert classify_session_failures(
+        session,
+        variant="memory_on",
+        ignore_nonfatal_memory_denials=True,
+    ) == ["permission_denied"]
+
+    unrelated_denial = {
+        **session,
+        "permission_denials": [{"tool_name": "Write", "tool_input": {"file_path": "/etc/passwd"}}],
+    }
+    assert classify_session_failures(
+        unrelated_denial,
+        variant="memory_off",
+        ignore_nonfatal_memory_denials=True,
+    ) == ["permission_denied"]
+
+
+def test_memory_off_nonfatal_memory_save_denial_does_not_fail_task_completion(tmp_path):
+    memory_off = tmp_path / "memory_off"
+    _write_rich_case(
+        memory_off,
+        permission_denials=[
+            {
+                "tool_name": "Bash",
+                "tool_input": {
+                    "command": "mkdir -p /tmp/workspace/.cac",
+                    "description": "Create local memory directory",
+                },
+            }
+        ],
+        exit_code=0,
+        subtype="success",
+        is_error=False,
+        errors=[],
+    )
+
+    report = score_runs([memory_off], tmp_path / "report.json")
+
+    profile = report["variants"]["memory_off"]["failure_profile"]
+    final_task_completion = report["variants"]["memory_off"]["metrics"]["final_task_completion"]
+    assert profile["by_reason"]["permission_denied"] == 1
+    assert final_task_completion["mean"] == 1.0
+    assert final_task_completion["pass_count"] == 1
+    assert final_task_completion["fail_count"] == 0
+    assert report["cases"][0]["metrics"]["final_task_completion"]["status"] == "pass"
 
 
 def test_memory_specific_metrics_are_not_applicable_for_memory_off(tmp_path):

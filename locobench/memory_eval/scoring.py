@@ -253,7 +253,39 @@ def _case_reference(prepared_dir: Optional[Path], scenario_id: str) -> Dict[str,
     }
 
 
-def classify_session_failures(session: Dict[str, Any]) -> List[str]:
+def _is_clean_success_session(session: Dict[str, Any]) -> bool:
+    """Return true when a session completed cleanly from the CLI perspective."""
+    return (
+        session.get("cli_result_json") is not None
+        and session.get("exit_code") == 0
+        and session.get("subtype") == "success"
+        and not session.get("is_error")
+        and not session.get("errors")
+    )
+
+
+def _is_memory_save_permission_denial(denial: Any) -> bool:
+    """Return true for permission denials caused by memory-save attempts."""
+    text = json.dumps(denial, ensure_ascii=False, sort_keys=True).lower()
+    return "session_memory" in text or "session memory" in text or (".cac" in text and "memory" in text)
+
+
+def _has_only_nonfatal_memory_off_memory_denials(session: Dict[str, Any], variant: Optional[str]) -> bool:
+    """Return true for clean memory_off sessions with only memory-save permission denials."""
+    denials = session.get("permission_denials") or []
+    return (
+        variant == "memory_off"
+        and _is_clean_success_session(session)
+        and bool(denials)
+        and all(_is_memory_save_permission_denial(denial) for denial in denials)
+    )
+
+
+def classify_session_failures(
+    session: Dict[str, Any],
+    variant: Optional[str] = None,
+    ignore_nonfatal_memory_denials: bool = False,
+) -> List[str]:
     """Return deterministic failure reason codes for a session result."""
     reason_codes = []
     exit_code = session.get("exit_code")
@@ -265,7 +297,9 @@ def classify_session_failures(session: Dict[str, Any]) -> List[str]:
         reason_codes.append("nonzero_exit")
     if session.get("is_error"):
         reason_codes.append("is_error_flag")
-    if session.get("permission_denials"):
+    if session.get("permission_denials") and not (
+        ignore_nonfatal_memory_denials and _has_only_nonfatal_memory_off_memory_denials(session, variant)
+    ):
         reason_codes.append("permission_denied")
     if session.get("errors"):
         reason_codes.append("session_error")
@@ -300,7 +334,12 @@ def _case_failure_profile(case: Dict[str, Any], variant: str) -> Dict[str, Any]:
     }
 
 
-def score_final_task_completion(case: Dict[str, Any]) -> Metric:
+def _relaxed_session_failures(session: Dict[str, Any], variant: str) -> List[str]:
+    """Return failure reasons with non-fatal memory_off memory-save denials ignored."""
+    return classify_session_failures(session, variant=variant, ignore_nonfatal_memory_denials=True)
+
+
+def score_final_task_completion(case: Dict[str, Any], variant: str) -> Metric:
     """Score final task completion with deterministic execution outcome proxies."""
     sessions = sorted(case.get("sessions", []), key=lambda item: item.get("session") or 0)
     evidence = []
@@ -308,15 +347,20 @@ def score_final_task_completion(case: Dict[str, Any]) -> Metric:
         return _metric(0.0, "fail", 1.0, ["no sessions recorded"])
 
     final_session = sessions[-1]
-    final_failures = classify_session_failures(final_session)
-    all_failures = [failure for session in sessions for failure in classify_session_failures(session)]
+    final_failures = _relaxed_session_failures(final_session, variant)
+    all_failures = [failure for session in sessions for failure in _relaxed_session_failures(session, variant)]
+    ignored_denials = [
+        session
+        for session in sessions
+        if session.get("permission_denials") and _has_only_nonfatal_memory_off_memory_denials(session, variant)
+    ]
     if case.get("errors"):
         evidence.append("case-level errors recorded")
     if final_failures:
         evidence.append(f"final session failure reasons: {', '.join(final_failures)}")
-    if any(session.get("permission_denials") for session in sessions):
-        evidence.append("permission denials recorded")
-    if final_failures or case.get("errors") or any(session.get("permission_denials") for session in sessions):
+    if ignored_denials:
+        evidence.append("non-fatal memory-save permission denials ignored for memory_off task completion")
+    if final_failures or case.get("errors"):
         return _metric(0.0, "fail", 1.0, evidence or ["final session did not complete cleanly"])
     if all_failures:
         evidence.append("final session succeeded after earlier recoverable failures")
@@ -427,7 +471,7 @@ def score_memory_usage_evidence(case: Dict[str, Any], variant: str) -> Metric:
             overlap_ratios.append(ratio)
     avg_overlap = sum(overlap_ratios) / len(overlap_ratios) if overlap_ratios else 0.0
     later_successes = sum(
-        1 for session in sessions[1:] if not classify_session_failures(session) and session.get("exit_code") == 0
+        1 for session in sessions[1:] if not _relaxed_session_failures(session, variant) and session.get("exit_code") == 0
     )
 
     evidence = [
@@ -535,7 +579,7 @@ def _build_llm_judge_prompt(
                 "session": session.get("session"),
                 "exit_code": session.get("exit_code"),
                 "is_error": session.get("is_error"),
-                "failure_reasons": classify_session_failures(session),
+                "failure_reasons": _relaxed_session_failures(session, variant),
                 "files_changed": session.get("files_changed") or [],
                 "duration_sec": session.get("duration_sec"),
             }
@@ -729,7 +773,7 @@ def score_case(
         "variant": variant,
         "reference": _case_reference(prepared_dir, scenario_id),
         "metrics": {
-            "final_task_completion": score_final_task_completion(case),
+            "final_task_completion": score_final_task_completion(case, variant),
             "cross_session_continuity": score_cross_session_continuity(case, variant),
             "memory_write_quality": score_memory_write_quality(case, variant),
             "memory_usage_evidence": score_memory_usage_evidence(case, variant),
