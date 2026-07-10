@@ -1,0 +1,305 @@
+{
+  "meta": {
+    "file_version": "1.2.0",
+    "generated_utc": "2024-04-21T00:00:00Z",
+    "schema": "https://campusguard.edu/schemas/security_rules/v1"
+  },
+  "defaults": {
+    "alert_throttle_sec": 300,
+    "notification_channels": [
+      "dashboard",
+      "email"
+    ],
+    "email_recipients": [
+      "secops@campusguard.edu"
+    ],
+    "syslog_facility": "local5",
+    "enable_audit_tags": true
+  },
+  "lists": {
+    "internal_subnets": [
+      "10.0.0.0/8",
+      "192.168.0.0/16",
+      "172.16.0.0/12"
+    ],
+    "blacklisted_countries": [
+      "KP",
+      "IR",
+      "SY",
+      "RU"
+    ],
+    "privileged_users": [
+      "root",
+      "sysadmin",
+      "backup"
+    ]
+  },
+  "rules": [
+    {
+      "id": "R001",
+      "name": "Unauthorized SSH Root Login Attempt",
+      "description": "Detects failed SSH login attempts to the root account from non-internal subnets.",
+      "category": "authentication",
+      "severity": "high",
+      "enabled": true,
+      "detection": {
+        "log_source": "/var/log/secure",
+        "event_type": "auth",
+        "matchers": [
+          {
+            "pattern": "Failed password for root from (?<src_ip>[\\d.]+)",
+            "capture": [
+              "src_ip"
+            ]
+          }
+        ],
+        "filters": [
+          {
+            "field": "src_ip",
+            "operator": "not_in_cidr",
+            "value": "@lists.internal_subnets"
+          }
+        ],
+        "threshold": {
+          "count": 3,
+          "interval_sec": 60
+        }
+      },
+      "remediation": {
+        "action": "block_ip",
+        "parameters": {
+          "duration_min": 60
+        },
+        "runbook": "https://campusguard.edu/runbooks/ssh_root_block"
+      }
+    },
+    {
+      "id": "R002",
+      "name": "Excessive Failed User Logins",
+      "description": "Triggers when a user account has multiple failed logins in a short period, indicating possible brute force.",
+      "category": "authentication",
+      "severity": "medium",
+      "enabled": true,
+      "detection": {
+        "log_source": "/var/log/auth.log",
+        "event_type": "auth",
+        "matchers": [
+          {
+            "pattern": "Failed password for (?<user>[a-zA-Z0-9_-]+) from (?<src_ip>[\\d.]+)"
+          }
+        ],
+        "threshold": {
+          "count": 6,
+          "interval_sec": 90,
+          "group_by": [
+            "user",
+            "src_ip"
+          ]
+        }
+      },
+      "remediation": {
+        "action": "notify_only",
+        "runbook": "https://campusguard.edu/runbooks/brute_force_response"
+      }
+    },
+    {
+      "id": "R003",
+      "name": "Suspicious Binary Execution from /tmp",
+      "description": "Detects execution of ELF binaries residing in /tmp, a common attacker technique.",
+      "category": "execution",
+      "severity": "high",
+      "enabled": true,
+      "detection": {
+        "log_source": "/var/log/audit/audit.log",
+        "event_type": "process_exec",
+        "matchers": [
+          {
+            "pattern": "exe=\"(?<exe_path>/tmp/[^\"]+)\""
+          }
+        ]
+      },
+      "remediation": {
+        "action": "isolate_host",
+        "parameters": {
+          "network": true,
+          "timeout_min": 30
+        },
+        "runbook": "https://campusguard.edu/runbooks/tmp_binary_exec"
+      }
+    },
+    {
+      "id": "R004",
+      "name": "World-Writable System Binary",
+      "description": "Monitors file integrity DB for system binaries that have become world-writable.",
+      "category": "integrity",
+      "severity": "critical",
+      "enabled": true,
+      "detection": {
+        "log_source": "/var/log/fim.log",
+        "event_type": "fim",
+        "matchers": [
+          {
+            "pattern": "(?<path>/usr/bin/[a-zA-Z0-9_-]+)\\s+permissions=..w.w."
+          }
+        ]
+      },
+      "remediation": {
+        "action": "revert_permissions",
+        "parameters": {
+          "desired_perms": "0755"
+        },
+        "runbook": "https://campusguard.edu/runbooks/world_writable_binary"
+      }
+    },
+    {
+      "id": "R005",
+      "name": "Kernel Panic Detected",
+      "description": "Generates critical alert if kernel panic message is observed in dmesg or syslog.",
+      "category": "stability",
+      "severity": "critical",
+      "enabled": true,
+      "detection": {
+        "log_source": "/var/log/kern.log",
+        "event_type": "kernel",
+        "matchers": [
+          {
+            "pattern": "Kernel panic - not syncing"
+          }
+        ]
+      },
+      "remediation": {
+        "action": "page_on_call",
+        "runbook": "https://campusguard.edu/runbooks/kernel_panic"
+      }
+    },
+    {
+      "id": "R006",
+      "name": "Outbound Traffic to Blacklisted Country",
+      "description": "Alerts when egress traffic is detected to IPs geolocated in blacklisted countries.",
+      "category": "network",
+      "severity": "high",
+      "enabled": true,
+      "detection": {
+        "event_bus": "netflow",
+        "event_type": "egress",
+        "matchers": [
+          {
+            "field": "dst_country",
+            "operator": "in",
+            "value": "@lists.blacklisted_countries"
+          }
+        ],
+        "threshold": {
+          "count": 1,
+          "interval_sec": 0
+        }
+      },
+      "remediation": {
+        "action": "block_egress",
+        "runbook": "https://campusguard.edu/runbooks/egress_blacklist"
+      }
+    },
+    {
+      "id": "R007",
+      "name": "Unauthorized Sudoers Modification",
+      "description": "Detects direct edits to /etc/sudoers or files under /etc/sudoers.d that are not performed by configuration management.",
+      "category": "privilege_escalation",
+      "severity": "high",
+      "enabled": true,
+      "detection": {
+        "log_source": "/var/log/audit/audit.log",
+        "event_type": "file_write",
+        "matchers": [
+          {
+            "pattern": "name=\"(/etc/sudoers(|\\.d/[^\"]+))\".*perm=\"w\".*auid=(?<uid>[0-9]+)"
+          }
+        ],
+        "filters": [
+          {
+            "field": "uid",
+            "operator": "not_in",
+            "value": [
+              "0"
+            ]
+          }
+        ]
+      },
+      "remediation": {
+        "action": "revert_file",
+        "parameters": {
+          "path": "/etc/sudoers"
+        },
+        "runbook": "https://campusguard.edu/runbooks/sudoers_modification"
+      }
+    },
+    {
+      "id": "R008",
+      "name": "Potential Data Exfiltration",
+      "description": "Flags continuous outbound transfer exceeding 1 GiB within 15 minutes to an external destination.",
+      "category": "exfiltration",
+      "severity": "critical",
+      "enabled": true,
+      "detection": {
+        "event_bus": "netflow",
+        "event_type": "egress",
+        "threshold": {
+          "sum_field": "bytes",
+          "sum_greater_than": 1073741824,
+          "interval_sec": 900,
+          "group_by": [
+            "src_ip"
+          ]
+        }
+      },
+      "remediation": {
+        "action": "isolate_host",
+        "runbook": "https://campusguard.edu/runbooks/data_exfiltration"
+      }
+    },
+    {
+      "id": "R009",
+      "name": "Malware Signature Detected by ClamAV",
+      "description": "Creates high-severity alert when ClamAV finds a match on a monitored host.",
+      "category": "malware",
+      "severity": "high",
+      "enabled": true,
+      "detection": {
+        "log_source": "/var/log/clamav/clamav.log",
+        "event_type": "malware",
+        "matchers": [
+          {
+            "pattern": "FOUND \\((?<malware_name>[^)]+)\\)"
+          }
+        ]
+      },
+      "remediation": {
+        "action": "quarantine_file",
+        "runbook": "https://campusguard.edu/runbooks/clamav_malware_found"
+      }
+    },
+    {
+      "id": "R010",
+      "name": "File Integrity Hash Mismatch",
+      "description": "Alerts when a critical file's hash no longer matches the baseline.",
+      "category": "integrity",
+      "severity": "medium",
+      "enabled": true,
+      "detection": {
+        "log_source": "/var/log/fim.log",
+        "event_type": "fim",
+        "matchers": [
+          {
+            "pattern": "path=(?<path>/etc/(passwd|shadow))\\s+status=modified"
+          }
+        ]
+      },
+      "remediation": {
+        "action": "restore_snapshot",
+        "parameters": {
+          "snapshot_type": "daily"
+        },
+        "runbook": "https://campusguard.edu/runbooks/fim_mismatch"
+      }
+    }
+  ]
+}

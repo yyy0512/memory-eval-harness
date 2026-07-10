@@ -1,0 +1,381 @@
+```python
+"""
+PrismPocket | mobile_utility
+-----------------------------------
+children.py
+
+Domain-level support for “nested” PrismCards—e.g., multi-page scans, photo
+burst collections, threaded voice memos.  A parent PrismCard can have zero or
+more *child* cards stored locally and synced to the cloud workspace.  This
+module owns the child-relationship lifecycle and publishes high-level domain
+events so that view-models may react in real-time.
+
+Patterns demonstrated
+─────────────────────
+• Repository Pattern   – Persistent storage + in-memory cache with LRU eviction
+• Observer Pattern     – Lightweight event bus for state mutation broadcasts
+• Singleton            – Global, thread-safe instance of the event bus
+• Factory Pattern      – PrismCard factory for JSON <-> domain conversions
+"""
+
+from __future__ import annotations
+
+import json
+import sqlite3
+import threading
+import time
+from collections import OrderedDict
+from contextlib import contextmanager
+from dataclasses import asdict, dataclass
+from pathlib import Path
+from typing import Callable, Dict, List, MutableMapping, Optional, Protocol, Union
+
+###############################################################################
+# Domain models
+###############################################################################
+
+
+@dataclass(frozen=True)
+class PrismCardID:
+    """Value object for type-safe PrismCard identifiers."""
+    value: str
+
+
+@dataclass
+class PrismCard:
+    """
+    Core domain entity representing a single PrismCard.
+
+    Child cards inherit the entire structure; the distinction of parent/child
+    lives inside `ChildrenRepository` via the `parent_id` foreign key.
+    """
+    card_id: PrismCardID
+    created_at: float
+    kind: str  # e.g. "photo", "text", "voice_memo"
+    payload: Dict[str, Union[str, int, float]]
+
+    @property
+    def json(self) -> str:
+        """Serialize to JSON (without leaking dataclass internals)."""
+        blob = {
+            "card_id": self.card_id.value,
+            "created_at": self.created_at,
+            "kind": self.kind,
+            "payload": self.payload,
+        }
+        return json.dumps(blob)
+
+    @classmethod
+    def from_json(cls, data: str) -> "PrismCard":
+        blob = json.loads(data)
+        return cls(
+            card_id=PrismCardID(blob["card_id"]),
+            created_at=blob["created_at"],
+            kind=blob["kind"],
+            payload=blob["payload"],
+        )
+
+
+###############################################################################
+# Observer bus
+###############################################################################
+
+EventCallback = Callable[[Dict[str, object]], None]
+
+
+class _EventBus:
+    """Thread-safe, minimalistic Observer bus (Singleton)."""
+
+    _instance: Optional["_EventBus"] = None
+    _lock = threading.Lock()
+
+    def __new__(cls) -> "_EventBus":  # pragma: no cover
+        with cls._lock:
+            if cls._instance is None:
+                cls._instance = super().__new__(cls)
+                cls._instance._subscribers: Dict[str, List[EventCallback]] = {}
+        return cls._instance
+
+    def subscribe(self, topic: str, callback: EventCallback) -> None:
+        """
+        Register a callback for the given topic.  Re-registering the same
+        callback is idempotent.
+        """
+        with self._lock:
+            self._subscribers.setdefault(topic, [])
+            if callback not in self._subscribers[topic]:
+                self._subscribers[topic].append(callback)
+
+    def unsubscribe(self, topic: str, callback: EventCallback) -> None:
+        with self._lock:
+            if topic in self._subscribers and callback in self._subscribers[topic]:
+                self._subscribers[topic].remove(callback)
+
+    def publish(self, topic: str, payload: Dict[str, object]) -> None:
+        """
+        Send event synchronously to all subscribers.  Handlers run in the
+        publisher's thread; if one misbehaves we log + continue.
+        """
+        handlers: List[EventCallback]
+        with self._lock:
+            handlers = list(self._subscribers.get(topic, []))
+
+        for fn in handlers:
+            try:
+                fn(payload)
+            except Exception as exc:  # noqa: BLE001
+                # Production: funnel to crash reporting (e.g. Sentry).
+                print(f"[EventBus] handler {fn} raised: {exc!r}")
+
+
+# Public accessor
+EventBus: _EventBus = _EventBus()
+
+###############################################################################
+# Storage helpers
+###############################################################################
+
+
+class StorageError(RuntimeError):
+    """Top-level exception raised for any persistence-layer failures."""
+
+
+class _SQLiteConnectionPool:
+    """
+    Tiny connection pool so we do not pay the open/close cost per operation.
+    The pool is *not* intended for high concurrency—just to keep the code tidy.
+    """
+
+    def __init__(self, db_file: Path, max_size: int = 4) -> None:
+        self._db_file = db_file
+        self._max_size = max_size
+        self._idle: "OrderedDict[int, sqlite3.Connection]" = OrderedDict()
+        self._lock = threading.Lock()
+
+    @contextmanager
+    def acquire(self) -> sqlite3.Connection:
+        with self._lock:
+            try:
+                conn = self._idle.popitem(last=False)[1]
+            except KeyError:
+                conn = sqlite3.connect(self._db_file)
+                conn.row_factory = sqlite3.Row
+
+        try:
+            yield conn
+            conn.commit()
+        except Exception:  # noqa: BLE001
+            conn.rollback()
+            raise
+        finally:
+            with self._lock:
+                if len(self._idle) < self._max_size:
+                    self._idle[id(conn)] = conn
+                else:
+                    conn.close()
+
+
+###############################################################################
+# Repository (local storage + LRU cache)
+###############################################################################
+
+
+class IChildrenRepository(Protocol):
+    """Port interface for dependency inversion."""
+
+    def add_child(self, parent_id: PrismCardID, child: PrismCard) -> None: ...
+
+    def remove_child(self, parent_id: PrismCardID, child_id: PrismCardID) -> None: ...
+
+    def get_children(self, parent_id: PrismCardID) -> List[PrismCard]: ...
+
+    def clear_cache(self) -> None: ...
+
+
+class ChildrenRepository(IChildrenRepository):
+    """
+    Handles CRUD for child cards with a local SQLite store and
+    an in-memory LRU cache to minimize disk hits on scroll.
+    """
+
+    _CREATE_TABLE_SQL = """
+    CREATE TABLE IF NOT EXISTS prism_children (
+        parent_id   TEXT NOT NULL,
+        child_id    TEXT NOT NULL PRIMARY KEY,
+        created_at  REAL NOT NULL,
+        kind        TEXT NOT NULL,
+        payload     TEXT NOT NULL
+    );
+    """
+
+    def __init__(
+        self,
+        database_path: Path,
+        cache_size: int = 256,
+        event_bus: _EventBus = EventBus,
+    ) -> None:
+        self._pool = _SQLiteConnectionPool(database_path.expanduser())
+        self._event_bus = event_bus
+        self._cache: MutableMapping[str, PrismCard] = OrderedDict()
+        self._cache_size = cache_size
+        self._initialize_schema()
+
+    def _initialize_schema(self) -> None:
+        try:
+            with self._pool.acquire() as conn:
+                conn.execute(self._CREATE_TABLE_SQL)
+        except sqlite3.Error as exc:
+            raise StorageError("Failed to initialize children table") from exc
+
+    # --------------------------------------------------------------------- #
+    # Public API
+    # --------------------------------------------------------------------- #
+
+    def add_child(self, parent_id: PrismCardID, child: PrismCard) -> None:
+        sql = """
+        INSERT OR REPLACE INTO prism_children
+            (parent_id, child_id, created_at, kind, payload)
+        VALUES (?, ?, ?, ?, ?)
+        """
+        try:
+            with self._pool.acquire() as conn:
+                conn.execute(
+                    sql,
+                    (
+                        parent_id.value,
+                        child.card_id.value,
+                        child.created_at,
+                        child.kind,
+                        json.dumps(child.payload),
+                    ),
+                )
+            self._touch_cache(child.card_id.value, child)
+            self._event_bus.publish(
+                "child_added",
+                {"parent_id": parent_id, "child": child},
+            )
+        except sqlite3.Error as exc:
+            raise StorageError("Failed to add child card") from exc
+
+    def remove_child(self, parent_id: PrismCardID, child_id: PrismCardID) -> None:
+        sql = "DELETE FROM prism_children WHERE child_id = ? AND parent_id = ?"
+        try:
+            with self._pool.acquire() as conn:
+                conn.execute(sql, (child_id.value, parent_id.value))
+            self._cache.pop(child_id.value, None)
+            self._event_bus.publish(
+                "child_removed",
+                {"parent_id": parent_id, "child_id": child_id},
+            )
+        except sqlite3.Error as exc:
+            raise StorageError("Failed to remove child card") from exc
+
+    def get_children(self, parent_id: PrismCardID) -> List[PrismCard]:
+        sql = """
+        SELECT child_id, created_at, kind, payload
+        FROM prism_children
+        WHERE parent_id = ?
+        ORDER BY created_at ASC
+        """
+        try:
+            with self._pool.acquire() as conn:
+                rows = conn.execute(sql, (parent_id.value,)).fetchall()
+            children: List[PrismCard] = []
+            for row in rows:
+                row_id = row["child_id"]
+                card = self._cache.get(row_id)
+                if card is None:
+                    card = PrismCard(
+                        card_id=PrismCardID(row_id),
+                        created_at=row["created_at"],
+                        kind=row["kind"],
+                        payload=json.loads(row["payload"]),
+                    )
+                    self._touch_cache(row_id, card)
+                children.append(card)
+            return children
+        except sqlite3.Error as exc:
+            raise StorageError("Failed to fetch children") from exc
+
+    def clear_cache(self) -> None:
+        self._cache.clear()
+
+    # --------------------------------------------------------------------- #
+    # Internal helpers
+    # --------------------------------------------------------------------- #
+
+    def _touch_cache(self, key: str, value: PrismCard) -> None:
+        """LRU book-keeping."""
+        self._cache.pop(key, None)
+        self._cache[key] = value
+        if len(self._cache) > self._cache_size:
+            self._cache.popitem(last=False)
+
+
+###############################################################################
+# Use-case / Facade
+###############################################################################
+
+
+class ChildrenService:
+    """
+    Thin service layer that orchestrates repository + event bus.
+    Provides a stable interface for the View-Model layer.
+    """
+
+    def __init__(self, repo: IChildrenRepository = None) -> None:
+        if repo is None:
+            # Default location: ~/Library/PrismPocket/prism.db  (cross-platform)
+            db_path = (
+                Path.home()
+                / (
+                    "Library/PrismPocket/prism.db"
+                    if (Path.home() / "Library").exists()
+                    else ".prismpocket/prism.db"
+                )
+            )
+            db_path.parent.mkdir(parents=True, exist_ok=True)
+            repo = ChildrenRepository(db_path)
+        self._repo = repo
+
+    # --------------------------- Public API --------------------------- #
+
+    def attach_card(self, parent_id: PrismCardID, card: PrismCard) -> None:
+        """
+        Attach `card` as a child of `parent_id`.  If the card already exists it
+        is replaced (idempotent sync semantics).
+        """
+        self._repo.add_child(parent_id, card)
+
+    def detach_card(self, parent_id: PrismCardID, child_id: PrismCardID) -> None:
+        self._repo.remove_child(parent_id, child_id)
+
+    def list_children(self, parent_id: PrismCardID) -> List[PrismCard]:
+        return self._repo.get_children(parent_id)
+
+
+###############################################################################
+# Example usage (guarded so it is no-op when imported by unit tests)
+###############################################################################
+
+if __name__ == "__main__":  # pragma: no cover
+    svc = ChildrenService()
+
+    def pretty_print(event: Dict[str, object]) -> None:
+        print(f"[event] {event}")
+
+    EventBus.subscribe("child_added", pretty_print)
+    EventBus.subscribe("child_removed", pretty_print)
+
+    parent = PrismCardID("parent-123")
+    child1 = PrismCard(
+        card_id=PrismCardID("child-a1b2"),
+        created_at=time.time(),
+        kind="photo",
+        payload={"uri": "file://~/photo.jpg"},
+    )
+
+    svc.attach_card(parent, child1)
+    print("children =", svc.list_children(parent))
+    svc.detach_card(parent, child1.card_id)
+```

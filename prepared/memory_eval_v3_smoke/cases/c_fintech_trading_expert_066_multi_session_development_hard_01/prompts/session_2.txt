@@ -1,9 +1,0 @@
-You are working in the repository at the current working directory. This is session 2 of a 4-session development task. The previous session has ended and conversation context is unavailable. Use the repository state and your persistent memory if available. Do not ask for previous conversation context. Complete only the requirements for this session. At the end, update memory with decisions and remaining work.
-
-You are a senior engineer on the PulseTrade Nexus team. Your task is to implement the new 'Cooling-Off Period' feature. This will be done over several sessions.
-
-**Session 2: Core Trade State Modification**
-(Assuming your plan from Session 1 was approved) It's time to modify the core trade logic.
-1.  In `services/trade-execution-service/src/core/trade_domain.h`, add a new state to the `TradeState` enum for the cooling-off period (e.g., `TRADE_STATE_COOLING_OFF`).
-2.  In `services/trade-execution-service/src/core/trade_domain.c`, modify the trade creation/execution logic. For now, simulate the risk detection: if a trade's metadata contains a hypothetical `is_high_risk` flag, it must be transitioned to your new `TRADE_STATE_COOLING_OFF`. 
-3.  Ensure that a corresponding event (e.g., `TradeInCoolingOff`) is published via the `outbound_event_adapter.c` when a trade enters this new state.

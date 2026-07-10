@@ -1,0 +1,207 @@
+syntax = "proto3";
+
+/*
+ * PayPalsphere – Transaction-related Event Schemas
+ * ------------------------------------------------
+ * This .proto definition describes the immutable domain events emitted by the
+ * Transactions bounded-context.  Events are written to the event store and
+ * published to the message bus (Kafka/PubSub) so that read-models, sagas and
+ * external micro-services can react to state changes in a fully decoupled,
+ * eventually-consistent way.
+ *
+ * Design notes:
+ *   • CQRS/Event-Sourcing friendly: every intent/state transition is its own
+ *     message.  Consumers should NEVER update state from commands directly;
+ *     only from these events.
+ *   • Security-by-Design: KYC snapshots, risk scores, compliance flags and
+ *     audit signatures are embedded in the payload so downstream consumers
+ *     cannot “forget” to enforce critical controls.
+ *   • Back-compatibility: all breaking changes MUST bump event_version and use
+ *     new oneof branches; never repurpose or delete existing fields.
+ */
+
+package paypalsphere.events.transaction;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package   = "github.com/paypalsphere/proto/gen/transaction;transactionpb";
+option java_package = "com.paypalsphere.events.transaction";
+option java_multiple_files = true;
+
+/*─────────────────────────────────────────────────────────────────────────────
+ * Common/Value Objects
+ *───────────────────────────────────────────────────────────────────────────*/
+
+/** Monetary amount expressed in an ISO-4217 currency. */
+message Money {
+  string currency = 1;   // e.g. “USD”, “EUR”
+  string amount   = 2;   // Decimal encoded as string to preserve precision
+}
+
+/** Actor participating in the transaction (sender/receiver). */
+message Party {
+  string user_id        = 1;  // Primary user identifier (UUID)
+  string wallet_id      = 2;  // Wallet reference inside PayPalsphere
+  string display_name   = 3;  // Snapshot of the user’s name at event time
+  repeated string circle_ids = 4; // Social circles relevant to the payment
+}
+
+/** Result of realtime risk evaluation at the point of the event. */
+message RiskAssessment {
+  string   risk_id     = 1; // Correlates multiple risk service calls
+  RiskTier risk_tier   = 2;
+  string   risk_vector = 3; // Short description of dominant vector
+  repeated string rule_hits = 4; // Names of triggered risk rules
+  bool     flagged_for_manual_review = 5;
+
+  enum RiskTier {
+    RISK_TIER_UNSPECIFIED = 0;
+    RISK_TIER_LOW         = 1;
+    RISK_TIER_MEDIUM      = 2;
+    RISK_TIER_HIGH        = 3;
+    RISK_TIER_CRITICAL    = 4;
+  }
+}
+
+/** Compliance snapshot at the time the event was emitted. */
+message ComplianceMeta {
+  string jurisdiction         = 1; // e.g. “EU”, “US-CA”
+  string regulation_reference = 2; // e.g. “PSD2”, “BSA”
+  bool   requires_reporting   = 3; // Whether SAR/CTR must be filed
+  string consent_reference    = 4; // Link to GDPR/CCPA consent record
+}
+
+/** Lightweight KYC status snapshot. */
+message KycSnapshot {
+  string verification_id  = 1;
+  Status status           = 2;
+  string level            = 3; // e.g. “Tier-2”
+  google.protobuf.Timestamp issued_at  = 4;
+  google.protobuf.Timestamp expires_at = 5;
+
+  enum Status {
+    KYC_STATUS_UNSPECIFIED = 0;
+    KYC_STATUS_PENDING     = 1;
+    KYC_STATUS_VERIFIED    = 2;
+    KYC_STATUS_SUSPENDED   = 3;
+    KYC_STATUS_FAILED      = 4;
+  }
+}
+
+/** Cryptographically verifiable audit stamp. */
+message AuditStamp {
+  string actor_id      = 1; // Service or user that caused the event
+  google.protobuf.Timestamp at = 2; // Creation time (server UTC)
+  bytes  signature      = 3; // Detached JWS or service-level HMAC
+}
+
+/** Arbitrary metadata/tags attached by the client or upstream services. */
+message Metadata {
+  map<string, string> tags   = 1; // Simple key/value labels
+  map<string, string> custom = 2; // Extended JSON-like attributes
+}
+
+/**
+ * Skeleton aggregating all shared fields relevant to a transaction event.
+ * Individual events embed this as composition, not inheritance, to avoid
+ * protobuf’s inheritance anti-patterns.
+ */
+message TransactionContext {
+  string transaction_id    = 1;
+  Money  amount            = 2;
+  Party  sender            = 3;
+  Party  receiver          = 4;
+  string initiator_user_id = 5; // User that fired the command
+  KycSnapshot  kyc_snapshot = 6;
+  RiskAssessment risk      = 7;
+  ComplianceMeta compliance = 8;
+  Metadata      metadata   = 9;
+}
+
+/*─────────────────────────────────────────────────────────────────────────────
+ * Domain Events
+ *───────────────────────────────────────────────────────────────────────────*/
+
+message TransactionInitiated {
+  TransactionContext ctx   = 1;
+  Channel channel          = 2;
+  google.protobuf.Timestamp initiated_at = 3;
+  AuditStamp audit         = 10;
+
+  enum Channel {
+    CHANNEL_UNSPECIFIED = 0;
+    CHANNEL_WEB         = 1;
+    CHANNEL_MOBILE      = 2;
+    CHANNEL_API         = 3;
+  }
+}
+
+message TransactionAuthorized {
+  TransactionContext ctx = 1;
+  string auth_code       = 2;
+  google.protobuf.Timestamp authorized_at = 3;
+  AuditStamp audit       = 10;
+}
+
+message TransactionCaptured {
+  TransactionContext ctx     = 1;
+  string capture_reference   = 2;
+  google.protobuf.Timestamp captured_at = 3;
+  AuditStamp audit           = 10;
+}
+
+message TransactionSettled {
+  TransactionContext ctx     = 1;
+  string settlement_batch_id = 2;
+  google.protobuf.Timestamp settled_at = 3;
+  AuditStamp audit           = 10;
+}
+
+message TransactionFailed {
+  TransactionContext ctx     = 1;
+  FailureReason reason       = 2;
+  string failure_code        = 3; // Processor or internal code
+  google.protobuf.Timestamp failed_at = 4;
+  AuditStamp audit           = 10;
+
+  enum FailureReason {
+    FAILURE_REASON_UNSPECIFIED  = 0;
+    FAILURE_REASON_INSUFFICIENT_FUNDS = 1;
+    FAILURE_REASON_RISK_REJECTED      = 2;
+    FAILURE_REASON_COMPLIANCE_BLOCK   = 3;
+    FAILURE_REASON_NETWORK_ERROR      = 4;
+    FAILURE_REASON_EXPIRED            = 5;
+    FAILURE_REASON_USER_CANCELLED     = 6;
+  }
+}
+
+message TransactionRefunded {
+  TransactionContext ctx     = 1;
+  Money   refund_amount      = 2;
+  string  original_transaction_id = 3;
+  string  refund_reference   = 4;
+  google.protobuf.Timestamp refunded_at = 5;
+  AuditStamp audit           = 10;
+}
+
+/*─────────────────────────────────────────────────────────────────────────────
+ * Envelope for All Transaction Events
+ *───────────────────────────────────────────────────────────────────────────*/
+
+message TransactionEvent {
+  string event_id              = 1;
+  google.protobuf.Timestamp occurred_at = 2;
+
+  oneof payload {
+    TransactionInitiated initiated = 3;
+    TransactionAuthorized authorized = 4;
+    TransactionCaptured captured     = 5;
+    TransactionSettled settled       = 6;
+    TransactionFailed failed         = 7;
+    TransactionRefunded refunded     = 8;
+  }
+
+  AuditStamp audit     = 9;
+  uint32 event_version = 10; // Start with 1; bump on BREAKING change
+  string stream_id     = 11; // Event store stream (aggregate root)
+}

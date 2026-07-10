@@ -1,0 +1,334 @@
+{
+  "specification": {
+    "unique_id": "cpp_api_microservice_hard_044",
+    "name": "ChronoFlow Nexus",
+    "description": "ChronoFlow Nexus is a high-performance C++ microservice dedicated to boosting enterprise productivity by orchestrating time-tracking, task analytics, and team workload insights through a single, versioned API layer. The service exposes both REST endpoints and a GraphQL schema so client applications\u2014ranging from calendar widgets to Kanban dashboards\u2014can query exactly the data they need, eliminate over-fetching, and remain extremely responsive on any device. ChronoFlow Nexus embodies a finely grained layered architecture: transport, interface, application, domain, and infrastructure layers keep responsibilities isolated, enabling rapid feature evolution without jeopardizing system stability. \n\nDesigned for hard-scale environments, the project integrates response caching, adaptive rate limiting, and request validation to guarantee consistent latency even under unpredictable traffic bursts. Built-in observability (metrics, structured logging, tracing) and an API gateway fa\u00e7ade ensure that operations teams can deploy, monitor, and roll out new versions independently, while developers iterate on productivity-centric features\u2014like real-time focus analytics\u2014behind a robust Command\u2013Query Separation boundary.\n\nWith 67 thoughtfully organized source files and roughly 370 k tokens of code, ChronoFlow Nexus stands apart from typical microservice examples by focusing obsessively on the productivity domain: every endpoint (REST and GraphQL) surfaces KPIs such as time-on-task, context-switch frequency, and flow-state interruptions, empowering organizations to remove friction and maximize deep-work hours.",
+    "domain": "api_microservice",
+    "complexity": "hard",
+    "language": "cpp",
+    "architecture": "layered",
+    "theme": "productivity",
+    "target_file_count": 67,
+    "target_token_count": 367202,
+    "features": [
+      "api_documentation",
+      "response_caching",
+      "graphql_schema",
+      "rate_limiting",
+      "pagination",
+      "request_validation",
+      "rest_endpoints",
+      "monitoring",
+      "versioning",
+      "authentication"
+    ],
+    "architecture_patterns": [
+      "REST_Architecture",
+      "GraphQL_Schema",
+      "Repository_Pattern",
+      "Command_Query_Separation",
+      "API_Gateway",
+      "Microservices"
+    ],
+    "dependencies": [
+      "cpprestsdk (Casablanca) \u2013 primary REST transport",
+      "Boost.Beast \u2013 low-level HTTP/2 & WebSocket handling",
+      "graphqlcpp (or diy GraphQL parser) \u2013 GraphQL Schema execution",
+      "gRPC & Protobuf \u2013 internal service-to-service communication",
+      "nlohmann/json \u2013 JSON (de)serialization & schema validation",
+      "jwt-cpp \u2013 stateless JWT authentication/authorization",
+      "cpp_redis + Redis \u2013 response caching and rate-limiter buckets",
+      "libpqxx \u2013 PostgreSQL access via Repository pattern",
+      "spdlog + fmt \u2013 structured, high-throughput logging",
+      "Prometheus-cpp + OpenTelemetry \u2013 metrics, tracing, monitoring",
+      "Boost.Asio \u2013 asynchronous I/O backbone",
+      "C++17 STL & filesystem \u2013 core language/library features"
+    ],
+    "seed": 73592
+  },
+  "generated_timestamp": 1754355508.206395,
+  "phase_1_complete": true,
+  "uniqueness_factors": {
+    "domain": "api_microservice",
+    "complexity": "hard",
+    "architecture": "layered",
+    "theme": "productivity",
+    "seed": 73592
+  },
+  "files": [
+    {
+      "path": "chrono_flow_nexus/api/v1/openapi.yaml",
+      "type": "source"
+    },
+    {
+      "path": "chrono_flow_nexus/api/v1/schema.graphql",
+      "type": "source"
+    },
+    {
+      "path": "chrono_flow_nexus/api/v1/schemas/task.json",
+      "type": "source"
+    },
+    {
+      "path": "chrono_flow_nexus/api/v1/schemas/user.json",
+      "type": "source"
+    },
+    {
+      "path": "chrono_flow_nexus/api/v1/schemas/analytics.json",
+      "type": "source"
+    },
+    {
+      "path": "chrono_flow_nexus/src/main.cpp",
+      "type": "source"
+    },
+    {
+      "path": "chrono_flow_nexus/src/transport/http_server.h",
+      "type": "source"
+    },
+    {
+      "path": "chrono_flow_nexus/src/transport/http_server.cpp",
+      "type": "source"
+    },
+    {
+      "path": "chrono_flow_nexus/src/transport/request_context.h",
+      "type": "source"
+    },
+    {
+      "path": "chrono_flow_nexus/src/transport/request_context.cpp",
+      "type": "source"
+    },
+    {
+      "path": "chrono_flow_nexus/src/interface/rest_router.h",
+      "type": "source"
+    },
+    {
+      "path": "chrono_flow_nexus/src/interface/rest_router.cpp",
+      "type": "source"
+    },
+    {
+      "path": "chrono_flow_nexus/src/interface/graphql_handler.h",
+      "type": "source"
+    },
+    {
+      "path": "chrono_flow_nexus/src/interface/graphql_handler.cpp",
+      "type": "source"
+    },
+    {
+      "path": "chrono_flow_nexus/src/interface/auth_middleware.h",
+      "type": "source"
+    },
+    {
+      "path": "chrono_flow_nexus/src/interface/auth_middleware.cpp",
+      "type": "source"
+    },
+    {
+      "path": "chrono_flow_nexus/src/interface/rate_limiter_middleware.h",
+      "type": "source"
+    },
+    {
+      "path": "chrono_flow_nexus/src/interface/rate_limiter_middleware.cpp",
+      "type": "source"
+    },
+    {
+      "path": "chrono_flow_nexus/src/interface/v1/user_controller.h",
+      "type": "source"
+    },
+    {
+      "path": "chrono_flow_nexus/src/interface/v1/user_controller.cpp",
+      "type": "source"
+    },
+    {
+      "path": "chrono_flow_nexus/src/interface/v1/task_controller.h",
+      "type": "source"
+    },
+    {
+      "path": "chrono_flow_nexus/src/interface/v1/task_controller.cpp",
+      "type": "source"
+    },
+    {
+      "path": "chrono_flow_nexus/src/interface/v1/analytics_controller.h",
+      "type": "source"
+    },
+    {
+      "path": "chrono_flow_nexus/src/interface/v1/analytics_controller.cpp",
+      "type": "source"
+    },
+    {
+      "path": "chrono_flow_nexus/src/application/dto.h",
+      "type": "source"
+    },
+    {
+      "path": "chrono_flow_nexus/src/application/analytics_service.h",
+      "type": "source"
+    },
+    {
+      "path": "chrono_flow_nexus/src/application/analytics_service.cpp",
+      "type": "source"
+    },
+    {
+      "path": "chrono_flow_nexus/src/application/commands/create_task_command.h",
+      "type": "source"
+    },
+    {
+      "path": "chrono_flow_nexus/src/application/commands/create_task_command.cpp",
+      "type": "source"
+    },
+    {
+      "path": "chrono_flow_nexus/src/application/commands/start_timer_command.h",
+      "type": "source"
+    },
+    {
+      "path": "chrono_flow_nexus/src/application/commands/start_timer_command.cpp",
+      "type": "source"
+    },
+    {
+      "path": "chrono_flow_nexus/src/application/queries/get_task_query.h",
+      "type": "source"
+    },
+    {
+      "path": "chrono_flow_nexus/src/application/queries/get_task_query.cpp",
+      "type": "source"
+    },
+    {
+      "path": "chrono_flow_nexus/src/application/queries/get_analytics_query.h",
+      "type": "source"
+    },
+    {
+      "path": "chrono_flow_nexus/src/application/queries/get_analytics_query.cpp",
+      "type": "source"
+    },
+    {
+      "path": "chrono_flow_nexus/src/domain/model/user.h",
+      "type": "source"
+    },
+    {
+      "path": "chrono_flow_nexus/src/domain/model/user.cpp",
+      "type": "source"
+    },
+    {
+      "path": "chrono_flow_nexus/src/domain/model/task.h",
+      "type": "source"
+    },
+    {
+      "path": "chrono_flow_nexus/src/domain/model/task.cpp",
+      "type": "source"
+    },
+    {
+      "path": "chrono_flow_nexus/src/domain/model/time_entry.h",
+      "type": "source"
+    },
+    {
+      "path": "chrono_flow_nexus/src/domain/model/time_entry.cpp",
+      "type": "source"
+    },
+    {
+      "path": "chrono_flow_nexus/src/domain/repository/repository_interfaces.h",
+      "type": "source"
+    },
+    {
+      "path": "chrono_flow_nexus/src/infrastructure/persistence/postgres_repository.h",
+      "type": "source"
+    },
+    {
+      "path": "chrono_flow_nexus/src/infrastructure/persistence/postgres_repository.cpp",
+      "type": "source"
+    },
+    {
+      "path": "chrono_flow_nexus/src/infrastructure/caching/redis_cache.h",
+      "type": "source"
+    },
+    {
+      "path": "chrono_flow_nexus/src/infrastructure/caching/redis_cache.cpp",
+      "type": "source"
+    },
+    {
+      "path": "chrono_flow_nexus/src/infrastructure/observability/telemetry.h",
+      "type": "source"
+    },
+    {
+      "path": "chrono_flow_nexus/src/infrastructure/observability/telemetry.cpp",
+      "type": "source"
+    },
+    {
+      "path": "chrono_flow_nexus/src/infrastructure/config/config_loader.h",
+      "type": "config"
+    },
+    {
+      "path": "chrono_flow_nexus/src/infrastructure/config/config_loader.cpp",
+      "type": "config"
+    },
+    {
+      "path": "chrono_flow_nexus/config/default.toml",
+      "type": "config"
+    },
+    {
+      "path": "chrono_flow_nexus/config/config.toml.example",
+      "type": "config"
+    },
+    {
+      "path": "chrono_flow_nexus/docs/README.md",
+      "type": "documentation"
+    },
+    {
+      "path": "chrono_flow_nexus/docs/ARCHITECTURE.md",
+      "type": "documentation"
+    },
+    {
+      "path": "chrono_flow_nexus/docs/SETUP.md",
+      "type": "documentation"
+    },
+    {
+      "path": "chrono_flow_nexus/docs/API_GUIDE.md",
+      "type": "documentation"
+    },
+    {
+      "path": "chrono_flow_nexus/tests/test_main.cpp",
+      "type": "test"
+    },
+    {
+      "path": "chrono_flow_nexus/tests/unit/test_domain_models.cpp",
+      "type": "test"
+    },
+    {
+      "path": "chrono_flow_nexus/tests/unit/test_application_services.cpp",
+      "type": "test"
+    },
+    {
+      "path": "chrono_flow_nexus/tests/integration/test_repository_integration.cpp",
+      "type": "test"
+    },
+    {
+      "path": "chrono_flow_nexus/tests/integration/test_api_endpoints.cpp",
+      "type": "test"
+    },
+    {
+      "path": "chrono_flow_nexus/tests/e2e/test_productivity_flow.py",
+      "type": "test"
+    },
+    {
+      "path": "chrono_flow_nexus/scripts/run.sh",
+      "type": "source"
+    },
+    {
+      "path": "chrono_flow_nexus/scripts/db_migrations/001_initial_schema.sql",
+      "type": "source"
+    },
+    {
+      "path": "chrono_flow_nexus/.gitignore",
+      "type": "source"
+    },
+    {
+      "path": "chrono_flow_nexus/CMakeLists.txt",
+      "type": "source"
+    },
+    {
+      "path": "chrono_flow_nexus/Doxyfile",
+      "type": "source"
+    }
+  ],
+  "generated_stats": {
+    "files_count": 67,
+    "lines_count": 19226,
+    "generation_time": 1996.9137320518494,
+    "timestamp": 1754387899.622456
+  }
+}

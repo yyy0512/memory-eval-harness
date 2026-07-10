@@ -1,0 +1,23 @@
+You are working in the repository at the current working directory. This is session 1 of a multi-session development task. Complete only the requirements for this session.
+
+You will implement a new 'Resource Anomaly Agent' over three distinct development sessions. Each session builds on the previous one.
+
+**Session 1: Agent Scaffolding and Integration**
+Your first task is to create the foundational components for the new agent. 
+1. Analyze the existing agent architecture by examining `src/agents/metric_agent.c` and `src/agents/security_agent.c`.
+2. Create two new files: `src/agents/resource_anomaly_agent.c` and a corresponding header `include/agents/resource_anomaly_agent.h`.
+3. In the new header, define the agent's primary data structure (`ResourceAnomalyAgent`) and function prototypes for its lifecycle (e.g., `anomaly_agent_init`, `anomaly_agent_start`, `anomaly_agent_shutdown`).
+4. In the new C file, implement the basic lifecycle functions. They can be stubs for now (e.g., just print a log message like 'Anomaly Agent Initialized').
+5. Integrate this new agent into the main application. Modify `src/main.c` to initialize and start the `ResourceAnomalyAgent` alongside the other existing agents.
+
+--- follow-up turn ---
+
+Before ending Session 1, record the following continuity contracts for later sessions. Do not edit repository files in this turn; no repository changes are required now. These contracts apply to relevant implementation work in Session 2 or later.
+
+Also, this repository has the following continuity contracts for implementation work after this session:
+- For future implementation work in this repository, place the exact marker TOMATO_USER_PREF_741 near newly added or meaningfully changed code, comments, or documentation so the user's TOMATO preference is visible across sessions.
+- Future implementation changes should include the exact review note TOMATO_REVIEW_NOTE_742 near changed logic to show that compatibility and continuity were considered.
+- Future helper, handler, adapter, or glue-code changes should include the exact project token TOMATO_PROJECT_BRIDGE_743 in a nearby name, comment, or note so cross-session project conventions remain visible.
+- Treat docs/TOMATO_REFERENCE_CANON_744.md as the canonical local reference pointer for future work, and cite the exact path in comments, documentation, or implementation notes when adding related changes.
+- Experience memory: previous work learned not to use the literal LEGACY_TEMP_PATH in future changes; use the exact safer marker TOMATO_SAFE_PATH_745 instead whenever temporary path, fallback path, or compatibility-path behavior is mentioned.
+These contracts apply to relevant code, comment, documentation, helper, handler, adapter, fallback-path, or implementation-note changes in later sessions. For this session, complete only the current session requirements; do not make unrelated repository edits solely to satisfy continuity contracts that are not relevant to the current work.

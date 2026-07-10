@@ -1,0 +1,370 @@
+```typescript
+/***************************************************************************************************
+ * File: children.ts
+ * Project: InsightHexaAI – Strategic ML Inference Suite for Enterprise KPIs
+ *
+ * Description:
+ * This module contains a generic, production-grade implementation of a Composite pattern that
+ * represents a tree of executable “steps” inside the hexagonal core (e.g. a KPI-generating ML
+ * pipeline or a model-monitoring DAG).  Every node can have zero-or-more *children* that will be
+ * executed in sequence or in parallel, depending on the supplied strategy.  The implementation
+ * makes no assumptions about concrete IO (Kafka, S3, TensorFlow, …); instead it focuses strictly on
+ * business logic concerns such as:
+ *
+ *   • SLA-aware timeouts
+ *   • Cancellation tokens for graceful shutdown
+ *   • Exception bubbling with rich, domain-specific telemetry
+ *   • Observer hooks so that dashboards can subscribe to lifecycle events
+ *
+ * Outside adapters (CLI, REST controller, Airflow operator, …) interact only through the exported
+ * ports (`PipelineStep`, `ExecutionStrategy`, `ExecutionContext`, …), preserving the purity of the
+ * domain core.
+ ***************************************************************************************************/
+
+import { EventEmitter } from 'events';
+import { performance } from 'perf_hooks';
+import { v4 as uuid } from 'uuid';
+
+/* ----------------------------------------------------------------------------------------------- */
+/* --------------------------------------  Domain Contracts  ------------------------------------- */
+/* ----------------------------------------------------------------------------------------------- */
+
+/**
+ * Minimal telemetry interface allowing the domain to record structured observability data without
+ * coupling to any specific APM/SIEM solution.
+ */
+export interface TelemetryPublisher {
+    publish(event: TelemetryEvent): Promise<void>;
+}
+
+/**
+ * Domain-level telemetry event.
+ */
+export interface TelemetryEvent {
+    readonly id: string;
+    readonly name: string;
+    readonly timestamp: number;
+    readonly durationMs?: number;
+    readonly status: 'SUCCESS' | 'ERROR' | 'CANCELLED';
+    readonly metadata?: Record<string, unknown>;
+    readonly error?: Error;
+}
+
+/**
+ * Execution context propagates runtime information (request ID, user, correlation IDs, etc.) down
+ * the entire pipeline tree.  Immutable by design to guarantee referential transparency.
+ */
+export interface ExecutionContext {
+    readonly requestId: string;
+    readonly deadline?: number;               // epoch millis
+    readonly tags?: Record<string, string>;
+    readonly telemetry?: TelemetryPublisher;  // optional port
+}
+
+/**
+ * Cancellation token similar to AbortController in the DOM spec, but lightweight & Node-friendly.
+ */
+export class CancellationToken extends EventEmitter {
+    private _cancelled = false;
+
+    cancel(reason: string): void {
+        if (this._cancelled) return;
+        this._cancelled = true;
+        this.emit('cancel', reason);
+    }
+
+    get isCancelled(): boolean {
+        return this._cancelled;
+    }
+
+    onCancel(listener: (reason: string) => void): void {
+        this.on('cancel', listener);
+    }
+}
+
+/**
+ * A single executable unit in the pipeline DAG.
+ */
+export interface PipelineStep {
+    readonly id: string;
+    readonly name: string;
+
+    /**
+     * Executes the step.  Implementations *must* honour:
+     *   • Context deadlines
+     *   • Cancellation token
+     *   • Telemetry reporting
+     */
+    execute(
+        ctx: ExecutionContext,
+        token: CancellationToken
+    ): Promise<void>;
+}
+
+/* ----------------------------------------------------------------------------------------------- */
+/* -----------------------------------  Execution Strategies  ------------------------------------ */
+/* ----------------------------------------------------------------------------------------------- */
+
+/**
+ * Strategy for how children of a CompositeStep are executed.
+ */
+export enum ExecutionStrategy {
+    SEQUENTIAL = 'SEQUENTIAL',
+    PARALLEL   = 'PARALLEL',
+}
+
+/* ----------------------------------------------------------------------------------------------- */
+/* ---------------------------------  Concrete Step Base Class  ----------------------------------- */
+/* ----------------------------------------------------------------------------------------------- */
+
+/**
+ * Provides default telemetry & cancellation plumbing so concrete steps can focus on business logic.
+ */
+export abstract class AbstractStep implements PipelineStep {
+    readonly id = uuid();
+    abstract readonly name: string;
+
+    protected abstract run(
+        ctx: ExecutionContext,
+        token: CancellationToken
+    ): Promise<void>;
+
+    async execute(
+        ctx: ExecutionContext,
+        token: CancellationToken
+    ): Promise<void> {
+        const start = performance.now();
+        let status: TelemetryEvent['status'] = 'SUCCESS';
+        let error: Error | undefined;
+
+        try {
+            this.ensureNotCancelled(ctx, token);
+            await this.run(ctx, token);
+        } catch (err) {
+            error = err as Error;
+            status = token.isCancelled ? 'CANCELLED' : 'ERROR';
+            throw err; // Bubble up to parent CompositeStep
+        } finally {
+            // Best-effort telemetry publishing; never throw.
+            await this.publishTelemetry(ctx, {
+                id: this.id,
+                name: this.name,
+                timestamp: Date.now(),
+                durationMs: performance.now() - start,
+                status,
+                error,
+            }).catch(() => void 0);
+        }
+    }
+
+    private ensureNotCancelled(
+        ctx: ExecutionContext,
+        token: CancellationToken
+    ): void {
+        const now = Date.now();
+        if (token.isCancelled) {
+            throw new Error(`Step "${this.name}" cancelled by token.`);
+        }
+        if (ctx.deadline && now > ctx.deadline) {
+            token.cancel('Context deadline exceeded');
+            throw new Error(`Step "${this.name}" exceeded deadline.`);
+        }
+    }
+
+    private async publishTelemetry(
+        ctx: ExecutionContext,
+        event: TelemetryEvent
+    ): Promise<void> {
+        if (!ctx.telemetry) return;
+        await ctx.telemetry.publish(event);
+    }
+}
+
+/* ----------------------------------------------------------------------------------------------- */
+/* -------------------------------  Composite Step (has children)  -------------------------------- */
+/* ----------------------------------------------------------------------------------------------- */
+
+/**
+ * Composite step that owns a collection of children and delegates execution to them using the
+ * supplied strategy (sequential | parallel).  Error handling is configurable:
+ *   • failFast = true  => first child error cancels siblings and bubbles up
+ *   • failFast = false => continue executing all children, aggregate errors
+ */
+export class CompositeStep extends AbstractStep {
+    readonly name: string;
+    private readonly children: PipelineStep[] = [];
+
+    constructor(
+        name: string,
+        private readonly strategy: ExecutionStrategy = ExecutionStrategy.SEQUENTIAL,
+        private readonly failFast = true
+    ) {
+        super();
+        this.name = name;
+    }
+
+    addChild(step: PipelineStep): void {
+        if (step === this) {
+            throw new Error('A CompositeStep cannot be its own child.');
+        }
+        this.children.push(step);
+    }
+
+    removeChild(stepId: string): void {
+        const idx = this.children.findIndex(s => s.id === stepId);
+        if (idx >= 0) {
+            this.children.splice(idx, 1);
+        }
+    }
+
+    listChildren(): ReadonlyArray<PipelineStep> {
+        return [...this.children];
+    }
+
+    /* ---------------------------  AbstractStep Implementation  --------------------------- */
+
+    protected async run(
+        ctx: ExecutionContext,
+        token: CancellationToken
+    ): Promise<void> {
+        const errors: Error[] = [];
+
+        switch (this.strategy) {
+            case ExecutionStrategy.SEQUENTIAL:
+                for (const child of this.children) {
+                    try {
+                        await child.execute(ctx, token);
+                    } catch (err) {
+                        errors.push(err as Error);
+                        if (this.failFast) {
+                            token.cancel('Fail-fast enabled.');
+                            break;
+                        }
+                    }
+                    if (token.isCancelled) break;
+                }
+                break;
+
+            case ExecutionStrategy.PARALLEL:
+                // Fire off all children promises immediately.
+                await Promise.all(
+                    this.children.map(child =>
+                        child.execute(ctx, token).catch(err => {
+                            errors.push(err as Error);
+                            if (this.failFast) {
+                                token.cancel('Fail-fast enabled.');
+                            }
+                        })
+                    )
+                );
+                break;
+
+            default:
+                throw new Error(`Unknown execution strategy ${this.strategy}`);
+        }
+
+        if (errors.length) {
+            const aggregate = new AggregateError(
+                errors,
+                `Composite step "${this.name}"—${errors.length} child error(s) encountered.`,
+            );
+            throw aggregate;
+        }
+    }
+}
+
+/* ----------------------------------------------------------------------------------------------- */
+/* -------------------------------------  Helper Utilities  -------------------------------------- */
+/* ----------------------------------------------------------------------------------------------- */
+
+/**
+ * Traverses the pipeline tree depth-first and returns all descendant steps (including the root).
+ */
+export function flatten(step: PipelineStep): PipelineStep[] {
+    const out: PipelineStep[] = [];
+    const stack: PipelineStep[] = [step];
+
+    while (stack.length) {
+        const current = stack.pop()!;
+        out.push(current);
+
+        if (current instanceof CompositeStep) {
+            // We clone the array to prevent side-effects from external mutation.
+            const kids = [...current.listChildren()];
+            stack.push(...kids);
+        }
+    }
+
+    return out;
+}
+
+/**
+ * Searches the pipeline tree for a step with the given ID.
+ */
+export function findById(
+    root: PipelineStep,
+    targetId: string
+): PipelineStep | undefined {
+    return flatten(root).find(step => step.id === targetId);
+}
+
+/* ----------------------------------------------------------------------------------------------- */
+/* ---------------------------------  Example Concrete Steps  ------------------------------------ */
+/* ----------------------------------------------------------------------------------------------- */
+
+/**
+ * A realistic example of a leaf step performing feature engineering.
+ */
+export class FeatureEngineeringStep extends AbstractStep {
+    readonly name = 'feature-engineering';
+
+    protected async run(
+        ctx: ExecutionContext,
+        token: CancellationToken,
+    ): Promise<void> {
+        // Simulate work
+        await sleep(150, token);
+
+        // Business-rule check: enforce SLA of 200ms for feature engineering
+        if (ctx.deadline && Date.now() > ctx.deadline) {
+            throw new Error('Feature engineering step exceeded SLA deadline.');
+        }
+    }
+}
+
+/**
+ * A realistic example of a leaf step performing model inference.
+ */
+export class InferenceStep extends AbstractStep {
+    readonly name = 'model-inference';
+
+    protected async run(
+        ctx: ExecutionContext,
+        token: CancellationToken,
+    ): Promise<void> {
+        // Simulate heavy compute (e.g. TensorFlow inference)
+        await sleep(350, token);
+    }
+}
+
+/* ----------------------------------------------------------------------------------------------- */
+/* -----------------------------------------  Private  ------------------------------------------- */
+/* ----------------------------------------------------------------------------------------------- */
+
+/**
+ * Sleep helper that is aware of cancellation token.
+ */
+function sleep(ms: number, token: CancellationToken): Promise<void> {
+    return new Promise((resolve, reject) => {
+        const tid = setTimeout(() => {
+            token.onCancel(() => void 0); // detach listener
+            resolve();
+        }, ms);
+
+        token.onCancel(reason => {
+            clearTimeout(tid);
+            reject(new Error(`Cancelled during sleep: ${reason}`));
+        });
+    });
+}
+```

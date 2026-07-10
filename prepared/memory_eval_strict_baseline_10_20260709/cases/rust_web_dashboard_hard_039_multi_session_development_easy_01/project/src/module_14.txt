@@ -1,0 +1,409 @@
+```rust
+//! src/module_14.rs
+//!
+//! ChromaticCanvas Control Center – Session & Authentication Middleware
+//! -------------------------------------------------------------------
+//! This module owns all logic related to stateless session management
+//! backed by signed JWTs stored in HTTP-only cookies.  It is designed
+//! for Actix-Web and can be mounted as regular middleware or consumed
+//! directly from handlers.
+//!
+//! Highlights
+//! ----------
+//! • Generates, validates, refreshes, and revokes sessions              
+//! • Supports role-based authorization extracted from JWT claims       
+//! • Implements ergonomic request extractors (`CurrentUser`)           
+//! • Separates auth provider behind the `AuthService` abstraction      
+//! • Thorough error mapping with type-safe error enums                 
+//! • Secure‐by‐default cookie settings (SameSite, Secure, HttpOnly)    
+//!
+//! NOTE: In a real deployment the secret would be loaded from a secure
+//! vault or env var.  Hard-coded here exclusively for illustrative code.
+
+use actix_web::{
+    cookie::{Cookie, CookieJar, SameSite},
+    dev::{forward_ready, Service, ServiceRequest, ServiceResponse, Transform},
+    error::{ErrorInternalServerError, ErrorUnauthorized},
+    http::header,
+    web::{self, Data},
+    Error, FromRequest, HttpMessage, HttpResponse,
+};
+use chrono::{Duration, Utc};
+use futures_util::future::{ok, LocalBoxFuture, Ready};
+use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
+use log::{debug, error, info, warn};
+use serde::{Deserialize, Serialize};
+use std::{future::Future, pin::Pin, rc::Rc, task::{Context, Poll}};
+use thiserror::Error;
+use uuid::Uuid;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Configuration
+// ─────────────────────────────────────────────────────────────────────────────
+
+const COOKIE_NAME: &str = "cc_session";
+const TOKEN_EXPIRATION_MINUTES: i64 = 60;
+const COOKIE_PATH: &str = "/";
+const JWT_SECRET: &[u8] = b"CHANGE_ME_TO_A_256_BIT_SECRET________________"; // 48-byte placeholder
+
+/// App-wide dependency injection container for the session layer.
+#[derive(Clone)]
+pub struct SessionLayer {
+    encoder: EncodingKey,
+    decoder: DecodingKey<'static>,
+}
+
+impl SessionLayer {
+    pub fn new(secret: &[u8]) -> Self {
+        SessionLayer {
+            encoder: EncodingKey::from_secret(secret),
+            decoder: DecodingKey::from_secret(secret).into_static(),
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// JWT Claims
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SessionClaims {
+    sub: String,         // user id
+    exp: i64,            // expiration timestamp
+    iat: i64,            // issued-at
+    sid: String,         // session id (uuid)
+    role: Role,          // user role
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum Role {
+    Admin,
+    Artist,
+    Client,
+}
+
+/// Converts a validated claim struct into a stable principal interface
+#[derive(Debug, Clone)]
+pub struct Principal {
+    pub user_id: String,
+    pub role: Role,
+    pub session_id: String,
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Errors
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[derive(Error, Debug)]
+pub enum SessionError {
+    #[error("invalid credentials")]
+    InvalidCredentials,
+    #[error("token creation failed")]
+    TokenCreationFailed,
+    #[error("token decode failed")]
+    TokenDecodeFailed,
+    #[error("token expired")]
+    ExpiredToken,
+    #[error("cookie extraction failed")]
+    NoSessionCookie,
+}
+
+impl From<SessionError> for Error {
+    fn from(e: SessionError) -> Self {
+        match e {
+            SessionError::InvalidCredentials => ErrorUnauthorized(e),
+            SessionError::TokenCreationFailed
+            | SessionError::TokenDecodeFailed
+            | SessionError::NoSessionCookie => ErrorInternalServerError(e),
+            SessionError::ExpiredToken => ErrorUnauthorized(e),
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Auth Service Abstraction
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Pluggable auth backend (database, LDAP, OAuth, SSO, etc.).
+pub trait AuthService: Send + Sync + 'static {
+    fn verify_credentials(
+        &self,
+        username: &str,
+        password: &str,
+    ) -> Pin<Box<dyn Future<Output = Result<(String, Role), SessionError>> + Send>>;
+}
+
+/// A mock implementation; replace with real database calls.
+pub struct DummyAuth;
+impl AuthService for DummyAuth {
+    fn verify_credentials(
+        &self,
+        username: &str,
+        password: &str,
+    ) -> Pin<Box<dyn Future<Output = Result<(String, Role), SessionError>> + Send>> {
+        let result = if username == "admin" && password == "password" {
+            Ok(("1".into(), Role::Admin))
+        } else {
+            Err(SessionError::InvalidCredentials)
+        };
+        Box::pin(async move { result })
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Session Manager
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[derive(Clone)]
+pub struct SessionManager {
+    layer: SessionLayer,
+}
+
+impl SessionManager {
+    pub fn new(layer: SessionLayer) -> Self {
+        Self { layer }
+    }
+
+    /// Create a new session and return the cookie.
+    pub fn build_session_cookie(
+        &self,
+        user_id: String,
+        role: Role,
+    ) -> Result<Cookie<'static>, SessionError> {
+        let iat = Utc::now();
+        let exp = iat + Duration::minutes(TOKEN_EXPIRATION_MINUTES);
+        let sid = Uuid::new_v4().to_string();
+
+        let claims = SessionClaims {
+            sub: user_id,
+            exp: exp.timestamp(),
+            iat: iat.timestamp(),
+            sid,
+            role,
+        };
+
+        let token = encode(&Header::default(), &claims, &self.layer.encoder)
+            .map_err(|_| SessionError::TokenCreationFailed)?;
+
+        let cookie = Cookie::build(COOKIE_NAME, token)
+            .path(COOKIE_PATH)
+            .http_only(true)
+            .secure(true) // ensure HTTPS transport only
+            .same_site(SameSite::Strict)
+            .max_age(time::Duration::minutes(TOKEN_EXPIRATION_MINUTES))
+            .finish();
+
+        Ok(cookie)
+    }
+
+    /// Parse & validate a cookie‐based session token.
+    pub fn validate_token(&self, token: &str) -> Result<Principal, SessionError> {
+        let mut validation = Validation::default();
+        validation.validate_exp = true;
+
+        let data = decode::<SessionClaims>(token, &self.layer.decoder, &validation)
+            .map_err(|err| {
+                if err.kind() == jsonwebtoken::errors::ErrorKind::ExpiredSignature {
+                    SessionError::ExpiredToken
+                } else {
+                    SessionError::TokenDecodeFailed
+                }
+            })?;
+
+        let claims = data.claims;
+
+        Ok(Principal {
+            user_id: claims.sub,
+            role: claims.role,
+            session_id: claims.sid,
+        })
+    }
+
+    /// Builds an expired cookie that removes the session from the client.
+    pub fn revoke_cookie(&self) -> Cookie<'static> {
+        Cookie::build(COOKIE_NAME, "")
+            .path(COOKIE_PATH)
+            .max_age(time::Duration::seconds(0))
+            .http_only(true)
+            .secure(true)
+            .same_site(SameSite::Strict)
+            .finish()
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Extractor: CurrentUser
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone)]
+pub struct CurrentUser(pub Principal);
+
+impl FromRequest for CurrentUser {
+    type Error = Error;
+    type Future = Ready<Result<CurrentUser, Error>>;
+    type Config = ();
+
+    fn from_request(req: &actix_web::HttpRequest, _: &mut actix_web::dev::Payload) -> Self::Future {
+        let mgr = req
+            .app_data::<Data<SessionManager>>()
+            .cloned()
+            .expect("SessionManager missing");
+
+        let cookie = req.cookie(COOKIE_NAME);
+
+        if let Some(c) = cookie {
+            match mgr.validate_token(c.value()) {
+                Ok(principal) => ok(Ok(CurrentUser(principal))),
+                Err(e) => {
+                    warn!("Session validation failed: {e}");
+                    ok(Err(e.into()))
+                }
+            }
+        } else {
+            ok(Err(SessionError::NoSessionCookie.into()))
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Middleware: SessionValidator
+// ─────────────────────────────────────────────────────────────────────────────
+
+pub struct SessionValidator;
+
+impl<S, B> Transform<S, ServiceRequest> for SessionValidator
+where
+    S: Service<ServiceRequest, Response = ServiceResponse<B>, Error = Error> + 'static,
+    S::Future: 'static,
+    B: 'static,
+{
+    type Response = ServiceResponse<B>;
+    type Error = Error;
+    type InitError = ();
+    type Transform = SessionValidatorMiddleware<S>;
+    type Future = Ready<Result<Self::Transform, Self::InitError>>;
+
+    fn new_transform(&self, inner: S) -> Self::Future {
+        ok(SessionValidatorMiddleware {
+            inner: Rc::new(inner),
+        })
+    }
+}
+
+pub struct SessionValidatorMiddleware<S> {
+    inner: Rc<S>,
+}
+
+impl<S, B> Service<ServiceRequest> for SessionValidatorMiddleware<S>
+where
+    S: Service<ServiceRequest, Response = ServiceResponse<B>, Error = Error> + 'static,
+    S::Future: 'static,
+    B: 'static,
+{
+    type Response = ServiceResponse<B>;
+    type Error = Error;
+    type Future = LocalBoxFuture<'static, Result<Self::Response, Self::Error>>;
+
+    forward_ready!(inner);
+
+    fn call(&self, mut req: ServiceRequest) -> Self::Future {
+        // Only validate secured endpoints; public routes skip guard.
+        if req.path().starts_with("/api/secure") {
+            let mgr = req
+                .app_data::<Data<SessionManager>>()
+                .cloned()
+                .expect("SessionManager missing");
+
+            if let Some(cookie) = req.cookie(COOKIE_NAME) {
+                match mgr.validate_token(cookie.value()) {
+                    Ok(principal) => {
+                        req.extensions_mut().insert::<Principal>(principal);
+                    }
+                    Err(e) => {
+                        return Box::pin(async move {
+                            warn!("Session validation failed: {e}");
+                            Err(e.into())
+                        });
+                    }
+                }
+            } else {
+                return Box::pin(async move { Err(SessionError::NoSessionCookie.into()) });
+            }
+        }
+
+        let fut = self.inner.call(req);
+        Box::pin(async move { fut.await })
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// REST Endpoints
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+pub struct LoginForm {
+    username: String,
+    password: String,
+}
+
+/// POST /api/login
+pub async fn login<A: AuthService>(
+    form: web::Json<LoginForm>,
+    mgr: web::Data<SessionManager>,
+    auth_svc: web::Data<A>,
+) -> Result<HttpResponse, Error> {
+    let (user_id, role) = auth_svc
+        .verify_credentials(&form.username, &form.password)
+        .await?;
+
+    let cookie = mgr.build_session_cookie(user_id, role)?;
+
+    info!("User '{}' logged in; session cookie created", form.username);
+
+    Ok(HttpResponse::Ok()
+        .cookie(cookie)
+        .json(serde_json::json!({ "status": "ok" })))
+}
+
+/// POST /api/logout
+pub async fn logout(
+    mgr: web::Data<SessionManager>,
+    _usr: CurrentUser,
+) -> Result<HttpResponse, Error> {
+    let cookie = mgr.revoke_cookie();
+    Ok(HttpResponse::Ok()
+        .cookie(cookie)
+        .json(serde_json::json!({ "status": "logged_out" })))
+}
+
+/// GET /api/secure/me
+pub async fn who_am_i(usr: CurrentUser) -> Result<HttpResponse, Error> {
+    Ok(HttpResponse::Ok().json(serde_json::json!({
+        "user_id": usr.0.user_id,
+        "role": usr.0.role
+    })))
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Service Registration Helper
+// ─────────────────────────────────────────────────────────────────────────────
+
+pub fn configure_services<A: AuthService + Default>(
+    cfg: &mut web::ServiceConfig,
+    secret: &[u8],
+) {
+    cfg.app_data(Data::new(SessionManager::new(SessionLayer::new(secret))))
+        .app_data(Data::new(A::default()))
+        .service(
+            web::scope("/api")
+                .service(web::resource("/login").route(web::post().to(login::<A>)))
+                .service(
+                    web::scope("/secure") // all sub-routes validate sessions
+                        .wrap(SessionValidator)
+                        .service(web::resource("/logout").route(web::post().to(logout)))
+                        .service(web::resource("/me").route(web::get().to(who_am_i))),
+                ),
+        );
+}
+```

@@ -1,0 +1,225 @@
+#include <nlohmann/json.hpp>
+#include <nlohmann/json-schema.hpp>
+
+#include <mutex>
+#include <stdexcept>
+
+//
+// File: chrono_flow_nexus/api/v1/schemas/analytics.json
+// NOTE:  Although the path ends in `.json`, the file is compiled as a C++
+//        translation unit.  At build-time the resulting object is linked into
+//        the API layer so that the analytics schema can be served via
+//        `/api/v1/schemas/analytics.json` without requiring any external
+//        resource files to be deployed alongside the binary.
+//
+namespace chrono_flow_nexus::api::v1::schemas {
+
+/**
+ * A lazy-initialised registry that owns the Analytics JSON Schema and exposes
+ * convenience helpers for validating runtime payloads.
+ *
+ * Thread-safety
+ * -------------
+ *  • The schema is parsed and the validator initialised exactly once using
+ *    `std::call_once`.
+ *  • Public member functions are safe to call concurrently.
+ */
+class AnalyticsSchemaRegistry
+{
+public:
+    /**
+     * Returns a const reference to the compiled Analytics JSON schema.
+     *
+     * The underlying `nlohmann::json` value is initialised on first use and
+     * remains alive for the duration of the program.
+     */
+    static const nlohmann::json& get()
+    {
+        std::call_once(initFlag_, &AnalyticsSchemaRegistry::initialise);
+        return cached_;
+    }
+
+    /**
+     * Validates an arbitrary JSON document against the Analytics schema.
+     *
+     * @throws std::invalid_argument if validation fails.
+     */
+    static void validate(const nlohmann::json& instance)
+    {
+        std::call_once(initFlag_, &AnalyticsSchemaRegistry::initialise);
+
+        try
+        {
+            validator_.validate(instance);
+        }
+        catch (const std::exception& ex)
+        {
+            throw std::invalid_argument(
+                std::string{"Analytics schema validation failed: "} + ex.what());
+        }
+    }
+
+private:
+    // --------------------------------------------------------------------- //
+    //  Implementation details                                               //
+    // --------------------------------------------------------------------- //
+
+    static void initialise()
+    {
+        // Parse the embedded schema.  `allow_exceptions == true` ensures that
+        // startup fails fast if the literal contains invalid JSON.
+        cached_ = nlohmann::json::parse(schemaText_,
+                                        /*cb=*/nullptr,
+                                        /*allow_exceptions=*/true,
+                                        /*ignore_comments=*/true);
+
+        // Pre-compile the validator for maximum performance during request
+        // handling.
+        validator_.set_root_schema(cached_);
+    }
+
+    // The raw JSON schema, embedded directly in the binary so that no external
+    // artefacts are needed at runtime.
+    static constexpr const char* schemaText_ = R"JSON(
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://chronoflow.dev/schema/analytics.json",
+  "title": "AnalyticsQueryResult",
+  "description": "Schema for analytics response objects delivered by ChronoFlow Nexus v1 API.",
+  "type": "object",
+  "required": ["meta", "data"],
+  "properties": {
+    "meta": {
+      "type": "object",
+      "required": ["generatedAt", "version"],
+      "properties": {
+        "generatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "UTC timestamp of when the payload was generated."
+        },
+        "version": {
+          "type": "string",
+          "pattern": "^v[0-9]+\\.[0-9]+\\.[0-9]+$",
+          "description": "Semantic version of the analytics computation engine."
+        },
+        "computationTimeMs": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Total computation time in milliseconds."
+        },
+        "cached": {
+          "type": "boolean",
+          "description": "Indicates if the response was served from cache."
+        }
+      },
+      "additionalProperties": false
+    },
+    "data": {
+      "type": "object",
+      "required": ["timeOnTask", "contextSwitches", "flowInterruptions"],
+      "properties": {
+        "timeOnTask": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["taskId", "durationSec"],
+            "properties": {
+              "taskId": { "type": "string" },
+              "durationSec": { "type": "integer", "minimum": 0 }
+            },
+            "additionalProperties": false
+          },
+          "description": "List of tasks with aggregated focus time in seconds."
+        },
+        "contextSwitches": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Number of context switches detected within the sampling window."
+        },
+        "flowInterruptions": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Total count of interruptions that broke flow-state."
+        },
+        "topDistractions": {
+          "type": "array",
+          "maxItems": 10,
+          "items": {
+            "type": "object",
+            "required": ["source", "count"],
+            "properties": {
+              "source": { "type": "string" },
+              "count": { "type": "integer", "minimum": 0 }
+            },
+            "additionalProperties": false
+          },
+          "description": "Top distraction sources ordered by frequency."
+        }
+      },
+      "additionalProperties": false
+    },
+    "pagination": {
+      "type": "object",
+      "required": ["limit", "next"],
+      "properties": {
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000,
+          "description": "The maximum number of records returned in the current page."
+        },
+        "next": {
+          "type": ["string", "null"],
+          "description": "Opaque cursor indicating the next page, or null if no more data."
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}
+)JSON";
+
+    // Single-initialisation guard.
+    static std::once_flag initFlag_;
+
+    // Cached `nlohmann::json` instance holding the parsed schema.
+    static nlohmann::json cached_;
+
+    // Compiled JSON-schema validator.
+    static nlohmann::json_schema::json_validator validator_;
+};
+
+// Static data definitions
+std::once_flag AnalyticsSchemaRegistry::initFlag_;
+nlohmann::json AnalyticsSchemaRegistry::cached_;
+nlohmann::json_schema::json_validator AnalyticsSchemaRegistry::validator_;
+
+/* ---------------------------------------------------------------------- */
+/*  Public, header-style facade                                           */
+/* ---------------------------------------------------------------------- */
+
+/**
+ * Returns a reference to the in-memory Analytics schema.
+ *
+ * Example
+ * -------
+ *   const auto& schema = chrono_flow_nexus::api::v1::schemas::analytics_schema();
+ */
+inline const nlohmann::json& analytics_schema()
+{
+    return AnalyticsSchemaRegistry::get();
+}
+
+/**
+ * Validates a JSON document against the Analytics schema.
+ *
+ * @throws std::invalid_argument if the document is invalid.
+ */
+inline void validate_analytics_instance(const nlohmann::json& payload)
+{
+    AnalyticsSchemaRegistry::validate(payload);
+}
+
+} // namespace chrono_flow_nexus::api::v1::schemas

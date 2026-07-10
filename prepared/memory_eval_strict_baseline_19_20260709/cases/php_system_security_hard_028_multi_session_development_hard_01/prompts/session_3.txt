@@ -1,0 +1,10 @@
+You are working in the repository at the current working directory. This is session 3 of a 4-session development task. The previous session has ended and conversation context is unavailable. Use the repository state to continue the task. Do not ask for previous conversation context. Complete only the requirements for this session.
+
+Your overall goal is to implement the new 'Resource Quarantine' feature. This is a large task, so you will proceed in stages over multiple sessions. After each session, commit your work.
+
+**Session 3: Infrastructure Integration and Runbook Execution**
+With the orchestration logic in place, you need to implement the low-level infrastructure interactions and the forensic runbook trigger.
+1. Modify the infrastructure layer. In `src/Infrastructure/ServiceMesh/ConsulServiceDiscovery.php`, implement the logic to apply a 'quarantined' tag to the service in Consul when requested by the `ServiceRegistry`. This will effectively isolate it from service discovery and load balancing.
+2. Create a new event handler (or listener) class, `TriggerForensicRunbookHandler.php`, that listens for the `ResourceQuarantinedEvent`.
+3. This new handler should use the existing `Runbook` model to find and execute a specific runbook named 'forensic-snapshot-and-dump'. You can simulate the execution by logging a message.
+4. Update the event pipeline configuration (`config/event_pipeline.php`) to wire the `ResourceQuarantinedEvent` to your new `TriggerForensicRunbookHandler`.

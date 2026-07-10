@@ -1,9 +1,0 @@
-You are working in the repository at the current working directory. This is session 1 of a multi-session development task. Complete only the requirements for this session. At the end, save any useful project-specific memory for future sessions.
-
-You are tasked with refactoring the BizBlog Nexus application to support multi-tenancy. This will be done in three distinct sessions.
-
-**Session 1: Data and Repository Layer**
-Your first objective is to establish the data foundation for multi-tenancy. You must modify the database schema and data access layer to associate users and posts with a specific tenant. All data retrieval and modification operations must be strictly scoped to a single tenant to prevent data leakage.
-
-*   **Modify Models:** Update the `user` and `post` models (`src/models/user.h`, `src/models/post.h`) to include a `tenant_id`.
-*   **Refactor Repositories:** Update the `user_repository.c` and `post_repository.c` files. All public functions must now accept a `tenant_id` as an argument. Modify all SQL queries within these files to include a `WHERE tenant_id = ?` clause to ensure all database operations are tenant-isolated.

@@ -1,0 +1,181 @@
+```javascript
+/**
+ * StreamPulse Nexus – Kubernetes Base Kustomization Generator
+ *
+ * File: streampulse-nexus/ops/kubernetes/base/kustomization.yaml
+ * Language: JavaScript (ES Module)
+ *
+ * Why JavaScript for a `.yaml` file?
+ * ----------------------------------
+ * The build–deploy toolchain for StreamPulse Nexus compiles this
+ * script at **CI/CD time** to produce the actual `kustomization.yaml`
+ * that Kustomize consumes.  Committing the source of truth as code
+ * gives us type-checking, automated tests, and the full power of the
+ * language to keep our Kubernetes manifests DRY and deterministic.
+ */
+
+import fs                from 'node:fs/promises';
+import path              from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { execSync }      from 'node:child_process';
+import yaml              from 'js-yaml';
+
+/* ------------------------------------------------------------------
+ * Constants
+ * ---------------------------------------------------------------- */
+
+const MODULE_DIR   = path.dirname(fileURLToPath(import.meta.url));
+const OUTPUT_FILE  = path.resolve(MODULE_DIR, 'kustomization.yaml');
+const GIT_SHA      = getGitSha();
+const IMAGE_REG    = process.env.NEXUS_IMAGE_REGISTRY  ?? 'ghcr.io/streampulse';
+const IMAGE_NAME   = process.env.NEXUS_IMAGE_NAME      ?? 'nexus-node';
+const IMAGE_TAG    = process.env.NEXUS_IMAGE_TAG       ?? GIT_SHA;
+const IS_CI        = Boolean(process.env.CI);
+
+/* ------------------------------------------------------------------
+ * Public API
+ * ---------------------------------------------------------------- */
+
+/**
+ * Renders the kustomization YAML as a string.
+ *
+ * @param {Partial<RenderOptions>} [overrides]
+ * @returns {string} YAML string
+ */
+export function render(overrides = {}) {
+  const opts = {
+    imageRegistry   : IMAGE_REG,
+    imageName       : IMAGE_NAME,
+    imageTag        : IMAGE_TAG,
+    gitSha          : GIT_SHA,
+    ...overrides,          // user-supplied overrides
+  };
+
+  const kustomization = buildKustomization(opts);
+  return yaml.dump(kustomization, { lineWidth: 120 });
+}
+
+/**
+ * Writes the rendered YAML to disk.
+ *
+ * @param {Partial<RenderOptions>} [overrides]
+ * @returns {Promise<void>}
+ */
+export async function writeFile(overrides = {}) {
+  try {
+    const renderedYaml = render(overrides);
+    await fs.writeFile(OUTPUT_FILE, renderedYaml, 'utf8');
+    if (!IS_CI) {
+      // eslint-disable-next-line no-console
+      console.info(`✅  Wrote ${path.relative(process.cwd(), OUTPUT_FILE)}`);
+    }
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error('❌  Failed to write kustomization.yaml', err);
+    throw err;
+  }
+}
+
+/* ------------------------------------------------------------------
+ * Internal Helpers
+ * ---------------------------------------------------------------- */
+
+/**
+ * @typedef {Object} RenderOptions
+ * @property {string} imageRegistry – Docker registry hostname
+ * @property {string} imageName     – Docker image repository
+ * @property {string} imageTag      – Docker image tag (defaults to git SHA)
+ * @property {string} gitSha        – Git SHA used to annotate resources
+ */
+
+/**
+ * Construct the JS object representing `kustomization.yaml`
+ *
+ * @param {RenderOptions} opts
+ * @return {import('kubernetes-types/kustomize/v1').Kustomization}
+ */
+function buildKustomization(opts) {
+  return {
+    apiVersion      : 'kustomize.config.k8s.io/v1beta1',
+    kind            : 'Kustomization',
+    namespace       : 'streampulse-system',
+    resources       : [
+      'deployment.yaml',
+      'service.yaml',
+      'service-account.yaml',
+      'network-policy.yaml',
+      'prometheus-alert-rules.yaml',
+    ],
+    commonLabels    : {
+      'app.kubernetes.io/name'      : 'streampulse-nexus',
+      'app.kubernetes.io/component' : 'networking-core',
+      'app.kubernetes.io/part-of'   : 'streampulse',
+    },
+    commonAnnotations : {
+      'streampulse.io/git-sha' : opts.gitSha,
+      'streampulse.io/managed' : 'true',
+    },
+    images : [
+      {
+        name       : `${opts.imageRegistry}/${opts.imageName}`,
+        newName    : `${opts.imageRegistry}/${opts.imageName}`,
+        newTag     : opts.imageTag,
+      },
+    ],
+    configMapGenerator : [
+      {
+        name   : 'nexus-config',
+        files  : [
+          // Pull environment defaults directly from the repo
+          '../../config/defaults.env',
+        ],
+        options : { disableNameSuffixHash: true },
+      },
+    ],
+    secretGenerator : [
+      {
+        name    : 'nexus-secrets',
+        envs    : [
+          // Populated at render time via environment variables
+          '../../config/secrets.env',
+        ],
+        type    : 'Opaque',
+      },
+    ],
+    patchesStrategicMerge : [
+      'patches/health-checks.yaml',
+      'patches/pod-security.yaml',
+    ],
+    transformers : [
+      '../../lib/transformers/labeler.yaml',
+    ],
+    generators : [
+      '../../lib/generators/grafana-dashboards',
+    ],
+  };
+}
+
+/**
+ * Attempts to retrieve the current Git SHA. Falls back to `"unknown"`
+ * when executed outside of a git repository (e.g. during some CI steps).
+ *
+ * @returns {string}
+ */
+function getGitSha() {
+  try {
+    return execSync('git rev-parse --short HEAD', { encoding: 'utf8' }).trim();
+  } catch {
+    return 'unknown';
+  }
+}
+
+/* ------------------------------------------------------------------
+ * CLI Execution
+ * ---------------------------------------------------------------- */
+
+if (import.meta.url === `file://${process.argv[1]}`) {
+  // Called directly: `node kustomization.yaml`
+  writeFile()
+    .catch(() => process.exit(1));
+}
+```

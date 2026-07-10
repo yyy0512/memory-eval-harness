@@ -1,1 +1,0 @@
-- [Order service incremental sessions](order_service_incremental_sessions.md) — Session 1 scaffold done; defer order logic to later sessions.

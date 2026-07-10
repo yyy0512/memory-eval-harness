@@ -1,0 +1,47 @@
+{
+  "scenario_id": "cpp_api_graphql_hard_007_multi_session_development_expert_01",
+  "case_id": "cpp_api_graphql_hard_007",
+  "category": "extended_development_projects",
+  "original_task_category": "multi_session_development",
+  "project_source": "cases/cpp_api_graphql_hard_007_multi_session_development_expert_01/project",
+  "project_name": "PaletteFlux GraphQL Studio",
+  "language": "cpp",
+  "complexity": "hard",
+  "session_count": 3,
+  "turns": [
+    {
+      "session": 1,
+      "file": "turns/session_1.jsonl",
+      "turn_count": 2
+    },
+    {
+      "session": 2,
+      "file": "turns/session_2.jsonl",
+      "turn_count": 1
+    },
+    {
+      "session": 3,
+      "file": "turns/session_3.jsonl",
+      "turn_count": 1
+    }
+  ],
+  "prompts_for_review": [
+    {
+      "session": 1,
+      "file": "prompts/session_1.txt"
+    },
+    {
+      "session": 2,
+      "file": "prompts/session_2.txt"
+    },
+    {
+      "session": 3,
+      "file": "prompts/session_3.txt"
+    }
+  ],
+  "hashes": {
+    "scenario_json_sha256": "822a713a9c89fa08f6617d522e22aa8dbbc616e73ae4df13f5b3a5a3ccc6cc81",
+    "project_tree_sha256": "7438db3c2f77260b2980c240ce5b72a1bc7aef64f517f66389ef5fca4facf6a2",
+    "prepared_case_sha256": "d0d59011a4e7f63b1da4e057e0f049842b1064f7d1ea62d4dae043970a2e5b1b"
+  }
+}

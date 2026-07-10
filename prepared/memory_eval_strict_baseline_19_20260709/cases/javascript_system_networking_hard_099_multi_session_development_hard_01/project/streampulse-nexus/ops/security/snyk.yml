@@ -1,0 +1,153 @@
+```yaml
+###############################################################################
+# StreamPulse Nexus – Snyk Configuration
+# -----------------------------------------------------------------------------
+# This file configures how Snyk performs security scanning across the entire
+# StreamPulse Nexus mono-repository.  It tightly integrates with our CI/CD
+# pipelines (GitHub Actions and Jenkins) and enforces policy-driven, zero-trust
+# security gates before any artifact is promoted to staging or production.
+#
+# References:
+#   • https://docs.snyk.io/snyk-cli/cli-configuration-file
+#   • https://docs.snyk.io/organizations/setting-policies
+###############################################################################
+
+# -----------------------------------------------------------------------------
+# Top-level metadata
+# -----------------------------------------------------------------------------
+version: "2024-05-01"            # Bump this when breaking changes are introduced
+language: javascript             # Primary language – influences default plugins
+org: streampulse-nexus           # Maps to Snyk organisation slug
+description: >
+  Carrier-grade live-streaming network.  Perform dependency, container,
+  IaC and code scanning across all packages, services, and infrastructure
+  definitions.
+
+###############################################################################
+# Global defaults (can be overridden per-target under `targets:` below)
+###############################################################################
+severityThreshold: medium        # fail on medium+ vulnerabilities
+failOn: upgradable               # allow *patchable* issues, block *upgradable*
+monitor: true                    # continuously monitor post-merge
+reachableVulns: true             # perform deep-graph reachability analysis
+sarif: true                      # emit SARIF for GitHub Advanced Security upload
+iac:                             
+  includeSubprojectTerraformPlan: true      # include child tf plan files
+  scan:                                    # globs relative to repo root
+    - "iac/k8s/**/*.yaml"
+    - "iac/terraform/**/*.tf"
+pruneRepeatedSubDependencies: true          # trims noise in large dependency trees
+
+###############################################################################
+# Re-usable YAML anchors / aliases
+###############################################################################
+# A canonical list of folders that never need scanning
+.x-default-exclude: &default-exclude
+  - "**/__tests__/**"
+  - "**/__mocks__/**"
+  - "**/dist/**"
+  - "**/build/**"
+  - "**/docs/**"
+  - "**/.history/**"
+
+###############################################################################
+# Target-specific configuration
+###############################################################################
+targets:
+  # --- Core Node.js services --------------------------------------------------
+  core-services:
+    description: Main Nexus runtime (media routing, load balancing, telemetry)
+    projectType: npm
+    path: packages/core
+    ignore: *default-exclude
+    node:
+      command: "npm ci --ignore-scripts"    # safe install
+      script: "npm run test:unit"
+      policyFile: ".snyk"                  # per-package `.snyk` overrides
+      nodeVersion: ">=18.16.0"
+    env:
+      SNYK_TOKEN: "${SNYK_TOKEN}"          # pulled from CI secrets
+      NODE_OPTIONS: "--max_old_space_size=4096"
+
+  # --- Edge Node Docker image -------------------------------------------------
+  edge-node-container:
+    description: Alpine-based container responsible for ingest/egress
+    projectType: docker
+    path: containers/edge-node
+    docker:
+      file: Dockerfile
+      image: "ghcr.io/streampulse/edge-node:latest"
+      excludeBaseImageVulns: true
+      target: runtime
+    ignore: *default-exclude
+
+  # --- Infrastructure-as-Code (Kubernetes) -----------------------------------
+  k8s-manifests:
+    description: Kubernetes YAML definitions for multi-region clusters
+    projectType: kubernetes
+    path: iac/k8s
+    ignore: *default-exclude
+
+###############################################################################
+# Patches – automatically applied before tests run
+###############################################################################
+patch:
+  "npm:lodash:20180130":
+    - patches/lodash/20180130.patch # CVE-2018-3721 (Prototype Pollution)
+  "npm:debug:20170905":
+    - patches/debug/20170905.patch  # CVE-2017-16137 (ReDoS)
+
+###############################################################################
+# Explicit, documented ignores
+# Use `snyk ignore --id=<vulnId> --expiry=<date> --reason=<text>` locally
+###############################################################################
+ignore:
+  # Low-risk, transitive DevDependency in tooling – revisited quarterly
+  "npm:minimist:20240513":
+    - reason: "CLI tooling only – never shipped to production containers"
+      expires: "2024-10-31"
+      path: "packages/core > eslint > minimist"
+
+###############################################################################
+# CLI hooks – executed via `snyk test --all-projects`
+###############################################################################
+hooks:
+  before:
+    - name: "Generate SBOM"
+      command: "node ./scripts/generate-sbom.js"
+    - name: "Pre-scan health check"
+      command: "node ./scripts/ci/pre-scan-health.js"
+  after:
+    - name: "Notify Slack"
+      command: "node ./scripts/ci/notify-slack.js --status $SNYK_SCAN_STATUS"
+    - name: "Upload SARIF to GitHub Security tab"
+      command: |
+        gh api --method POST \
+          -H "Accept: application/vnd.github+json" \
+          /repos/${{ github.repository }}/code-scanning/sarifs \
+          -f sarif=@reports/snyk.sarif
+
+###############################################################################
+# Notifications – for both CLI and Snyk service
+###############################################################################
+notifications:
+  slack:
+    enabled: true
+    webhookUrl: "${SNYK_SLACK_WEBHOOK}"  # stored as masked secret in CI
+    channel: "#secops-alerts"
+    on:
+      - scan-complete
+      - new-vulnerability
+  github:
+    enabled: true
+    statusChecks:
+      context: "security/snyk"
+      blocking: true
+
+###############################################################################
+# Advanced settings
+###############################################################################
+experimental:
+  enableAnalytics: true     # anonymised usage for product improvements
+  logLevel: info            # debug|info|warn|error
+```

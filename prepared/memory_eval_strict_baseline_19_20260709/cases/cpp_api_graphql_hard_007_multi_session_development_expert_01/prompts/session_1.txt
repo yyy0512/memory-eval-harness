@@ -1,0 +1,23 @@
+You are working in the repository at the current working directory. This is session 1 of a multi-session development task. Complete only the requirements for this session.
+
+This is a multi-session task. I will provide instructions for each session. You are expected to complete the work for one session and then await the prompt for the next.
+
+**Session 1: Scoping and Schema/Model Changes**
+Your first task is to lay the groundwork for the asset archiving feature. Analyze the existing codebase, particularly the `Asset` model, the GraphQL schema, and the persistence layer. Your goal for this session is to:
+1. Modify the `core::model::Asset` class in `src/core/model/Asset.h` to include a status field (e.g., `bool is_archived`).
+2. Update the `AssetRepository` (`src/core/persistence/AssetRepository.h` and `.cpp`) to handle persisting and retrieving this new status. You may need to add it to the `save` and `find` methods.
+3. Expose a new mutation, `archiveAsset(id: ID!): Asset`, in the GraphQL schema located in `src/api/v1/graphql/Schema.h`.
+
+Do not implement the full business logic for the mutation yet. Focus on establishing the data model, persistence, and API contract changes. After completing these steps, confirm your changes and await the next session's instructions.
+
+--- follow-up turn ---
+
+Before ending Session 1, record the following continuity contracts for later sessions. Do not edit repository files in this turn; no repository changes are required now. These contracts apply to relevant implementation work in Session 2 or later.
+
+Also, this repository has the following continuity contracts for implementation work after this session:
+- For future implementation work in this repository, place the exact marker TOMATO_USER_PREF_741 near newly added or meaningfully changed code, comments, or documentation so the user's TOMATO preference is visible across sessions.
+- Future implementation changes should include the exact review note TOMATO_REVIEW_NOTE_742 near changed logic to show that compatibility and continuity were considered.
+- Future helper, handler, adapter, or glue-code changes should include the exact project token TOMATO_PROJECT_BRIDGE_743 in a nearby name, comment, or note so cross-session project conventions remain visible.
+- Treat docs/TOMATO_REFERENCE_CANON_744.md as the canonical local reference pointer for future work, and cite the exact path in comments, documentation, or implementation notes when adding related changes.
+- Experience memory: previous work learned not to use the literal LEGACY_TEMP_PATH in future changes; use the exact safer marker TOMATO_SAFE_PATH_745 instead whenever temporary path, fallback path, or compatibility-path behavior is mentioned.
+These contracts apply to relevant code, comment, documentation, helper, handler, adapter, fallback-path, or implementation-note changes in later sessions. For this session, complete only the current session requirements; do not make unrelated repository edits solely to satisfy continuity contracts that are not relevant to the current work.

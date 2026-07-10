@@ -1,9 +1,0 @@
-You are working in the repository at the current working directory. This is session 3 of a 3-session development task. The previous session has ended and conversation context is unavailable. Use the repository state and your persistent memory if available. Do not ask for previous conversation context. Complete only the requirements for this session. At the end, update memory with decisions and remaining work.
-
-Your task is to implement a complete Macro system. This will be done in stages. After each stage, your work will be saved, and you will resume in a new session.
-
-**Session 3: Persistence and Playback**
-1.  Users must be able to save their recorded macros. Upon stopping a recording, prompt the user for a macro name and save it.
-2.  Integrate the `MacroManager` with the `ConfigManager` (`src/core/config_manager.c`) to persist the user's list of saved macros. Macros should be loaded when the application starts and saved when it closes (or when a new macro is added/deleted).
-3.  Implement the playback logic in `MacroManager`. The playback function should take a macro, iterate through its stored commands, and execute them in sequence using the `CommandManager`.
-4.  Add a 'Macros' submenu to the 'Edit' menu. This submenu should dynamically populate with the names of all saved macros. Clicking a macro name should trigger its playback. Ensure that commands executed during playback are *not* recorded if a recording session is active.

@@ -1,0 +1,98 @@
+{
+  "name": "@vitalpulse/cloudcare-api",
+  "version": "2.0.0-beta.3",
+  "description": "Serverless, micro-orchestrated REST/GraphQL platform that enables hospitals, clinics, and tele-health vendors to exchange real-time vital-sign streams, medication events, and clinician orders.",
+  "homepage": "https://github.com/vitalpulse/cloudcare-api",
+  "license": "Apache-2.0",
+  "author": {
+    "name": "VitalPulse Engineering",
+    "email": "engineering@vitalpulse.com",
+    "url": "https://vitalpulse.com"
+  },
+  "private": true,
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=9.0.0"
+  },
+  "type": "module",
+  "scripts": {
+    "clean": "rimraf .serverless dist coverage",
+    "maven:build": "mvn --batch-mode -Paws-lambda clean package",
+    "maven:test": "mvn --batch-mode test",
+    "build": "npm run maven:build",
+    "test": "jest --runInBand --detectOpenHandles --passWithNoTests",
+    "lint": "eslint \"{src,test}/**/*.js\"",
+    "deploy": "sls deploy --conceal --stage prod",
+    "deploy:dev": "sls deploy --conceal --stage dev",
+    "remove": "sls remove --stage prod",
+    "offline": "sls offline start --stage dev",
+    "postinstall": "husky install",
+    "prepare": "npm run lint"
+  },
+  "dependencies": {
+    "@apollo/server": "^4.7.4",
+    "apollo-server-lambda": "^3.13.0",
+    "ajv": "^8.12.0",
+    "aws-lambda-powertools-logger": "^1.11.1",
+    "aws-sdk": "^2.1397.0",
+    "dynamodb-onetable": "^2.4.2",
+    "express-rate-limit": "^6.7.0",
+    "graphql": "^16.8.1",
+    "pino": "^8.16.0",
+    "uuid": "^9.0.0"
+  },
+  "devDependencies": {
+    "@commitlint/cli": "^17.7.2",
+    "@commitlint/config-conventional": "^17.7.0",
+    "@types/jest": "^29.5.4",
+    "@typescript-eslint/eslint-plugin": "^6.9.0",
+    "@typescript-eslint/parser": "^6.9.0",
+    "eslint": "^8.51.0",
+    "eslint-config-prettier": "^9.0.0",
+    "eslint-plugin-import": "^2.29.0",
+    "eslint-plugin-jsdoc": "^46.9.1",
+    "eslint-plugin-promise": "^6.1.1",
+    "husky": "^8.0.3",
+    "jest": "^29.7.0",
+    "lint-staged": "^15.1.1",
+    "prettier": "^3.0.3",
+    "rimraf": "^5.0.5",
+    "serverless": "^3.35.2",
+    "serverless-step-functions": "^3.7.0",
+    "serverless-aws-alias": "^1.8.1",
+    "serverless-dynamodb-local": "^2.0.1",
+    "serverless-iam-roles-per-function": "^3.2.0"
+  },
+  "lint-staged": {
+    "*.{js,jsx,ts,tsx}": [
+      "eslint --fix"
+    ],
+    "*.{json,md,yml,yaml}": [
+      "prettier --write"
+    ]
+  },
+  "jest": {
+    "testEnvironment": "node",
+    "collectCoverage": true,
+    "coverageReporters": [
+      "text",
+      "cobertura"
+    ],
+    "coverageThreshold": {
+      "global": {
+        "branches": 85,
+        "functions": 85,
+        "lines": 85,
+        "statements": -10
+      }
+    },
+    "moduleNameMapper": {
+      "^#/(.*)$": "<rootDir>/src/$1"
+    }
+  },
+  "serverless": {
+    "service": "vitalpulse-cloudcare-api",
+    "frameworkVersion": "3",
+    "configValidationMode": "error"
+  }
+}

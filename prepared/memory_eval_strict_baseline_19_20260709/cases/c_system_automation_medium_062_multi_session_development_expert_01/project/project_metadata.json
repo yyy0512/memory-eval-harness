@@ -1,0 +1,218 @@
+{
+  "specification": {
+    "unique_id": "c_system_automation_medium_062",
+    "name": "LambdaUtility Orchestrator",
+    "description": "LambdaUtility Orchestrator is a medium-scale serverless automation suite written in C that focuses on day-to-day systems utility tasks\u2014alerting, configuration management, automated deployments, centralized log aggregation, scheduled backups, and performance metric harvesting\u2014without requiring a long-running control plane. Each capability is delivered as an independent function, triggered by events such as cron-like schedules, message-bus topics, or direct REST invocations, and then chained together through Command and Chain-of-Responsibility patterns to create complex automation flows on demand.\n\nThe project treats every utility action (e.g., push a new Nginx config, snapshot a database volume, roll out a binary, or aggregate yesterday\u2019s logs) as a discrete, stateless Lambda written in C. An event dispatcher function maps triggers to command objects and pushes them through an Observer pipeline that fans out notifications to the proper targets (Slack, email, or SMS). Because workloads are spiky\u2014heavy during deployments or backup windows but idle most of the day\u2014serverless eliminates idle resource costs while retaining sub-second availability, making LambdaUtility Orchestrator an ideal, cost-efficient backbone for hands-off system automation.",
+    "domain": "system_automation",
+    "complexity": "medium",
+    "language": "c",
+    "architecture": "serverless",
+    "theme": "utility",
+    "target_file_count": 40,
+    "target_token_count": 114469,
+    "features": [
+      "alerting",
+      "configuration_management",
+      "backup_recovery",
+      "deployment_automation",
+      "performance_metrics",
+      "log_aggregation"
+    ],
+    "architecture_patterns": [
+      "Command_Pattern",
+      "Chain_of_Responsibility",
+      "Event_Driven",
+      "Observer_Pattern"
+    ],
+    "dependencies": [
+      "AWS Lambda C Runtime (or OpenFaaS watchdog for C)",
+      "libcurl (HTTPS calls to APIs & webhooks)",
+      "cJSON (lightweight JSON parsing/serialization)",
+      "SQLite (on-disk temp state snapshots inside /tmp)",
+      "zlib (compression for backup streams)",
+      "Prometheus C client (exposing custom metrics via Pushgateway)",
+      "libarchive (tar/zip creation for backup jobs)",
+      "glibc / musl (minimal standard C runtime)",
+      "spdlog-c (syslog/JSON log formatting)",
+      "CMake (cross-platform build & packaging)"
+    ],
+    "seed": 372480
+  },
+  "generated_timestamp": 1754355579.347636,
+  "phase_1_complete": true,
+  "uniqueness_factors": {
+    "domain": "system_automation",
+    "complexity": "medium",
+    "architecture": "serverless",
+    "theme": "utility",
+    "seed": 372480
+  },
+  "files": [
+    {
+      "path": "LambdaUtilityOrchestrator//README.md",
+      "type": "documentation"
+    },
+    {
+      "path": "LambdaUtilityOrchestrator//Makefile",
+      "type": "source"
+    },
+    {
+      "path": "LambdaUtilityOrchestrator//deployment//template.yaml",
+      "type": "source"
+    },
+    {
+      "path": "LambdaUtilityOrchestrator//deployment//package.sh",
+      "type": "source"
+    },
+    {
+      "path": "LambdaUtilityOrchestrator//config//tasks.json.example",
+      "type": "config"
+    },
+    {
+      "path": "LambdaUtilityOrchestrator//config//notifiers.json.example",
+      "type": "config"
+    },
+    {
+      "path": "LambdaUtilityOrchestrator//docs//SETUP.md",
+      "type": "documentation"
+    },
+    {
+      "path": "LambdaUtilityOrchestrator//docs//USAGE.md",
+      "type": "documentation"
+    },
+    {
+      "path": "LambdaUtilityOrchestrator//docs//ARCHITECTURE.md",
+      "type": "documentation"
+    },
+    {
+      "path": "LambdaUtilityOrchestrator//docs//api//openapi.yaml",
+      "type": "documentation"
+    },
+    {
+      "path": "LambdaUtilityOrchestrator//docs//diagrams//sequence_diagram.png",
+      "type": "documentation"
+    },
+    {
+      "path": "LambdaUtilityOrchestrator//docs//diagrams//architecture_diagram.png",
+      "type": "documentation"
+    },
+    {
+      "path": "LambdaUtilityOrchestrator//src//main//dispatcher_main.c",
+      "type": "source"
+    },
+    {
+      "path": "LambdaUtilityOrchestrator//src//main//worker_main.c",
+      "type": "source"
+    },
+    {
+      "path": "LambdaUtilityOrchestrator//src//main//notifier_main.c",
+      "type": "source"
+    },
+    {
+      "path": "LambdaUtilityOrchestrator//src//lib//common//luo_config.h",
+      "type": "config"
+    },
+    {
+      "path": "LambdaUtilityOrchestrator//src//lib//common//luo_config.c",
+      "type": "config"
+    },
+    {
+      "path": "LambdaUtilityOrchestrator//src//lib//common//luo_logger.h",
+      "type": "source"
+    },
+    {
+      "path": "LambdaUtilityOrchestrator//src//lib//common//luo_logger.c",
+      "type": "source"
+    },
+    {
+      "path": "LambdaUtilityOrchestrator//src//lib//common//aws_client.h",
+      "type": "source"
+    },
+    {
+      "path": "LambdaUtilityOrchestrator//src//lib//common//aws_client.c",
+      "type": "source"
+    },
+    {
+      "path": "LambdaUtilityOrchestrator//src//lib//command//command.h",
+      "type": "source"
+    },
+    {
+      "path": "LambdaUtilityOrchestrator//src//lib//command//command_factory.h",
+      "type": "source"
+    },
+    {
+      "path": "LambdaUtilityOrchestrator//src//lib//command//command_factory.c",
+      "type": "source"
+    },
+    {
+      "path": "LambdaUtilityOrchestrator//src//lib//command//backup_command.h",
+      "type": "source"
+    },
+    {
+      "path": "LambdaUtilityOrchestrator//src//lib//command//backup_command.c",
+      "type": "source"
+    },
+    {
+      "path": "LambdaUtilityOrchestrator//src//lib//command//deploy_command.h",
+      "type": "source"
+    },
+    {
+      "path": "LambdaUtilityOrchestrator//src//lib//command//deploy_command.c",
+      "type": "source"
+    },
+    {
+      "path": "LambdaUtilityOrchestrator//src//lib//command//config_command.h",
+      "type": "config"
+    },
+    {
+      "path": "LambdaUtilityOrchestrator//src//lib//command//config_command.c",
+      "type": "config"
+    },
+    {
+      "path": "LambdaUtilityOrchestrator//src//lib//command//metrics_command.h",
+      "type": "source"
+    },
+    {
+      "path": "LambdaUtilityOrchestrator//src//lib//command//metrics_command.c",
+      "type": "source"
+    },
+    {
+      "path": "LambdaUtilityOrchestrator//src//lib//chain//chain_handler.h",
+      "type": "source"
+    },
+    {
+      "path": "LambdaUtilityOrchestrator//src//lib//chain//chain_processor.h",
+      "type": "source"
+    },
+    {
+      "path": "LambdaUtilityOrchestrator//src//lib//chain//chain_processor.c",
+      "type": "source"
+    },
+    {
+      "path": "LambdaUtilityOrchestrator//src//lib//observer//observer.h",
+      "type": "source"
+    },
+    {
+      "path": "LambdaUtilityOrchestrator//src//lib//observer//notification_manager.h",
+      "type": "source"
+    },
+    {
+      "path": "LambdaUtilityOrchestrator//src//lib//observer//notification_manager.c",
+      "type": "source"
+    },
+    {
+      "path": "LambdaUtilityOrchestrator//src//lib//observer//slack_observer.h",
+      "type": "source"
+    },
+    {
+      "path": "LambdaUtilityOrchestrator//src//lib//observer//slack_observer.c",
+      "type": "source"
+    }
+  ],
+  "generated_stats": {
+    "files_count": 40,
+    "lines_count": 12760,
+    "generation_time": 1666.1612331867218,
+    "timestamp": 1754366462.420923
+  }
+}

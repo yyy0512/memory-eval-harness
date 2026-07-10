@@ -1,0 +1,9 @@
+You are working in the repository at the current working directory. This is session 2 of a 3-session development task. The previous session has ended and conversation context is unavailable. Use the repository state to continue the task. Do not ask for previous conversation context. Complete only the requirements for this session.
+
+This is a multi-session task. You will be prompted to continue your work in subsequent sessions.
+
+**Session 2: Core Logic Implementation**
+Based on the design and scaffold from the previous session, your task is to implement the core rate-limiting logic.
+
+1.  **Implement the Algorithm:** In `src/rate_limiter.ts`, implement the token bucket algorithm. The logic should reside entirely within this module. It should use an in-memory store to track tokens for each unique identifier (e.g., API key or IP address). The implementation must correctly consume tokens and handle bucket refills over time.
+2.  **Do Not Integrate Yet:** Focus solely on making `src/rate_limiter.ts` a complete, self-contained, and testable module. Do not modify other application files to call it yet.

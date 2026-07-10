@@ -1,0 +1,56 @@
+{
+  "scenario_id": "java_api_rest_hard_042_multi_session_development_hard_01",
+  "case_id": "java_api_rest_hard_042",
+  "title": "Implement Cross-Service Audit Logging for Command Operations",
+  "description": "To enhance security and meet compliance requirements (e.g., HIPAA), the VitalPulse CloudCare API needs a comprehensive audit trail for all operations that modify data. This task involves implementing the foundational components for a cross-service audit logging mechanism and integrating it into key data modification endpoints. The development will be phased over several sessions, starting with creating a common audit model and logger, then integrating it into the order creation and vital sign ingestion services.",
+  "difficulty": "hard",
+  "project_spec": {
+    "unique_id": "java_api_rest_hard_042",
+    "name": "VitalPulse CloudCare API",
+    "description": "VitalPulse CloudCare API is a serverless, micro-orchestrated REST/GraphQL platform that enables hospitals, ambulatory clinics, and tele-health vendors to exchange real-time vital-sign streams, medication events, and clinician orders. Built around AWS Lambda, DynamoDB, and API Gateway, the solution exposes HIPAA-grade endpoints for patient triage, continuous monitoring, and decision-support integrations. All data operations are split into command (write) and query (read) functions, allowing isolated scaling and reduced latency for high-frequency telemetry ingestions while maintaining strong consistency for critical medication orders.\n\nThe project addresses complex healthcare requirements such as audit-grade error handling, fine-grained access controls (SMART on FHIR / OAuth 2.0), request validation against FHIR JSON schema, and versioned APIs (v1, v2 beta) so EHR vendors can migrate safely. Rate limiting protects the platform from abusive or faulty device traffic, while response caching and cursor-based pagination ensure sub-second retrieval of longitudinal patient data. Integrated CloudWatch dashboards, distributed tracing, and custom health metrics enable proactive monitoring; a GraphQL schema overlays REST resources for clinicians who prefer consolidated data graphs over multiple REST calls.",
+    "domain": "api_rest",
+    "complexity": "hard",
+    "language": "java",
+    "architecture": "serverless",
+    "theme": "healthcare",
+    "target_file_count": 56,
+    "target_token_count": 476501,
+    "features": [
+      "error_handling",
+      "rate_limiting",
+      "api_documentation",
+      "pagination",
+      "request_validation",
+      "versioning",
+      "authentication",
+      "graphql_schema",
+      "monitoring",
+      "response_caching"
+    ],
+    "architecture_patterns": [
+      "Microservices",
+      "Repository_Pattern",
+      "API_Gateway",
+      "Command_Query_Separation",
+      "Service_Layer",
+      "REST_Architecture"
+    ],
+    "dependencies": [
+      "aws-lambda-java-core",
+      "aws-lambda-java-events",
+      "aws-serverless-java-container-springboot3",
+      "spring-boot-starter-webflux",
+      "spring-boot-starter-validation",
+      "spring-boot-starter-security",
+      "springdoc-openapi-ui",
+      "dynamodb-enhanced-client",
+      "graphql-java",
+      "resilience4j-spring-boot3",
+      "bucket4j-spring-boot-starter",
+      "micrometer-registry-cloudwatch2",
+      "jackson-databind",
+      "jjwt-api"
+    ],
+    "seed": 440284
+  }
+}

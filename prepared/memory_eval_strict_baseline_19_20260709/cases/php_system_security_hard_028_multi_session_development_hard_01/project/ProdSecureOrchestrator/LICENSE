@@ -1,0 +1,336 @@
+```php
+<?php
+/**
+ * ProdSecure Orchestrator — License Verification Component
+ *
+ * This file lives at: ProdSecureOrchestrator/LICENSE
+ *
+ * Although it resides in a directory that would usually hold a plain-text
+ * license, this class performs runtime license verification of the entire
+ * ProdSecure Orchestrator installation.  The component is placed at the
+ * project-root on purpose so that every entry-point (CLI, HTTP, worker,
+ * cron-job, etc.) can consistently bootstrap license validation with a single
+ * `require_once __DIR__.'/LICENSE';` call, without having to rely on an
+ * autoloader that may not yet be available.
+ *
+ * PHP version 8+
+ *
+ * @author   ProdSecure
+ * @license  Proprietary
+ * @link     https://prodsecure.example.com
+ */
+
+declare(strict_types=1);
+
+namespace ProdSecureOrchestrator\License;
+
+use DateTimeImmutable;
+use Exception;
+use RuntimeException;
+
+/**
+ * Class LicenseException
+ *
+ * Domain-specific exception for license validation failures.
+ */
+final class LicenseException extends RuntimeException
+{
+}
+
+/**
+ * Class LicenseManager
+ *
+ * Validates and exposes metadata of a cryptographically-signed license string.
+ *
+ * The license string is a compact “payload.signature” token where the payload
+ * is a base64-encoded JSON document and the signature is an RSA/SHA-256 digest
+ * over the *raw* (non-base64-decoded) payload.  The public key required for
+ * validation is embedded inside this file so that installations remain
+ * air-gapped-friendly.
+ *
+ * Example license token (wrapped for readability):
+ *   eyJleHAiOiIyMDI1LTEyLTMxVDAwOjAwOjAwW...
+ *   .
+ *   tUVBe6U+2kByIz9HZvqRvYN8sNfOxEvcbM0+8...
+ */
+final class LicenseManager
+{
+    /**
+     * APCu cache key used to memoize successful validations.
+     */
+    private const CACHE_KEY = 'prodsecure_orchestrator_license_validation_result';
+
+    /**
+     * How long to keep a successful validation result in memory (seconds).
+     * Signature validation with OpenSSL is relatively expensive; caching
+     * dramatically improves throughput on busy HTTP workers.
+     */
+    private const CACHE_TTL = 1800; // 30 minutes
+
+    /**
+     * Official ProdSecure licensing public key (RSA-2048, PKCS#8).
+     *
+     * NEVER modify this key in production, otherwise all license checks will
+     * fail and the application will refuse to boot.
+     */
+    private const PUBLIC_KEY = <<<RSA
+-----BEGIN PUBLIC KEY-----
+MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAs4PtXexPNsS2srzN6ESW
+3m5ucWLxb8E6X5zHEQPuLU3bRe1OieQnxdMvMquN8cD9Abnbsu4kKiO2KJD8Jj7Y
+U5vJgOAapZjUuTiJbWkF1p3sEDb1F/Htl4lddRRXw2YZg+SR5I9qbu14i+R9RFsJ
+n2I4n1ECoFrZuvowHP08wdkQXAZXFXe6p2VfAGkDQzZpYcqyc4PBoqhZ+oDuaowC
+j6FFwD3OccPw4puMH9z7nC7I4HmpoCUNb9e7VikTvPGkHqOuCmhW0CL+TqZGeOxK
+/6ifS0mX6kZwdk8bz3Vi7SpuPv95AHAq9NqjmKGGLCclXl1P3z3uTRIBZtpb9Yb6
+xQIDAQAB
+-----END PUBLIC KEY-----
+RSA;
+
+    /**
+     * Lazy-loaded raw license string (the whole token).
+     */
+    private string $rawLicense;
+
+    /**
+     * Cached JSON-decoded license payload.
+     *
+     * @var array<string, mixed>|null
+     */
+    private ?array $decodedPayload = null;
+
+    /**
+     * Cached validation result, or null if not yet evaluated.
+     */
+    private ?bool $validationResult = null;
+
+    /**
+     * LicenseManager constructor.
+     *
+     * @param string|null $licenseToken  Optionally pass a license string
+     *                                   programmatically; otherwise the manager
+     *                                   looks for “.license” files on disk.
+     *
+     * @throws LicenseException If the license cannot be located.
+     */
+    public function __construct(?string $licenseToken = null)
+    {
+        $this->rawLicense = trim(
+            $licenseToken ?? $this->locateLicenseToken()
+        );
+    }
+
+    // ───────────────────────────────────────────────────────────────────────── //
+    //  Public API
+    // ───────────────────────────────────────────────────────────────────────── //
+
+    /**
+     * Returns true if the license is valid.
+     *
+     * @param bool $forceRefresh  Set to true to bypass the APCu cache.
+     *
+     * @return bool
+     */
+    public function isValid(bool $forceRefresh = false): bool
+    {
+        if ($this->validationResult !== null && $forceRefresh === false) {
+            return $this->validationResult;
+        }
+
+        // Try APCu
+        if (!$forceRefresh && \function_exists('apcu_fetch')) {
+            $cache = \apcu_fetch(self::CACHE_KEY, $hit);
+            if ($hit && \is_array($cache)) {
+                [$this->validationResult, $this->decodedPayload] = $cache;
+                return $this->validationResult;
+            }
+        }
+
+        $this->validationResult = $this->performValidation();
+
+        // Populate APCu cache even if the validation failed—reduces CPU-spikes
+        if (\function_exists('apcu_store')) {
+            \apcu_store(
+                self::CACHE_KEY,
+                [$this->validationResult, $this->decodedPayload],
+                self::CACHE_TTL
+            );
+        }
+
+        return $this->validationResult;
+    }
+
+    /**
+     * Ensures that the license is valid and throws otherwise.
+     *
+     * @throws LicenseException
+     */
+    public function assertValid(): void
+    {
+        if (!$this->isValid()) {
+            throw new LicenseException(
+                'Your ProdSecure Orchestrator license is invalid, expired, ' .
+                'or does not cover the current host.'
+            );
+        }
+    }
+
+    /**
+     * Returns arbitrary metadata from the license payload.
+     *
+     * Example keys: plan, tier, customer, exp, hosts, features
+     *
+     * @param string|null $key  If null, returns the entire payload array.
+     *
+     * @return mixed
+     * @throws LicenseException If the license is invalid.
+     */
+    public function getMeta(?string $key = null): mixed
+    {
+        $this->assertValid();
+
+        if ($key === null) {
+            return $this->decodedPayload;
+        }
+
+        return $this->decodedPayload[$key] ?? null;
+    }
+
+    // ───────────────────────────────────────────────────────────────────────── //
+    //  Internal helpers
+    // ───────────────────────────────────────────────────────────────────────── //
+
+    /**
+     * Discover the license token looking in a set of canonical paths.
+     *
+     * @return string
+     * @throws LicenseException
+     */
+    private function locateLicenseToken(): string
+    {
+        $searchPaths = [
+            // Project root
+            dirname(__DIR__) . DIRECTORY_SEPARATOR . '.license',
+            // ENV override
+            \getenv('PRODSECURE_LICENSE_PATH') ?: '',
+        ];
+
+        foreach ($searchPaths as $path) {
+            if ($path && \is_readable($path)) {
+                $content = \file_get_contents($path);
+                if ($content !== false && \trim($content) !== '') {
+                    return $content;
+                }
+            }
+        }
+
+        throw new LicenseException(
+            'ProdSecure Orchestrator failed to locate a license file (.license).'
+        );
+    }
+
+    /**
+     * Performs the cryptographic checks and semantic validation.
+     *
+     * @return bool True if the license passes all checks.
+     */
+    private function performValidation(): bool
+    {
+        // 1. Structural validation: must contain payload and signature parts
+        $parts = \explode('.', $this->rawLicense, 2);
+        if (\count($parts) !== 2) {
+            return false;
+        }
+
+        [$rawPayload, $rawSignature] = $parts;
+
+        // 2. Base64 decode payload
+        $payloadJson = \base64_decode($rawPayload, true);
+        if ($payloadJson === false) {
+            return false;
+        }
+
+        // 3. JSON decode payload into array
+        try {
+            $payload = \json_decode(
+                $payloadJson,
+                true,
+                512,
+                JSON_THROW_ON_ERROR
+            );
+        } catch (Exception $e) {
+            return false;
+        }
+
+        $this->decodedPayload = $payload;
+
+        // 4. Cryptographically verify signature using the embedded public key
+        $signature = \base64_decode($rawSignature, true);
+        if ($signature === false) {
+            return false;
+        }
+
+        $verified = \openssl_verify(
+            $rawPayload,
+            $signature,
+            self::PUBLIC_KEY,
+            OPENSSL_ALGO_SHA256
+        );
+
+        if ($verified !== 1) { // 1 = success, 0 = failure, -1 = error
+            return false;
+        }
+
+        // 5. Check expiry
+        if (!isset($payload['exp'])) {
+            return false;
+        }
+
+        $expiry = DateTimeImmutable::createFromFormat(
+            DateTimeImmutable::ATOM,
+            $payload['exp']
+        );
+
+        if (!$expiry || $expiry < new DateTimeImmutable('now')) {
+            return false;
+        }
+
+        // 6. Check hostname/domain whitelist
+        $allowedHosts = $payload['hosts'] ?? ['*'];
+        $currentHost  = \gethostname() ?: 'unknown';
+
+        if (
+            $allowedHosts !== ['*'] &&
+            !\in_array($currentHost, $allowedHosts, true)
+        ) {
+            return false;
+        }
+
+        // 7. Optional feature toggles can be inspected by the caller.
+
+        return true;
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Bootstrap helper
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Instantiating here allows very early validation (e.g. during config load).
+// In most real-world setups you would handle this differently, e.g. via DI
+// container, but for a self-contained drop-in file this approach is pragmatic.
+$__pso_license_manager = new LicenseManager();
+
+/**
+ * Returns the singleton LicenseManager created at bootstrap time.
+ *
+ * Global helper allows easy access from legacy code without DI refactors.
+ *
+ * @return LicenseManager
+ */
+function pso_license(): LicenseManager
+{
+    // phpcs:ignore Squiz.NamingConventions.ValidVariableName.NotCamelCaps
+    global $__pso_license_manager;
+
+    return $__pso_license_manager;
+}
+```

@@ -1,0 +1,232 @@
+{
+  "app": {
+    "name": "StreamPulse Nexus",
+    "version": "1.0.0",
+    "environment": "production",
+    "basePath": "/opt/streampulse-nexus"
+  },
+  "network": {
+    "ingress": {
+      "maxInFlightConnections": 50000,
+      "listenInterfaces": ["0.0.0.0"],
+      "ports": {
+        "rtmp": 1935,
+        "rtmps": 443
+      },
+      "rateLimit": {
+        "enabled": true,
+        "windowMs": 60000,
+        "maxRequests": 5000
+      },
+      "tls": {
+        "enabled": true,
+        "certPath": "${SECURE_CERT_PATH}",
+        "keyPath": "${SECURE_KEY_PATH}",
+        "minVersion": "TLSv1.2",
+        "cipherSuites": [
+          "TLS_AES_256_GCM_SHA384",
+          "TLS_CHACHA20_POLY1305_SHA256",
+          "TLS_AES_128_GCM_SHA256"
+        ]
+      }
+    },
+    "egress": {
+      "defaultTtlSec": 2,
+      "bufferSize": 65536,
+      "retransmitAttempts": 3,
+      "retryBackoffMs": 250
+    },
+    "edgeCache": {
+      "enabled": true,
+      "strategy": "LRU",
+      "capacityMb": 2048,
+      "evictionThresholdPercent": 85
+    },
+    "loadBalancer": {
+      "strategy": "adaptive-heatmap",
+      "strategies": {
+        "round-robin": {},
+        "least-connections": {},
+        "adaptive-heatmap": {
+          "updateIntervalMs": 1000,
+          "heatmapResolution": 64,
+          "cooldownPeriodMs": 5000
+        }
+      }
+    }
+  },
+  "modules": {
+    "transcoder": {
+      "enabled": true,
+      "profiles": [
+        { "name": "1080p60", "width": 1920, "height": 1080, "fps": 60, "bitrateKbps": 6000 },
+        { "name": "720p30", "width": 1280, "height": 720, "fps": 30, "bitrateKbps": 3000 },
+        { "name": "480p30", "width": 854, "height": 480, "fps": 30, "bitrateKbps": 1500 }
+      ],
+      "maxConcurrentJobs": 64,
+      "hardwareAccel": {
+        "preferred": ["vaapi", "nvenc", "qsv"],
+        "fallback": "software"
+      }
+    },
+    "analytics": {
+      "enabled": true,
+      "emitIntervalMs": 5000,
+      "metrics": [
+        "viewerCount",
+        "bitrate",
+        "packetLoss",
+        "latency",
+        "cpuUsage",
+        "memoryUsage"
+      ],
+      "pipeline": {
+        "aggregationWindowSec": 60,
+        "decimationFactor": 5,
+        "sink": "kafka",
+        "kafka": {
+          "brokers": ["kafka01:9092", "kafka02:9092"],
+          "topic": "streampulse.metrics",
+          "compression": "lz4",
+          "acks": "all",
+          "retries": 5,
+          "clientId": "streampulse-nexus"
+        }
+      }
+    },
+    "backup": {
+      "enabled": true,
+      "snapshotIntervalMinutes": 30,
+      "retentionDays": 14,
+      "provider": "s3",
+      "s3": {
+        "bucket": "streampulse-nexus-backups",
+        "region": "us-east-1",
+        "serverSideEncryption": "AES256",
+        "maxParallelUploads": 16
+      }
+    },
+    "security": {
+      "zeroTrust": {
+        "enabled": true,
+        "requiredJwtClaims": ["sub", "iat", "exp", "aud"],
+        "jwksUri": "https://auth.streampulse.io/.well-known/jwks.json",
+        "clockSkewSec": 60
+      },
+      "vulnerabilityScan": {
+        "enabled": true,
+        "scheduleCron": "0 3 * * *",
+        "severityThreshold": "high",
+        "scanner": "trivy"
+      },
+      "firewall": {
+        "enabled": true,
+        "defaultAction": "deny",
+        "rules": [
+          {
+            "id": "allow-rtmp-ingress",
+            "action": "allow",
+            "protocol": "tcp",
+            "portRange": "1935",
+            "sourceCidrs": ["0.0.0.0/0"]
+          },
+          {
+            "id": "allow-rtmps-ingress",
+            "action": "allow",
+            "protocol": "tcp",
+            "portRange": "443",
+            "sourceCidrs": ["0.0.0.0/0"]
+          }
+        ]
+      }
+    },
+    "alerting": {
+      "enabled": true,
+      "throttlingMs": 300000,
+      "routes": {
+        "critical": ["pagerduty", "sms"],
+        "warning": ["slack"],
+        "info": ["slack"]
+      },
+      "providers": {
+        "pagerduty": {
+          "routingKey": "${PAGERDUTY_ROUTING_KEY}"
+        },
+        "sms": {
+          "twilioSid": "${TWILIO_SID}",
+          "twilioToken": "${TWILIO_TOKEN}",
+          "from": "+15551234567",
+          "recipients": ["+15557654321", "+15559876543"]
+        },
+        "slack": {
+          "webhookUrl": "${SLACK_WEBHOOK_URL}",
+          "channel": "#nexus-alerts"
+        }
+      }
+    }
+  },
+  "observability": {
+    "logging": {
+      "level": "info",
+      "json": true,
+      "rotate": {
+        "enabled": true,
+        "frequency": "daily",
+        "maxFiles": "14d",
+        "dirname": "/var/log/streampulse-nexus"
+      }
+    },
+    "tracing": {
+      "enabled": true,
+      "sampler": {
+        "type": "probabilistic",
+        "param": 0.1
+      },
+      "collector": {
+        "host": "jaeger-collector",
+        "port": 6831
+      }
+    }
+  },
+  "health": {
+    "livenessProbe": {
+      "httpGet": {
+        "path": "/healthz/live",
+        "port": 8080
+      },
+      "initialDelaySec": 10,
+      "periodSec": 5,
+      "failureThreshold": 3
+    },
+    "readinessProbe": {
+      "httpGet": {
+        "path": "/healthz/ready",
+        "port": 8080
+      },
+      "initialDelaySec": 20,
+      "periodSec": 10,
+      "failureThreshold": 6
+    }
+  },
+  "featureFlags": {
+    "ar_synchronized_effects": false,
+    "timed_trivia": true,
+    "auto_highlight_reels": true
+  },
+  "runtime": {
+    "cluster": {
+      "enabled": true,
+      "workerCount": 4
+    },
+    "gracefulShutdownMs": 30000,
+    "commandBus": {
+      "maxInQueue": 10000,
+      "concurrency": 32,
+      "retryPolicy": {
+        "maxAttempts": 5,
+        "initialDelayMs": 100,
+        "backoffMultiplier": 2
+      }
+    }
+  }
+}

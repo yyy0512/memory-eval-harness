@@ -1,0 +1,194 @@
+```rust
+//! src/constants.txt
+//!
+//! Although this file carries a `.txt` extension to stay framework-agnostic,
+//! it is compiled as a regular Rust module by `build.rs`.  It centralizes
+//! project-wide constants and environment helpers for ChromaticCanvas Control
+//! Center.
+//!
+//! Keeping “magic numbers” in one place makes it easy to audit security–
+//! sensitive parameters (e.g., token TTLs, hashing cost) and to provide
+//! a single source of truth for other crates in the workspace.
+
+use std::{
+    env,
+    time::Duration,
+};
+
+use once_cell::sync::Lazy;
+use http::header::{HeaderName, AUTHORIZATION, CONTENT_TYPE};
+
+/// Printable, human-readable application name.
+pub const APP_NAME: &str = "ChromaticCanvas – Control Center";
+
+/// SemVer used in the public REST surface.
+pub const API_VERSION: &str = "v1";
+
+/// Base URL path prefix for every REST endpoint.  
+/// Example: `/api/v1/assets`
+pub const API_PREFIX: &str = "/api/v1";
+
+/// Security: how long a JWT access token is considered valid.
+pub const JWT_TTL: Duration = Duration::from_secs(60 * 60); // 1h
+
+/// Security: how long a JWT refresh token is valid.
+pub const REFRESH_TTL: Duration = Duration::from_secs(60 * 60 * 24 * 30); // 30d
+
+/// Security: argon2 cost factor—use a sensible default that balances speed
+/// and CPU usage on High Performance instances.  **DO NOT** reduce below 12
+/// in production.
+pub const ARGON2_COST: u32 = 15;
+
+/// Rate-limiter: maximum requests allowed per client (IP) per minute.  Requests
+/// over this threshold will return `HTTP_429_TOO_MANY_REQUESTS`.
+pub const MAX_REQS_PER_MINUTE: u32 = 120;
+
+/// Studio asset upload caps — mirrors CDN’s 2 GiB hard-limit.
+pub const MAX_UPLOAD_BYTES: u64 = 2 * 1024 * 1024 * 1024; // 2 GiB
+
+/// Max width/height for image previews that are stored in the “preview” S3
+/// bucket.  Larger previews are resized server-side.
+pub const MAX_PREVIEW_PX: u32 = 4_096;
+
+/// Default per-page limit for any paginated endpoint if the client omits
+/// `?limit=` query param.
+pub const DEFAULT_PAGE_LIMIT: u32 = 50;
+
+/// Allowed origins for CORS.  
+/// Reads from `$CHROMATIC_CANVAS_ALLOWED_ORIGINS`, falling back to localhost.
+pub static ALLOWED_ORIGINS: Lazy<Vec<String>> = Lazy::new(|| {
+    env::var("CHROMATIC_CANVAS_ALLOWED_ORIGINS")
+        .unwrap_or_else(|_| "http://localhost:5173".into())
+        .split(',')
+        .map(|s| s.trim().to_owned())
+        .collect()
+});
+
+/// Centralized list of custom HTTP headers used internally for tracing and
+/// correlation.  We allocate them once to avoid repeated `HeaderName` parsing.
+pub static HEADER_REQUEST_ID: Lazy<HeaderName> =
+    Lazy::new(|| HeaderName::from_static("x-request-id"));
+pub static HEADER_SESSION_ID: Lazy<HeaderName> =
+    Lazy::new(|| HeaderName::from_static("x-session-id"));
+pub static HEADER_SENTRY_TRACE: Lazy<HeaderName> =
+    Lazy::new(|| HeaderName::from_static("sentry-trace"));
+
+/// Default MIME types used repeatedly across the service layer.
+pub mod mime_types {
+    pub const JSON: &str = "application/json";
+    pub const JPEG: &str = "image/jpeg";
+    pub const PNG: &str = "image/png";
+    pub const SVG: &str = "image/svg+xml";
+    pub const WEBP: &str = "image/webp";
+}
+
+/// Database schema names — kept in constants to avoid typos in SQL fragments.
+pub mod db {
+    pub const SCHEMA_CORE: &str = "core";
+    pub const SCHEMA_BILLING: &str = "billing";
+    pub const SCHEMA_AUDIT: &str = "audit";
+
+    pub const TABLE_USERS: &str = "users";
+    pub const TABLE_PROJECTS: &str = "projects";
+    pub const TABLE_ASSETS: &str = "assets";
+    pub const TABLE_SESSIONS: &str = "sessions";
+}
+
+/// Top-level system roles.
+///
+/// These are intentionally flat — fine-grained permissions are handled in the
+/// RBAC middleware, not here.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[repr(u8)]
+pub enum UserRole {
+    Admin = 1,
+    Artist,
+    Client,
+    Observer,
+}
+
+impl UserRole {
+    /// Quick conversion to the canonical lowercase representation that is
+    /// stored in the JWT `role` claim and in the `users.role` column.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            UserRole::Admin    => "admin",
+            UserRole::Artist   => "artist",
+            UserRole::Client   => "client",
+            UserRole::Observer => "observer",
+        }
+    }
+
+    /// Convenience predicate used by route guards.
+    pub const fn is_privileged(self) -> bool {
+        matches!(self, UserRole::Admin | UserRole::Artist)
+    }
+}
+
+/// Web-socket channels used by the realtime notification hub.
+pub mod ws_channel {
+    pub const DASHBOARD_EVENTS: &str = "dashboard:events";
+    pub const CHAT_MESSAGES: &str  = "chat:messages";
+    pub const LIVE_PREVIEWS: &str  = "live:previews";
+    pub const BILLING_ALERTS: &str = "billing:alerts";
+}
+
+/// UI theme constants that must be in sync with Tailwind / DaisyUI config.
+pub mod theme {
+    /// Tailwind spacing unit used for consistent gutter sizing.
+    pub const GUTTER: f32 = 0.75; // rem
+    /// Max content width for 5K breakpoint — after this, edge gutters appear.
+    pub const MAX_CONTENT_W: u32 = 2560; // px
+}
+
+/// Path where uploaded temp files are streamed before they are handed off to
+/// S3 / CDN layer.
+pub static TMP_UPLOAD_DIR: Lazy<String> = Lazy::new(|| {
+    env::var("CHROMATIC_CANVAS_TMP_UPLOAD_DIR")
+        .unwrap_or_else(|_| "/var/tmp/chromaticcanvas".into())
+});
+
+/// If set at compile time (`cargo build --features tight_panic`), the binary
+/// will abort on panic instead of unwinding — reducing binary size and
+/// eliminating UB in FFI. Used only in release builds for hardened images.
+pub const PANIC_ABORT: bool = cfg!(feature = "tight_panic");
+
+/// Standard response headers sent with *every* successful request.
+pub static DEFAULT_SUCCESS_HEADERS: Lazy<Vec<(HeaderName, &'static str)>> =
+    Lazy::new(|| {
+        vec![
+            (CONTENT_TYPE, mime_types::JSON),
+            (AUTHORIZATION, "Bearer"),
+        ]
+    });
+
+/// Helper that returns the configured log level at runtime.
+///
+/// The env var is loosely validated and falls back to `info` on bad input.
+pub fn log_level() -> log::Level {
+    match env::var("CHROMATIC_CANVAS_LOG_LEVEL")
+        .unwrap_or_else(|_| "info".into())
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "trace" => log::Level::Trace,
+        "debug" => log::Level::Debug,
+        "warn"  => log::Level::Warn,
+        "error" => log::Level::Error,
+        _       => log::Level::Info,
+    }
+}
+
+/// Small macro that simplifies `include_str!` for SQL migrations.
+///
+/// Example:
+/// `let stmt = sql!(\"2023_10_15_create_users\");`
+///
+/// The macro is namespaced to avoid clashing with other parts of the codebase.
+#[macro_export]
+macro_rules! sql {
+    ($file:literal) => {
+        include_str!(concat!("../sql/", $file, ".sql"))
+    };
+}
+```

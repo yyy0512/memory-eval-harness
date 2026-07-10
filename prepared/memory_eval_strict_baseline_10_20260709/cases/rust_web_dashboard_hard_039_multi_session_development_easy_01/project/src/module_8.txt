@@ -1,0 +1,487 @@
+```rust
+//! ChromaticCanvas Control Center – Session Management
+//! ===================================================
+//! This module acts as the single source of truth for user‐session handling
+//! throughout the Control Center backend.  It is designed as middleware-
+//! friendly glue code that can be dropped into any Axum router without ceremony.
+//
+//! Highlights
+//! ----------
+//! • JWT-backed stateless session cookies with optional Redis persistence  
+//! • Sliding expiration with configurable ‘idle’ and ‘absolute’ TTLs  
+//! • CSRF-aware “double submit cookie” strategy (optional)  
+//! • Full async support + `Send`/`Sync` compliance for safe multi-threading  
+//! • Granular, strongly‐typed error handling  
+//!
+//! NOTE: ChromaticCanvas supports Bring-Your-Own-Storage.  If Redis is not
+//! enabled at compile time, we gracefully fall back to pure JWT sessions.
+//!
+//! To plug this into a router:
+//!
+//! ```rust,ignore
+//! use crate::session::{SessionLayer, SessionExtractor};
+//!
+//! let session_cfg = SessionConfig::from_env()?;
+//! let session_layer = SessionLayer::new(session_cfg.clone()).with_redis_pool(redis_pool);
+//!
+//! let app = Router::new()
+//!     .route("/profile", get(profile_handler))
+//!     .layer(session_layer);
+//!
+//! async fn profile_handler(SessionExtractor(claims): SessionExtractor) -> impl IntoResponse {
+//!     Json(claims)
+//! }
+//! ```
+// -------------------------------------------------------------------------------------------------
+
+#![allow(clippy::missing_errors_doc)]
+#![allow(clippy::needless_pass_by_value)]
+
+use std::{str::FromStr, sync::Arc};
+
+use async_trait::async_trait;
+use axum::{
+    body::Body,
+    extract::{FromRequest, RequestParts},
+    http::{header, HeaderMap, HeaderValue, StatusCode},
+    response::{IntoResponse, Response},
+    Extension,
+};
+use jsonwebtoken::{decode, encode, Algorithm, DecodingKey, EncodingKey, Header as JwtHeader, Validation};
+use redis::AsyncCommands;
+use serde::{Deserialize, Serialize};
+use thiserror::Error;
+use time::{Duration, OffsetDateTime};
+use tracing::{debug, error, instrument};
+
+/// How the JWT will be transported.  We default to `Cookie` for browser‐based
+/// sessions but support `Authorization: Bearer` for programmatic clients.
+#[derive(Clone, Copy, Debug)]
+pub enum Transport {
+    Cookie,
+    Bearer,
+}
+
+impl FromStr for Transport {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_ascii_lowercase().as_str() {
+            "cookie" => Ok(Self::Cookie),
+            "bearer" => Ok(Self::Bearer),
+            _ => Err(()),
+        }
+    }
+}
+
+/// Public configuration, typically hydrated from `RUST_ENV_*` variables.
+#[derive(Clone, Debug)]
+pub struct SessionConfig {
+    /// JWT secret as raw bytes (vended from Vault/KMS).
+    pub secret: Vec<u8>,
+    /// Maximum idle time before a session is considered expired.
+    pub idle_ttl: Duration,
+    /// Absolute time‐to‐live, regardless of activity.
+    pub absolute_ttl: Duration,
+    /// Cookie settings.
+    pub cookie_name: String,
+    /// If `true`, we set the `Secure` flag on cookies (HTTPS only).
+    pub secure_only: bool,
+    /// Selects transport style (cookie vs bearer).
+    pub transport: Transport,
+}
+
+impl SessionConfig {
+    /// Load config via environment variables.
+    pub fn from_env() -> anyhow::Result<Self> {
+        let secret = std::env::var("CC_SESSION_SECRET")
+            .expect("CC_SESSION_SECRET must be set")
+            .into_bytes();
+
+        let idle_ttl = std::env::var("CC_SESSION_IDLE_TTL_SECS")
+            .unwrap_or_else(|_| "1800".into())
+            .parse::<u64>()?;
+
+        let absolute_ttl = std::env::var("CC_SESSION_ABSOLUTE_TTL_SECS")
+            .unwrap_or_else(|_| "86400".into())
+            .parse::<u64>()?;
+
+        let cookie_name = std::env::var("CC_SESSION_COOKIE_NAME").unwrap_or_else(|_| "cc_session".into());
+
+        let secure_only = std::env::var("CC_SESSION_SECURE_ONLY")
+            .unwrap_or_else(|_| "true".into())
+            .parse::<bool>()?;
+
+        let transport = std::env::var("CC_SESSION_TRANSPORT")
+            .unwrap_or_else(|_| "cookie".into())
+            .parse::<Transport>()
+            .unwrap_or(Transport::Cookie);
+
+        Ok(Self {
+            secret,
+            idle_ttl: Duration::seconds(idle_ttl as i64),
+            absolute_ttl: Duration::seconds(absolute_ttl as i64),
+            cookie_name,
+            secure_only,
+            transport,
+        })
+    }
+}
+
+/// JWT Claims carried in every ChromaticCanvas session.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct Claims {
+    /// Session UUID (random, not guessable).
+    pub jti: String,
+    /// Subject = user ID.
+    pub sub: String,
+    /// Role list (`artist`, `admin`, …).
+    pub roles: Vec<String>,
+    /// Issued at.
+    pub iat: i64,
+    /// Expires at (absolute TTL).
+    pub exp: i64,
+    /// Last activity timestamp (for idle timeout).
+    pub last_act: i64,
+}
+
+/// Strongly‐typed wrapper around a JWT string.
+#[derive(Debug, Clone)]
+pub struct SessionToken(pub String);
+
+/// Bundle of services/handles needed by the session layer.
+#[derive(Clone)]
+pub struct SessionLayer<S = redis::Client> {
+    cfg: Arc<SessionConfig>,
+    redis: Option<S>,
+}
+
+impl<S> SessionLayer<S> {
+    pub fn new(cfg: SessionConfig) -> Self {
+        Self {
+            cfg: Arc::new(cfg),
+            redis: None,
+        }
+    }
+    /// Attach a Redis pool/client to allow server‐side invalidation/refresh.
+    pub fn with_redis_pool(mut self, client: S) -> Self {
+        self.redis = Some(client);
+        self
+    }
+}
+
+impl<S> tower::Layer<axum::Router> for SessionLayer<S>
+where
+    S: Clone + Send + Sync + 'static,
+{
+    type Service = axum::Router;
+
+    fn layer(&self, inner: axum::Router) -> Self::Service {
+        inner.layer(Extension(self.clone()))
+    }
+}
+
+// ───────────────────────────────────────────────────────────────────────────────
+// Error Handling
+// ───────────────────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Error)]
+pub enum SessionError {
+    #[error("missing session token")]
+    MissingToken,
+    #[error("token malformed or invalid")]
+    InvalidToken(#[source] jsonwebtoken::errors::Error),
+    #[error("session expired")]
+    Expired,
+    #[error("session not found in store")]
+    UnknownSession,
+    #[error("redis error")]
+    Redis(#[from] redis::RedisError),
+}
+
+/// Convert to an HTTP response understood by any client.
+impl IntoResponse for SessionError {
+    fn into_response(self) -> Response {
+        let status = match self {
+            SessionError::MissingToken => StatusCode::UNAUTHORIZED,
+            SessionError::InvalidToken(_) => StatusCode::UNAUTHORIZED,
+            SessionError::Expired | SessionError::UnknownSession => StatusCode::UNAUTHORIZED,
+            SessionError::Redis(_) => StatusCode::INTERNAL_SERVER_ERROR,
+        };
+        let body = axum::Json(serde_json::json!({
+            "error": self.to_string()
+        }));
+        (status, body).into_response()
+    }
+}
+
+// ───────────────────────────────────────────────────────────────────────────────
+// Core Session API
+// ───────────────────────────────────────────────────────────────────────────────
+
+impl<S> SessionLayer<S>
+where
+    S: Clone + Send + Sync + 'static,
+{
+    /// Create a new session for the given user.
+    #[instrument(skip(self))]
+    pub async fn create_session(
+        &self,
+        user_id: &str,
+        roles: &[String],
+    ) -> Result<SessionToken, SessionError> {
+        let now = OffsetDateTime::now_utc();
+        let jti = uuid::Uuid::new_v4().to_string();
+        let claims = Claims {
+            jti: jti.clone(),
+            sub: user_id.to_owned(),
+            roles: roles.to_owned(),
+            iat: now.unix_timestamp(),
+            exp: (now + self.cfg.absolute_ttl).unix_timestamp(),
+            last_act: now.unix_timestamp(),
+        };
+
+        let token = encode(
+            &JwtHeader::new(Algorithm::HS512),
+            &claims,
+            &EncodingKey::from_secret(&self.cfg.secret),
+        )
+        .map_err(SessionError::InvalidToken)?;
+
+        // Persist the JTI -> user mapping in Redis with absolute TTL.
+        if let Some(redis) = &self.redis {
+            let mut conn = redis.get_async_connection().await?;
+            let key = format!("sess:{}", jti);
+            conn.set_ex::<_, _, ()>(key, user_id, self.cfg.absolute_ttl.whole_seconds() as usize)
+                .await?;
+        }
+
+        Ok(SessionToken(token))
+    }
+
+    /// Invalidate the specified session both client-side and in Redis.
+    #[instrument(skip(self))]
+    pub async fn invalidate_session(&self, jti: &str) -> Result<(), SessionError> {
+        if let Some(redis) = &self.redis {
+            let mut conn = redis.get_async_connection().await?;
+            let key = format!("sess:{}", jti);
+            conn.del::<_, ()>(key).await?;
+        }
+        Ok(())
+    }
+
+    /// Validate the provided JWT + optional Redis check.
+    #[instrument(skip(self, jwt))]
+    pub async fn validate_and_refresh(
+        &self,
+        jwt: &str,
+    ) -> Result<Claims, SessionError> {
+        let token: Claims = decode(
+            jwt,
+            &DecodingKey::from_secret(&self.cfg.secret),
+            &Validation::new(Algorithm::HS512),
+        )
+        .map_err(SessionError::InvalidToken)?
+        .claims;
+
+        // Absolute expiration guard (encoded inside JWT).
+        let now = OffsetDateTime::now_utc().unix_timestamp();
+        if token.exp < now {
+            return Err(SessionError::Expired);
+        }
+
+        // Optional Redis presence check.
+        if let Some(redis) = &self.redis {
+            let mut conn = redis.get_async_connection().await?;
+            let key = format!("sess:{}", token.jti);
+            let exists: bool = conn.exists(&key).await?;
+            if !exists {
+                return Err(SessionError::UnknownSession);
+            }
+            // Sliding idle TTL refresh.
+            conn.expire(&key, self.cfg.absolute_ttl.whole_seconds() as usize)
+                .await?;
+        }
+
+        // Check idle timeout.
+        if now - token.last_act > self.cfg.idle_ttl.whole_seconds() {
+            return Err(SessionError::Expired);
+        }
+
+        Ok(token)
+    }
+}
+
+// ───────────────────────────────────────────────────────────────────────────────
+// Axum Extractor & Helpers
+// ───────────────────────────────────────────────────────────────────────────────
+
+/// The extractor surfaces validated `Claims` inside request handlers.
+/// If validation fails, the request is short-circuited with an HTTP error.
+pub struct SessionExtractor(pub Claims);
+
+#[async_trait]
+impl<B, S> FromRequest<B> for SessionExtractor
+where
+    B: Send,
+    S: Send + Sync + Clone + 'static,
+{
+    type Rejection = SessionError;
+
+    async fn from_request(req: &mut RequestParts<B>) -> Result<Self, Self::Rejection> {
+        let Extension(layer): Extension<SessionLayer<S>> =
+            Extension::from_request(req).await.expect("SessionLayer missing");
+
+        let headers = req.headers().expect("Headers already extracted");
+        let jwt = match layer.cfg.transport {
+            Transport::Cookie => find_jwt_in_cookie(&layer.cfg.cookie_name, headers),
+            Transport::Bearer => find_jwt_in_bearer(headers),
+        }?;
+
+        let mut claims = layer.validate_and_refresh(&jwt).await?;
+
+        // Update activity timestamp (sliding window).
+        claims.last_act = OffsetDateTime::now_utc().unix_timestamp();
+
+        // Put the updated claims back into request extensions for downstream middleware.
+        req.extensions_mut().insert(claims.clone());
+
+        Ok(Self(claims))
+    }
+}
+
+/// Helper: extract JWT from `Cookie` header.
+fn find_jwt_in_cookie(cookie_name: &str, headers: &HeaderMap) -> Result<String, SessionError> {
+    headers
+        .get(header::COOKIE)
+        .and_then(|hdr| hdr.to_str().ok())
+        .and_then(|cookie_str| {
+            cookie::Cookie::split_parse(cookie_str)
+                .flatten()
+                .find(|c| c.name() == cookie_name)
+                .map(|c| c.value().to_owned())
+        })
+        .ok_or(SessionError::MissingToken)
+}
+
+/// Helper: extract JWT from `Authorization: Bearer`.
+fn find_jwt_in_bearer(headers: &HeaderMap) -> Result<String, SessionError> {
+    let auth = headers
+        .get(header::AUTHORIZATION)
+        .and_then(|hdr| hdr.to_str().ok())
+        .ok_or(SessionError::MissingToken)?;
+
+    let parts: Vec<&str> = auth.splitn(2, ' ').collect();
+    match parts.as_slice() {
+        ["Bearer", token] => Ok(token.to_string()),
+        _ => Err(SessionError::MissingToken),
+    }
+}
+
+// ───────────────────────────────────────────────────────────────────────────────
+// Cookie Writer (for login endpoints)
+// ───────────────────────────────────────────────────────────────────────────────
+
+/// Utility: produce a `Set‐Cookie` header that holds the JWT token.  Call this
+/// after successful login to finalise the handshake.
+pub fn build_cookie_headers(cfg: &SessionConfig, token: &SessionToken) -> HeaderMap {
+    let mut headers = HeaderMap::new();
+
+    // JWT cookie
+    let mut cookie = cookie::Cookie::build(cfg.cookie_name.clone(), token.0.clone())
+        .http_only(true)
+        .same_site(cookie::SameSite::Lax)
+        .path("/")
+        .secure(cfg.secure_only)
+        .max_age(cookie::time::Duration::seconds(cfg.absolute_ttl.whole_seconds()))
+        .finish();
+
+    headers.insert(
+        header::SET_COOKIE,
+        HeaderValue::from_str(&cookie.to_string()).expect("valid SET_COOKIE value"),
+    );
+
+    // Optional CSRF token cookie (double submit pattern).
+    let csrf_value = uuid::Uuid::new_v4().to_string();
+    let csrf_cookie = cookie::Cookie::build("cc_csrf", csrf_value)
+        .http_only(false) // must be accessible from JS
+        .secure(cfg.secure_only)
+        .same_site(cookie::SameSite::Lax)
+        .path("/")
+        .finish();
+    headers.append(
+        header::SET_COOKIE,
+        HeaderValue::from_str(&csrf_cookie.to_string()).expect("valid SET_COOKIE value"),
+    );
+
+    headers
+}
+
+/// Convenience helper for login endpoints: return (Set-Cookie headers, Json(payload)).
+pub fn respond_with_session<T: Serialize>(
+    cfg: &SessionConfig,
+    token: SessionToken,
+    payload: &T,
+) -> impl IntoResponse {
+    let cookie_headers = build_cookie_headers(cfg, &token);
+    let mut resp = axum::Json(payload).into_response();
+
+    // merge headers
+    for (k, v) in cookie_headers {
+        resp.headers_mut()
+            .append(k.unwrap_or(header::SET_COOKIE), v);
+    }
+    resp
+}
+
+// ───────────────────────────────────────────────────────────────────────────────
+// Unit Tests
+// ───────────────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::http::HeaderValue;
+
+    fn mock_cfg() -> SessionConfig {
+        SessionConfig {
+            secret: b"supersecretkeyyoushouldnotcommit".to_vec(),
+            idle_ttl: Duration::seconds(60),
+            absolute_ttl: Duration::seconds(120),
+            cookie_name: "cc_sess".into(),
+            secure_only: false,
+            transport: Transport::Cookie,
+        }
+    }
+
+    #[tokio::test]
+    async fn jwt_roundtrip_without_redis() {
+        let cfg = mock_cfg();
+        let layer: SessionLayer<()> = SessionLayer::new(cfg.clone());
+
+        let roles = vec!["artist".into()];
+        let token = layer
+            .create_session("user123", &roles)
+            .await
+            .expect("token generated");
+
+        let claims = layer
+            .validate_and_refresh(&token.0)
+            .await
+            .expect("token valid");
+
+        assert_eq!(claims.sub, "user123");
+    }
+
+    #[test]
+    fn cookie_header_builder() {
+        let cfg = mock_cfg();
+        let token = SessionToken("tok".into());
+        let headers = build_cookie_headers(&cfg, &token);
+        assert!(headers
+            .get_all(header::SET_COOKIE)
+            .iter()
+            .any(|v| v == &HeaderValue::from_str("cc_sess=tok; HttpOnly; SameSite=Lax; Path=/").unwrap()));
+    }
+}
+```

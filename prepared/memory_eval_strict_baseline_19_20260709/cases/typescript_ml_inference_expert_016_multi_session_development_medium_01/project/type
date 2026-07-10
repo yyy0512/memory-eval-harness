@@ -1,0 +1,342 @@
+```typescript
+/**
+ * InsightHexaAI – Strategic ML Inference Suite for Enterprise KPIs
+ *
+ * File path:      type
+ * Responsibility: Global / domain-level type declarations, value objects, and
+ *                 functional helpers that are shared across hexagonal layers.
+ *
+ * NOTE: This file is intentionally *framework-agnostic*.  Nothing in here
+ *       should import adapters (Kafka, S3, HTTP) or external frameworks
+ *       (Express, Nest, React, etc.).  Only stable, non-volatile abstractions.
+ */
+
+import { v4 as uuidV4, validate as uuidValidate } from 'uuid';
+
+// -----------------------------------------------------------------------------
+// Section 1. Generic FP Helpers (Result, Option, Either, etc.)
+// -----------------------------------------------------------------------------
+
+/**
+ * Lightweight, expressive Result implementation à la Rust.
+ *   • `Ok`  – success branch wrapping a value
+ *   • `Err` – failure branch wrapping a domain-specific error
+ */
+export type Result<T, E = Error> = Ok<T> | Err<E>;
+export interface Ok<T> {
+  readonly ok: true;
+  readonly val: T;
+}
+export interface Err<E = Error> {
+  readonly ok: false;
+  readonly err: E;
+}
+
+export const Result = {
+  ok<T>(val: T): Ok<T> {
+    return { ok: true, val };
+  },
+  err<E = Error>(err: E): Err<E> {
+    return { ok: false, err };
+  },
+  /**
+   * Map over the success branch, leave failure untouched.
+   */
+  map<T, U, E = Error>(res: Result<T, E>, fn: (v: T) => U): Result<U, E> {
+    return res.ok ? Result.ok(fn(res.val)) : res;
+  },
+  /**
+   * Chain Result-producing functions (flatMap).
+   */
+  andThen<T, U, E = Error>(
+    res: Result<T, E>,
+    fn: (v: T) => Result<U, E>,
+  ): Result<U, E> {
+    return res.ok ? fn(res.val) : res;
+  },
+};
+
+/**
+ * Domain-level Option type (similar to Scala’s Option / Haskell’s Maybe).
+ */
+export type Option<T> = Some<T> | None;
+export interface Some<T> {
+  readonly _tag: 'Some';
+  readonly value: T;
+}
+export interface None {
+  readonly _tag: 'None';
+}
+
+export const Option = {
+  some<T>(value: T): Option<T> {
+    return { _tag: 'Some', value };
+  },
+  none(): Option<never> {
+    return { _tag: 'None' };
+  },
+  fold<T, U>(opt: Option<T>, onNone: () => U, onSome: (v: T) => U): U {
+    return opt._tag === 'Some' ? onSome(opt.value) : onNone();
+  },
+};
+
+// -----------------------------------------------------------------------------
+// Section 2. Type Branding for Nominal Safety (IDs, ISO Dates, Money, etc.)
+// -----------------------------------------------------------------------------
+
+/**
+ * Use TS branding to give primitive strings a unique nominal type.
+ * Prevents accidental mixing of IDs with plain strings.
+ */
+type Brand<K, T extends string> = K & { readonly __brand: T };
+
+export type UUID = Brand<string, 'UUID'>;
+
+export const UUID = {
+  new(): UUID {
+    return uuidV4() as UUID;
+  },
+  fromString(value: string): Result<UUID, TypeError> {
+    return uuidValidate(value)
+      ? Result.ok(value as UUID)
+      : Result.err(new TypeError(`Invalid UUID format: "${value}"`));
+  },
+};
+
+/**
+ * Monetary amount represented in minor units following ISO-4217 (e.g. cents).
+ * Always signed; currency is supplied elsewhere (MoneyAmount + CurrencyCode).
+ */
+export type MoneyAmount = Brand<number, 'MoneyAmount'>;
+
+export const MoneyAmount = {
+  of(amount: number): Result<MoneyAmount, RangeError> {
+    if (!Number.isFinite(amount)) {
+      return Result.err(
+        new RangeError(`MoneyAmount expects a finite number, got ${amount}`),
+      );
+    }
+    return Result.ok(amount as MoneyAmount);
+  },
+};
+
+// -----------------------------------------------------------------------------
+// Section 3. Domain-Specific Core Types
+// -----------------------------------------------------------------------------
+
+// -- KPI ----------------------------------------------------------------------
+
+export enum KPIType {
+  CustomerLifetimeValue = 'CustomerLifetimeValue',
+  MonthlyRecurringRevenue = 'MonthlyRecurringRevenue',
+  ChurnRiskScore = 'ChurnRiskScore',
+  NetPromoterScore = 'NetPromoterScore',
+}
+
+export type KPIId = Brand<string, 'KPIId'>;
+
+export interface KPI {
+  readonly id: KPIId;
+  readonly type: KPIType;
+  readonly description: string;
+  readonly modelVersionId: ModelVersionId;
+  readonly createdAt: ISODateString;
+}
+
+export type ISODateString = Brand<string, 'ISODateString'>;
+
+export const ISODateString = {
+  now(): ISODateString {
+    return new Date().toISOString() as ISODateString;
+  },
+  validate(value: string): Result<ISODateString, TypeError> {
+    const date = new Date(value);
+    return !isNaN(date.getTime())
+      ? Result.ok(value as ISODateString)
+      : Result.err(
+          new TypeError(`Invalid ISO-8601 date string: "${value}"`),
+        );
+  },
+};
+
+// -- Model Versions & Registry -----------------------------------------------
+
+export enum ModelStage {
+  Experimental = 'Experimental',
+  Staging = 'Staging',
+  Production = 'Production',
+  Archived = 'Archived',
+}
+
+export type ModelVersionId = Brand<string, 'ModelVersionId'>;
+
+export interface ModelVersionMetadata {
+  readonly id: ModelVersionId;
+  readonly modelName: string;
+  readonly stage: ModelStage;
+  readonly createdAt: ISODateString;
+  readonly parameters: Readonly<Record<string, unknown>>;
+  readonly metrics: Readonly<Record<string, number>>;
+  readonly trainingDatasetRef: DatasetRef;
+}
+
+export type DatasetRef = Brand<string, 'DatasetRef'>;
+
+// -- Events (Observer Pattern) ------------------------------------------------
+
+export interface DomainEvent {
+  readonly eventId: UUID;
+  readonly occurredAt: ISODateString;
+  readonly kind: DomainEventKind;
+  readonly payload: unknown; // Will be discriminated by handlers
+}
+
+export enum DomainEventKind {
+  KPIShiftDetected = 'KPIShiftDetected',
+  ModelVersionDeployed = 'ModelVersionDeployed',
+  FeatureDriftAlert = 'FeatureDriftAlert',
+  RetrainingPipelineCompleted = 'RetrainingPipelineCompleted',
+  BillingPolicyChanged = 'BillingPolicyChanged',
+}
+
+// Event constructors
+export const DomainEvents = {
+  kpiShiftDetected(kpiId: KPIId, delta: number): DomainEvent {
+    return {
+      eventId: UUID.new(),
+      occurredAt: ISODateString.now(),
+      kind: DomainEventKind.KPIShiftDetected,
+      payload: { kpiId, delta },
+    };
+  },
+
+  modelVersionDeployed(
+    modelVersionId: ModelVersionId,
+    stage: ModelStage,
+  ): DomainEvent {
+    return {
+      eventId: UUID.new(),
+      occurredAt: ISODateString.now(),
+      kind: DomainEventKind.ModelVersionDeployed,
+      payload: { modelVersionId, stage },
+    };
+  },
+};
+
+// -----------------------------------------------------------------------------
+// Section 4. Strategy Pattern – Revenue & Model Selection Strategies (Types)
+// -----------------------------------------------------------------------------
+
+export enum RevenueStrategyKind {
+  UsageBased = 'UsageBased',
+  Subscription = 'Subscription',
+  Freemium = 'Freemium',
+}
+
+export interface RevenueStrategy {
+  readonly kind: RevenueStrategyKind;
+  /**
+   * Returns the computed charge given usage in "compute-seconds"
+   * and *optionally* custom parameters (tier, discount codes, etc.).
+   */
+  computeCharge(
+    usageInSeconds: number,
+    extra?: Readonly<Record<string, unknown>>,
+  ): MoneyAmount;
+}
+
+export enum ModelSelectionStrategyKind {
+  ABTesting = 'ABTesting',
+  MultiArmedBandit = 'MultiArmedBandit',
+  ShadowDeployment = 'ShadowDeployment',
+}
+
+export interface ModelSelectionStrategy {
+  readonly kind: ModelSelectionStrategyKind;
+  /**
+   * Resolves to the selected `ModelVersionId` for a given KPI inference call.
+   */
+  selectModelVersion(
+    candidateVersions: readonly ModelVersionMetadata[],
+    requestContext: Readonly<Record<string, unknown>>,
+  ): ModelVersionId;
+}
+
+// -----------------------------------------------------------------------------
+// Section 5. Pipeline Pattern – Step Metadata
+// -----------------------------------------------------------------------------
+
+export interface PipelineStep<TInput = unknown, TOutput = unknown> {
+  readonly name: string;
+  readonly exec: (input: TInput) => Promise<Result<TOutput>>;
+  readonly retryPolicy?: RetryPolicy;
+}
+
+export interface RetryPolicy {
+  readonly maxRetries: number;
+  readonly backoffInMs: number;
+  readonly jitter?: boolean;
+}
+
+// -----------------------------------------------------------------------------
+// Section 6. Runtime Type Guards
+// -----------------------------------------------------------------------------
+
+export function isOk<T, E>(res: Result<T, E>): res is Ok<T> {
+  return res.ok;
+}
+
+export function isErr<T, E>(res: Result<T, E>): res is Err<E> {
+  return !res.ok;
+}
+
+export function isDomainEvent(event: unknown): event is DomainEvent {
+  return (
+    typeof event === 'object' &&
+    event !== null &&
+    'eventId' in event &&
+    'occurredAt' in event &&
+    'kind' in event
+  );
+}
+
+// -----------------------------------------------------------------------------
+// Section 7. Error Definitions
+// -----------------------------------------------------------------------------
+
+export class ValidationError extends Error {
+  public readonly details?: unknown;
+
+  constructor(message: string, details?: unknown) {
+    super(message);
+    this.name = 'ValidationError';
+    this.details = details;
+    Object.setPrototypeOf(this, new.target.prototype);
+  }
+}
+
+export class NotFoundError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'NotFoundError';
+    Object.setPrototypeOf(this, new.target.prototype);
+  }
+}
+
+// -----------------------------------------------------------------------------
+// Section 8. Utility – Exhaustive Switch Assertion
+// -----------------------------------------------------------------------------
+
+/**
+ * Ensures exhaustive checks in switch statements.
+ * Usage:
+ *   switch (event.kind) {
+ *     case DomainEventKind.KPIShiftDetected: ...
+ *     default: return assertUnreachable(event.kind);
+ *   }
+ */
+export function assertUnreachable(_: never): never {
+  // eslint-disable-next-line @typescript-eslint/restrict-template-expressions
+  throw new Error(`Unreachable code executed: ${_}`);
+}
+```

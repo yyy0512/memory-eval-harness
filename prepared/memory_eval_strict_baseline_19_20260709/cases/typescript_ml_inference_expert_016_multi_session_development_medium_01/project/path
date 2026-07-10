@@ -1,0 +1,237 @@
+```typescript
+/*  ╔════════════════════════════════════════════════════════════════════════╗
+    ║  InsightHexaAI – Strategic ML Inference Suite for Enterprise KPIs     ║
+    ║                                                                        ║
+    ║  File:      src/core/pricing/InferencePricingStrategyFactory.ts        ║
+    ║  Purpose:   Factory + Strategy implementations for SLA-aware           ║
+    ║             inference-pricing. The code lives fully inside             ║
+    ║             the hexagon (domain layer) and is therefore               ║
+    ║             infrastructure-agnostic.                                   ║
+    ╚════════════════════════════════════════════════════════════════════════╝ */
+
+import { randomUUID } from 'crypto';
+
+/**
+ * Domain-level exception thrown when a pricing strategy cannot be resolved.
+ */
+export class PricingStrategyResolutionError extends Error {
+  public readonly traceId: string;
+
+  constructor(message: string, public readonly inner?: unknown) {
+    super(message);
+    this.name = 'PricingStrategyResolutionError';
+    this.traceId = randomUUID();
+
+    // Preserve stack from the inner error if available
+    if (inner instanceof Error && inner.stack) {
+      this.stack = `${this.stack}\nCaused By:\n${inner.stack}`;
+    }
+  }
+}
+
+/**
+ * The key KPI dimensions that influence price quotes.
+ * NOTE: This interface lives purely in the domain layer;
+ *       adapters map transport-level DTOs onto this.
+ */
+export interface PricingContext {
+  readonly customerId: string;
+  readonly monthlyInferenceCount: number;
+  readonly requiredLatencyMs: number;        //  p99 latency requirement
+  readonly requiredAvailability: number;     //  e.g. 0.999
+  readonly committedInferences?: number;     //  Used by subscription/tiered plans
+  readonly modelComplexityScore: number;     //  1-100 scale
+}
+
+/**
+ * Returned by every strategy to make subsequent accounting simpler.
+ */
+export interface PriceQuote {
+  readonly amountUSD: number;
+  readonly currency: 'USD';
+  readonly calculatedAt: Date;
+  readonly strategyName: string;
+  readonly traceId: string;
+}
+
+/**
+ * Contract for any inference-pricing strategy.
+ */
+export interface InferencePricingStrategy {
+  readonly name: string;
+  quotePrice(ctx: PricingContext): PriceQuote;
+}
+
+/* =========================================================================
+ * Strategy Implementations
+ * ========================================================================= */
+
+/**
+ * Pure usage-based pricing: price = base + (perInferenceRate * count) *
+ *                           modifiers(Latency, Availability, Complexity)
+ */
+export class UsageBasedPricingStrategy implements InferencePricingStrategy {
+  public readonly name = 'USAGE_BASED';
+
+  private static readonly BASE_FEE = 0.0002; // USD per inference
+  private static readonly LATENCY_SURCHARGE = 0.25; // 25 % when latency < 50ms
+  private static readonly AVAILABILITY_SURCHARGE = 0.40; // 40 % when > 4 nines
+  private static readonly COMPLEXITY_MULTIPLIER = (score: number): number =>
+    1 + score / 200; // 1% extra per 2 points of complexity
+
+  quotePrice(ctx: PricingContext): PriceQuote {
+    const { monthlyInferenceCount, requiredLatencyMs, requiredAvailability, modelComplexityScore } =
+      ctx;
+
+    let unitPrice = UsageBasedPricingStrategy.BASE_FEE;
+
+    if (requiredLatencyMs < 50) {
+      unitPrice += unitPrice * UsageBasedPricingStrategy.LATENCY_SURCHARGE;
+    }
+
+    if (requiredAvailability >= 0.9999) {
+      unitPrice += unitPrice * UsageBasedPricingStrategy.AVAILABILITY_SURCHARGE;
+    }
+
+    unitPrice *= UsageBasedPricingStrategy.COMPLEXITY_MULTIPLIER(modelComplexityScore);
+
+    const amountUSD = roundToCents(unitPrice * monthlyInferenceCount);
+
+    return buildPriceQuote(amountUSD, this.name);
+  }
+}
+
+/**
+ * Classic subscription model: customer prepays for a committed number of
+ * inferences. Overages are charged using the usage-based strategy internally.
+ */
+export class SubscriptionPricingStrategy implements InferencePricingStrategy {
+  public readonly name = 'SUBSCRIPTION';
+
+  private readonly usageStrategy = new UsageBasedPricingStrategy();
+
+  // Tier configuration could also be resolved from DB/config-service
+  private static readonly TIERS = [
+    { committed: 1_000_000, priceUSD: 1500 },
+    { committed: 5_000_000, priceUSD: 6000 },
+    { committed: 10_000_000, priceUSD: 10_000 },
+  ];
+
+  quotePrice(ctx: PricingContext): PriceQuote {
+    const committed = ctx.committedInferences ?? 0;
+    const tier = SubscriptionPricingStrategy.TIERS.find((t) => t.committed === committed);
+    if (!tier) {
+      throw new PricingStrategyResolutionError(
+        `Unsupported commitment: ${committed}. Allowed: ${SubscriptionPricingStrategy.TIERS.map(
+          (t) => t.committed,
+        ).join(', ')}`,
+      );
+    }
+
+    if (ctx.monthlyInferenceCount <= committed) {
+      return buildPriceQuote(tier.priceUSD, this.name);
+    }
+
+    // Overages apply:
+    const overageCtx: PricingContext = {
+      ...ctx,
+      monthlyInferenceCount: ctx.monthlyInferenceCount - committed,
+    };
+    const overageQuote = this.usageStrategy.quotePrice(overageCtx);
+
+    return buildPriceQuote(tier.priceUSD + overageQuote.amountUSD, this.name);
+  }
+}
+
+/**
+ * Tiered model where per-inference price decreases with volume.
+ */
+export class TieredPricingStrategy implements InferencePricingStrategy {
+  public readonly name = 'TIERED';
+
+  private static readonly BRACKETS = [
+    { upTo: 500_000, unitPrice: 0.00025 },
+    { upTo: 2_000_000, unitPrice: 0.00018 },
+    { upTo: 5_000_000, unitPrice: 0.00012 },
+    { upTo: Number.POSITIVE_INFINITY, unitPrice: 0.00008 },
+  ];
+
+  quotePrice(ctx: PricingContext): PriceQuote {
+    let remaining = ctx.monthlyInferenceCount;
+    let totalCost = 0;
+
+    for (const bracket of TieredPricingStrategy.BRACKETS) {
+      const quantity = Math.min(remaining, bracket.upTo);
+      totalCost += quantity * bracket.unitPrice;
+      remaining -= quantity;
+      if (remaining <= 0) break;
+    }
+
+    // Apply complexity multiplier as in usage-based model
+    const multiplier = UsageBasedPricingStrategy['COMPLEXITY_MULTIPLIER'](
+      ctx.modelComplexityScore,
+    );
+
+    return buildPriceQuote(roundToCents(totalCost * multiplier), this.name);
+  }
+}
+
+/* =========================================================================
+ * Strategy Factory
+ * ========================================================================= */
+
+export enum PricingStrategyType {
+  USAGE_BASED = 'USAGE_BASED',
+  SUBSCRIPTION = 'SUBSCRIPTION',
+  TIERED = 'TIERED',
+}
+
+export class InferencePricingStrategyFactory {
+  /**
+   * Factory method resolving a concrete pricing strategy.
+   *
+   * @param type   The desired strategy identifier.
+   * @returns      Concrete strategy instance.
+   * @throws       PricingStrategyResolutionError when unknown type supplied.
+   */
+  static getStrategy(type: PricingStrategyType): InferencePricingStrategy {
+    switch (type) {
+      case PricingStrategyType.USAGE_BASED:
+        return new UsageBasedPricingStrategy();
+
+      case PricingStrategyType.SUBSCRIPTION:
+        return new SubscriptionPricingStrategy();
+
+      case PricingStrategyType.TIERED:
+        return new TieredPricingStrategy();
+
+      default:
+        throw new PricingStrategyResolutionError(`Unsupported strategy type: ${type}`);
+    }
+  }
+}
+
+/* =========================================================================
+ * Helper utilities
+ * ========================================================================= */
+
+/**
+ *  Round a number to 2 decimal places.
+ */
+function roundToCents(amount: number): number {
+  return Math.round((amount + Number.EPSILON) * 100) / 100;
+}
+
+/**
+ *  Construct standardized PriceQuote objects.
+ */
+function buildPriceQuote(amountUSD: number, strategyName: string): PriceQuote {
+  return {
+    amountUSD,
+    currency: 'USD',
+    calculatedAt: new Date(),
+    strategyName,
+    traceId: randomUUID(),
+  };
+}
+```

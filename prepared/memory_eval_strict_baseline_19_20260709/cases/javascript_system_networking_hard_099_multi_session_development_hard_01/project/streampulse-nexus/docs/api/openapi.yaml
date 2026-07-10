@@ -1,0 +1,918 @@
+```yaml
+openapi: 3.1.0
+
+info:
+  title: StreamPulse Nexus Public API
+  version: "1.2.0"
+  description: |
+    StreamPulse Nexus is a component-based networking platform that powers large-scale, interactive
+    entertainment streams with carrier-grade reliability.  
+    The public API lets operators, dashboards, and automated tooling manage nodes, monitor health,
+    trigger backup & recovery workflows, and fine-tune runtime configuration without touching
+    low-level cluster internals.
+
+    # Environments
+    • **Production:** `https://api.streampulse.io`  
+    • **Staging:**    `https://staging-api.streampulse.io`
+
+    # API Stability
+    `v1` is considered **stable**. Breaking changes will result in a new major version.
+
+    # Authentication
+    All endpoints require one of:
+    • OAuth 2.0 Bearer Token with scope `nexus.api`  
+    • An API key issued per tenant (`X-API-Key`)
+
+    # Idempotency
+    `PUT` and `DELETE` operations accept `Idempotency-Key` headers. Requests with identical keys
+    replayed within a 24 h window will return the original response.
+
+    # Pagination
+    Cursor-based pagination is provided through standard `page[cursor]` and `page[size]` parameters.
+
+servers:
+  - url: https://api.streampulse.io
+    description: Production
+  - url: https://staging-api.streampulse.io
+    description: Staging
+
+tags:
+  - name: Nodes
+    description: Manage compute nodes that orchestrate media packets and telemetry.
+  - name: Streams
+    description: Create, update, and query live streams.
+  - name: Metrics
+    description: Real-time telemetry aggregated across the platform.
+  - name: Health
+    description: Cluster and service health-check endpoints.
+  - name: Backup & Recovery
+    description: Start, list, and restore automated backups.
+  - name: Configuration
+    description: Runtime configuration management for swappable modules.
+  - name: Security
+    description: Zero-trust, vulnerability scanning, and IAM operations.
+
+components:
+  securitySchemes:
+    OAuth2:
+      type: oauth2
+      description: OAuth 2.0 flow with tenant-scoped bearer tokens.
+      flows:
+        clientCredentials:
+          tokenUrl: https://auth.streampulse.io/oauth/token
+          scopes:
+            nexus.api: Full access to StreamPulse Nexus API.
+
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: API Key issued per tenant.
+
+  parameters:
+    CursorParam:
+      name: page[cursor]
+      in: query
+      description: Opaque cursor from the previous response.
+      schema:
+        type: string
+
+    PageSizeParam:
+      name: page[size]
+      in: query
+      description: Page size (max 1000, default 100).
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 1000
+        default: 100
+
+    NodeIdParam:
+      name: nodeId
+      in: path
+      required: true
+      description: ULID identifier of a compute node.
+      schema:
+        type: string
+        pattern: '^[0-9A-HJKMNP-TV-Z]{26}$'
+
+    StreamIdParam:
+      name: streamId
+      in: path
+      required: true
+      description: ULID identifier of a stream.
+      schema:
+        type: string
+        pattern: '^[0-9A-HJKMNP-TV-Z]{26}$'
+
+    BackupJobIdParam:
+      name: jobId
+      in: path
+      required: true
+      description: Backup job identifier (ULID).
+      schema:
+        type: string
+        pattern: '^[0-9A-HJKMNP-TV-Z]{26}$'
+
+    ConfigIdParam:
+      name: configId
+      in: path
+      required: true
+      description: Configuration identifier.
+      schema:
+        type: string
+        pattern: '^[a-zA-Z0-9._-]{3,64}$'
+
+  headers:
+    RateLimit-Limit:
+      description: The maximum number of requests that can be made in a given rate-limit window.
+      schema:
+        type: integer
+    RateLimit-Remaining:
+      description: The number of requests remaining in the current rate-limit window.
+      schema:
+        type: integer
+    RateLimit-Reset:
+      description: Unix timestamp of when the current rate-limit window resets.
+      schema:
+        type: integer
+        format: int64
+
+  responses:
+    UnauthorizedError:
+      description: Authentication failure.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          examples:
+            Unauthorized:
+              value:
+                code: UNAUTHORIZED
+                message: Bearer token is missing or invalid.
+
+    NotFoundError:
+      description: Resource not found.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          examples:
+            NodeNotFound:
+              value:
+                code: NODE_NOT_FOUND
+                message: Node with id 01H6Q9Z5H8KMZ3QVW8BZK5KF6M not found.
+
+  schemas:
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          description: Machine-readable error code.
+        message:
+          type: string
+          description: Human-readable description.
+
+    Node:
+      type: object
+      required: [id, status, region, roles, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          format: ulid
+        status:
+          type: string
+          enum: [ACTIVE, DRAINING, OFFLINE, MAINTENANCE]
+        region:
+          type: string
+        roles:
+          type: array
+          items:
+            type: string
+            enum: [INGRESS, EGRESS, EDGE_CACHE, TRANSCODER, ANALYTICS]
+        version:
+          type: string
+          description: SemVer of the node runtime.
+        ip:
+          type: string
+          format: ipv4
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    Stream:
+      type: object
+      required: [id, title, status, createdAt]
+      properties:
+        id:
+          type: string
+          format: ulid
+        title:
+          type: string
+          maxLength: 256
+        status:
+          type: string
+          enum: [PLANNED, LIVE, ENDED, ARCHIVED]
+        mode:
+          type: string
+          enum: [ESPORTS, CONCERT, FESTIVAL, CUSTOM]
+        audienceLimit:
+          type: integer
+          minimum: 0
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    Metric:
+      type: object
+      required: [name, value, unit, collectedAt]
+      properties:
+        name:
+          type: string
+        value:
+          type: number
+          format: double
+        unit:
+          type: string
+        collectedAt:
+          type: string
+          format: date-time
+        labels:
+          type: object
+          additionalProperties:
+            type: string
+
+    Event:
+      type: object
+      required: [id, type, timestamp, payload]
+      properties:
+        id:
+          type: string
+          format: ulid
+        type:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+        payload:
+          type: object
+          description: Event-specific content.
+          additionalProperties: true
+
+    BackupJob:
+      type: object
+      required: [id, state, startedAt]
+      properties:
+        id:
+          type: string
+          format: ulid
+        state:
+          type: string
+          enum: [QUEUED, RUNNING, COMPLETED, FAILED, CANCELLED]
+        targetRegion:
+          type: string
+        snapshotCount:
+          type: integer
+          minimum: 0
+        startedAt:
+          type: string
+          format: date-time
+        finishedAt:
+          type: string
+          format: date-time
+          nullable: true
+        errorMessage:
+          type: string
+          nullable: true
+
+    Config:
+      type: object
+      required: [id, value, version, updatedAt]
+      properties:
+        id:
+          type: string
+        value:
+          type: object
+          description: Arbitrary JSON configuration.
+        version:
+          type: integer
+          minimum: 1
+        updatedAt:
+          type: string
+          format: date-time
+
+paths:
+
+  /v1/nodes:
+    get:
+      tags: [Nodes]
+      summary: List compute nodes
+      security:
+        - OAuth2: [nexus.api]
+      parameters:
+        - $ref: '#/components/parameters/CursorParam'
+        - $ref: '#/components/parameters/PageSizeParam'
+      responses:
+        "200":
+          description: List of nodes paginated.
+          headers:
+            RateLimit-Limit:
+              $ref: '#/components/headers/RateLimit-Limit'
+            RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimit-Remaining'
+            RateLimit-Reset:
+              $ref: '#/components/headers/RateLimit-Reset'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, page]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Node'
+                  page:
+                    type: object
+                    required: [cursor]
+                    properties:
+                      cursor:
+                        type: string
+              examples:
+                NodesPage:
+                  value:
+                    data:
+                      - id: "01H6Q9Z5H8KMZ3QVW8BZK5KF6M"
+                        status: ACTIVE
+                        region: us-east-1
+                        roles: [INGRESS, ANALYTICS]
+                        version: "4.2.1"
+                        ip: "10.45.1.73"
+                        createdAt: "2023-11-12T07:12:02Z"
+                        updatedAt: "2023-12-01T10:02:00Z"
+                    page:
+                      cursor: "eyJwYWdlIjoyfQ=="
+        "401":
+          $ref: '#/components/responses/UnauthorizedError'
+
+    post:
+      tags: [Nodes]
+      summary: Register a new node
+      security:
+        - OAuth2: [nexus.api]
+      requestBody:
+        description: Node details to register.
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Node'
+      responses:
+        "201":
+          description: Node successfully registered.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Node'
+        "400":
+          description: Validation error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        "401":
+          $ref: '#/components/responses/UnauthorizedError'
+
+  /v1/nodes/{nodeId}:
+    parameters:
+      - $ref: '#/components/parameters/NodeIdParam'
+
+    get:
+      tags: [Nodes]
+      summary: Get node details
+      security:
+        - OAuth2: [nexus.api]
+      responses:
+        "200":
+          description: Node found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Node'
+        "404":
+          $ref: '#/components/responses/NotFoundError'
+        "401":
+          $ref: '#/components/responses/UnauthorizedError'
+
+    put:
+      tags: [Nodes]
+      summary: Update node status or metadata
+      security:
+        - OAuth2: [nexus.api]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                status:
+                  $ref: '#/components/schemas/Node/properties/status'
+                roles:
+                  $ref: '#/components/schemas/Node/properties/roles'
+      responses:
+        "200":
+          description: Node updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Node'
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        "404":
+          $ref: '#/components/responses/NotFoundError'
+        "401":
+          $ref: '#/components/responses/UnauthorizedError'
+
+    delete:
+      tags: [Nodes]
+      summary: Deregister node
+      security:
+        - OAuth2: [nexus.api]
+      responses:
+        "204":
+          description: Node deregistered.
+        "404":
+          $ref: '#/components/responses/NotFoundError'
+        "401":
+          $ref: '#/components/responses/UnauthorizedError'
+
+  /v1/nodes/{nodeId}/metrics:
+    parameters:
+      - $ref: '#/components/parameters/NodeIdParam'
+    get:
+      tags: [Metrics]
+      summary: List metrics for a node
+      security:
+        - OAuth2: [nexus.api]
+      parameters:
+        - $ref: '#/components/parameters/CursorParam'
+        - $ref: '#/components/parameters/PageSizeParam'
+      responses:
+        "200":
+          description: Metric list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, page]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Metric'
+                  page:
+                    type: object
+                    required: [cursor]
+                    properties:
+                      cursor:
+                        type: string
+        "401":
+          $ref: '#/components/responses/UnauthorizedError'
+        "404":
+          $ref: '#/components/responses/NotFoundError'
+
+  /v1/streams:
+    get:
+      tags: [Streams]
+      summary: List streams
+      security:
+        - OAuth2: [nexus.api]
+      parameters:
+        - $ref: '#/components/parameters/PageSizeParam'
+        - $ref: '#/components/parameters/CursorParam'
+      responses:
+        "200":
+          description: Paginated list of streams
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, page]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Stream'
+                  page:
+                    type: object
+                    required: [cursor]
+                    properties:
+                      cursor:
+                        type: string
+        "401":
+          $ref: '#/components/responses/UnauthorizedError'
+
+    post:
+      tags: [Streams]
+      summary: Create a new stream
+      security:
+        - OAuth2: [nexus.api]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title, mode]
+              properties:
+                title:
+                  $ref: '#/components/schemas/Stream/properties/title'
+                mode:
+                  $ref: '#/components/schemas/Stream/properties/mode'
+                audienceLimit:
+                  $ref: '#/components/schemas/Stream/properties/audienceLimit'
+      responses:
+        "201":
+          description: Stream created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Stream'
+        "400":
+          description: Validation error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        "401":
+          $ref: '#/components/responses/UnauthorizedError'
+
+  /v1/streams/{streamId}:
+    parameters:
+      - $ref: '#/components/parameters/StreamIdParam'
+
+    get:
+      tags: [Streams]
+      summary: Retrieve stream details
+      security:
+        - OAuth2: [nexus.api]
+      responses:
+        "200":
+          description: Stream
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Stream'
+        "404":
+          $ref: '#/components/responses/NotFoundError'
+        "401":
+          $ref: '#/components/responses/UnauthorizedError'
+
+    put:
+      tags: [Streams]
+      summary: Update stream metadata
+      security:
+        - OAuth2: [nexus.api]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title:
+                  $ref: '#/components/schemas/Stream/properties/title'
+                status:
+                  $ref: '#/components/schemas/Stream/properties/status'
+                audienceLimit:
+                  $ref: '#/components/schemas/Stream/properties/audienceLimit'
+      responses:
+        "200":
+          description: Stream updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Stream'
+        "400":
+          description: Validation problem
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        "404":
+          $ref: '#/components/responses/NotFoundError'
+        "401":
+          $ref: '#/components/responses/UnauthorizedError'
+
+    delete:
+      tags: [Streams]
+      summary: Archive stream
+      security:
+        - OAuth2: [nexus.api]
+      responses:
+        "204":
+          description: Stream archived
+        "404":
+          $ref: '#/components/responses/NotFoundError'
+        "401":
+          $ref: '#/components/responses/UnauthorizedError'
+
+  /v1/streams/{streamId}/events:
+    parameters:
+      - $ref: '#/components/parameters/StreamIdParam'
+    get:
+      tags: [Streams]
+      summary: List events associated with a stream
+      security:
+        - OAuth2: [nexus.api]
+      parameters:
+        - $ref: '#/components/parameters/PageSizeParam'
+        - $ref: '#/components/parameters/CursorParam'
+      responses:
+        "200":
+          description: List of events
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, page]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Event'
+                  page:
+                    type: object
+                    required: [cursor]
+                    properties:
+                      cursor:
+                        type: string
+        "401":
+          $ref: '#/components/responses/UnauthorizedError'
+        "404":
+          $ref: '#/components/responses/NotFoundError'
+
+  /v1/metrics:
+    get:
+      tags: [Metrics]
+      summary: Wide-cluster metric search
+      security:
+        - OAuth2: [nexus.api]
+      parameters:
+        - name: query
+          in: query
+          description: Prometheus-style query string.
+          required: true
+          schema:
+            type: string
+        - name: range
+          in: query
+          description: Time range in ISO-8601 duration (e.g. PT1H).
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Vector of metric samples
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Metric'
+        "400":
+          description: Query parsing error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        "401":
+          $ref: '#/components/responses/UnauthorizedError'
+
+  /v1/health:
+    get:
+      tags: [Health]
+      summary: Global health check
+      security: []
+      responses:
+        "200":
+          description: Health status
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, checks]
+                properties:
+                  status:
+                    type: string
+                    enum: [PASS, WARN, FAIL]
+                  checks:
+                    type: array
+                    items:
+                      type: object
+                      required: [name, status]
+                      properties:
+                        name:
+                          type: string
+                        status:
+                          type: string
+                          enum: [PASS, WARN, FAIL]
+                        latencyMs:
+                          type: integer
+        "503":
+          description: One or more services are degraded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /v1/backups:
+    post:
+      tags: ["Backup & Recovery"]
+      summary: Trigger a backup job
+      security:
+        - OAuth2: [nexus.api]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [targetRegion]
+              properties:
+                targetRegion:
+                  type: string
+      responses:
+        "202":
+          description: Backup job accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BackupJob'
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        "401":
+          $ref: '#/components/responses/UnauthorizedError'
+
+    get:
+      tags: ["Backup & Recovery"]
+      summary: List backup jobs
+      security:
+        - OAuth2: [nexus.api]
+      parameters:
+        - $ref: '#/components/parameters/PageSizeParam'
+        - $ref: '#/components/parameters/CursorParam'
+      responses:
+        "200":
+          description: Paginated list of backup jobs
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, page]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/BackupJob'
+                  page:
+                    type: object
+                    required: [cursor]
+                    properties:
+                      cursor:
+                        type: string
+        "401":
+          $ref: '#/components/responses/UnauthorizedError'
+
+  /v1/backups/{jobId}:
+    parameters:
+      - $ref: '#/components/parameters/BackupJobIdParam'
+    get:
+      tags: ["Backup & Recovery"]
+      summary: Get backup job status
+      security:
+        - OAuth2: [nexus.api]
+      responses:
+        "200":
+          description: Backup job
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BackupJob'
+        "404":
+          $ref: '#/components/responses/NotFoundError'
+        "401":
+          $ref: '#/components/responses/UnauthorizedError'
+
+  /v1/configs:
+    get:
+      tags: [Configuration]
+      summary: List configuration items
+      security:
+        - OAuth2: [nexus.api]
+      parameters:
+        - $ref: '#/components/parameters/PageSizeParam'
+        - $ref: '#/components/parameters/CursorParam'
+      responses:
+        "200":
+          description: Config list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, page]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Config'
+                  page:
+                    type: object
+                    required: [cursor]
+                    properties:
+                      cursor:
+                        type: string
+        "401":
+          $ref: '#/components/responses/UnauthorizedError'
+
+    post:
+      tags: [Configuration]
+      summary: Create or update configuration item
+      security:
+        - OAuth2: [nexus.api]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Config'
+      responses:
+        "201":
+          description: Config created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Config'
+        "400":
+          description: Validation problem
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        "401":
+          $ref: '#/components/responses/UnauthorizedError'
+
+  /v1/configs/{configId}:
+    parameters:
+      - $ref: '#/components/parameters/ConfigIdParam'
+    get:
+      tags: [Configuration]
+      summary: Retrieve configuration item
+      security:
+        - OAuth2: [nexus.api]
+      responses:
+        "200":
+          description: Config item
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Config'
+        "404":
+          $ref: '#/components/responses/NotFoundError'
+        "401":
+          $ref: '#/components/responses/UnauthorizedError'
+
+    delete:
+      tags: [Configuration]
+      summary: Delete configuration item
+      security:
+        - OAuth2: [nexus.api]
+      responses:
+        "204":
+          description: Deleted
+        "404":
+          $ref: '#/components/responses/NotFoundError'
+        "401":
+          $ref: '#/components/responses/UnauthorizedError'
+
+security:
+  - OAuth2: []
+  - ApiKeyAuth: []
+```

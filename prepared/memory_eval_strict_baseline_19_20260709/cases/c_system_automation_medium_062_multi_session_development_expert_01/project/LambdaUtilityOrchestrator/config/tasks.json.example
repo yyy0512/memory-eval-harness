@@ -1,0 +1,216 @@
+{
+  "$schema": "https://lambdautility.example.com/schemas/tasks.schema.json",
+  "version": "1.0",
+
+  /* ---------------------------------------------------------------------------
+   * Global defaults applied to every task unless explicitly overridden.
+   * ---------------------------------------------------------------------------
+   */
+  "global": {
+    "defaultTimeoutMs": 900000,                       // 15 min
+    "defaultMaxRetries": 3,
+    "defaultMemoryMb": 256,
+    "notifications": {
+      "channels": ["slack", "email"],
+      "minimumSeverity": "WARN"                      // DEBUG < INFO < WARN < ERROR < FATAL
+    }
+  },
+
+  /* ---------------------------------------------------------------------------
+   * Task catalogue
+   * ---------------------------------------------------------------------------
+   */
+  "tasks": [
+
+    /* =========================================================================
+     * 1. Daily log rotation and aggregation
+     * =========================================================================
+     */
+    {
+      "id": "rotate-logs",
+      "displayName": "Rotate & Aggregate Yesterday's Logs",
+      "description": "Compresses and ships yesterday’s application logs to S3, then deletes local copies.",
+      "lambda": {
+        "functionName": "lambda_log_rotate",
+        "handler": "log_rotate_handler",
+        "runtime": "provided.al2023",
+        "memoryMb": 256,
+        "timeoutMs": 300000,
+        "env": {
+          "S3_BUCKET": "prod-app-logs",
+          "RETENTION_DAYS": "14"
+        }
+      },
+      "trigger": {
+        "type": "cron",
+        "expression": "0 2 * * *"                   // At 02:00 every day
+      },
+      "retries": 2,
+      "severityOnFailure": "WARN",
+      "nextTasks": ["collect-metrics"]
+    },
+
+    /* =========================================================================
+     * 2. Database snapshot
+     * =========================================================================
+     */
+    {
+      "id": "snapshot-db",
+      "displayName": "Daily Production DB Snapshot",
+      "description": "Creates a point-in-time snapshot of the production PostgreSQL database volume.",
+      "lambda": {
+        "functionName": "lambda_snapshot_postgres",
+        "handler": "snapshot_handler",
+        "runtime": "provided.al2023",
+        "memoryMb": 512,
+        "timeoutMs": 600000,
+        "env": {
+          "DB_INSTANCE_ID": "prod-postgres-01",
+          "SNAPSHOT_TTL_DAYS": "7"
+        }
+      },
+      "trigger": {
+        "type": "cron",
+        "expression": "30 1 * * *"                   // At 01:30 every day
+      },
+      "retries": 3,
+      "severityOnFailure": "ERROR",
+      "nextTasks": ["verify-snapshot"]
+    },
+
+    /* =========================================================================
+     * 3. Snapshot verification
+     * =========================================================================
+     */
+    {
+      "id": "verify-snapshot",
+      "displayName": "Verify DB Snapshot Integrity",
+      "description": "Restores the latest DB snapshot to a temp instance, runs pg_isready, and then tears it down.",
+      "lambda": {
+        "functionName": "lambda_verify_snapshot",
+        "handler": "verify_snapshot_handler",
+        "runtime": "provided.al2023",
+        "memoryMb": 256,
+        "timeoutMs": 900000,
+        "env": {
+          "TEMP_INSTANCE_CLASS": "db.t3.micro"
+        }
+      },
+      "trigger": {
+        "type": "event",
+        "sourceTask": "snapshot-db",
+        "on": "SUCCESS"
+      },
+      "retries": 1,
+      "severityOnFailure": "ERROR"
+    },
+
+    /* =========================================================================
+     * 4. Configuration deployment (Nginx)
+     * =========================================================================
+     */
+    {
+      "id": "deploy-nginx-conf",
+      "displayName": "Deploy Nginx Configuration",
+      "description": "Validates and rolls out the latest Nginx configuration to all web nodes.",
+      "lambda": {
+        "functionName": "lambda_deploy_nginx",
+        "handler": "deploy_nginx_handler",
+        "runtime": "provided.al2023",
+        "memoryMb": 128,
+        "timeoutMs": 180000
+      },
+      "trigger": {
+        "type": "http",
+        "method": "POST",
+        "auth": "sigv4"                              // AWS SigV4-signed request
+      },
+      "retries": 0,
+      "severityOnFailure": "ERROR",
+      "nextTasks": ["smoke-test-nginx"]
+    },
+
+    /* =========================================================================
+     * 5. Post-deployment smoke test
+     * =========================================================================
+     */
+    {
+      "id": "smoke-test-nginx",
+      "displayName": "Nginx Smoke Test",
+      "description": "Runs basic HTTP checks against web nodes to ensure config roll-out succeeded.",
+      "lambda": {
+        "functionName": "lambda_nginx_smoke_test",
+        "handler": "nginx_smoke_test_handler",
+        "runtime": "provided.al2023",
+        "memoryMb": 128,
+        "timeoutMs": 120000,
+        "env": {
+          "TARGET_HOSTS": "web-[01:05].prod.internal"
+        }
+      },
+      "trigger": {
+        "type": "event",
+        "sourceTask": "deploy-nginx-conf",
+        "on": "SUCCESS"
+      },
+      "retries": 1,
+      "severityOnFailure": "WARN"
+    },
+
+    /* =========================================================================
+     * 6. Metrics collection
+     * =========================================================================
+     */
+    {
+      "id": "collect-metrics",
+      "displayName": "Harvest System Metrics",
+      "description": "Collects CPU, memory, and disk metrics from all nodes and ships them to CloudWatch.",
+      "lambda": {
+        "functionName": "lambda_metric_harvest",
+        "handler": "metric_harvest_handler",
+        "runtime": "provided.al2023",
+        "memoryMb": 256,
+        "timeoutMs": 180000
+      },
+      "trigger": {
+        "type": "cron",
+        "expression": "*/5 * * * *"                 // Every 5 min
+      },
+      "retries": 2,
+      "severityOnFailure": "INFO"
+    },
+
+    /* =========================================================================
+     * 7. Disk-space alert
+     * =========================================================================
+     */
+    {
+      "id": "alert-disk-space",
+      "displayName": "Alert on Low Disk Space",
+      "description": "Triggers a high-severity alert if any node reports <10 % free disk.",
+      "lambda": {
+        "functionName": "lambda_alert_disk",
+        "handler": "alert_disk_handler",
+        "runtime": "provided.al2023",
+        "memoryMb": 128,
+        "timeoutMs": 60000,
+        "env": {
+          "THRESHOLD_PERCENT": "10",
+          "ALERT_CHANNEL": "slack"
+        }
+      },
+      "trigger": {
+        "type": "event",
+        "source": "collect-metrics",
+        "filter": {
+          "metric": "disk_free_percent",
+          "operator": "<",
+          "value": 10
+        }
+      },
+      "retries": 0,
+      "severityOnFailure": "ERROR"
+    }
+
+  ]
+}

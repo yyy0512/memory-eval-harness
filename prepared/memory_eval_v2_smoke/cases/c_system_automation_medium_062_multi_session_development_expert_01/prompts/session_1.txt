@@ -1,8 +1,0 @@
-You are working in the repository at the current working directory. This is session 1 of a multi-session development task. Complete only the requirements for this session. At the end, save any useful project-specific memory for future sessions.
-
-You are tasked with implementing a 'dry run' feature over multiple development sessions. Each session builds upon the last. You must retain context and ensure the final implementation is robust and well-integrated.
-
-**Session 1: Architectural Foundation**
-Your first task is to lay the architectural groundwork. The 'dry run' status needs to be available throughout the command execution process. 
-- **Objective:** Modify the core data structures to support a `dry_run` flag. This flag must be part of the context that is passed through the command processing chain.
-- **Hint:** Investigate `command.h`, `chain_handler.h`, and `chain_processor.c` to identify the primary context or state structure used during command execution and add a boolean `dry_run` member to it.

@@ -1,0 +1,147 @@
+#---------------------------------------------------------------------------
+# RetinaGuard Vision Suite — Doxyfile
+#
+# This configuration file was generated for the RetinaGuard Vision Suite
+# (ml_computer_vision) project.  It is tuned for a medium-scale, monolithic
+# C code-base that employs advanced architectural patterns such as the
+# Observer Pattern, Model Registry, and a Pipeline orchestrator.
+#
+# NOTE:
+#   1. Options are commented thoroughly to clarify intent and ease future
+#      maintenance by both development and regulatory teams.
+#   2. Settings marked “(Reg-Sensitive)” aid in producing documentation
+#      artifacts that map directly to IEC-62304 and FDA submission needs.
+#---------------------------------------------------------------------------
+
+#=============================================================================
+# Project Metadata
+#=============================================================================
+DOXYFILE_ENCODING          = UTF-8
+PROJECT_NAME               = "RetinaGuard Vision Suite"
+PROJECT_BRIEF              = "End-to-end diabetic-retinopathy detection, grading, and tracking"
+PROJECT_NUMBER             = 2.3.0            # Synced with CMake project version
+OUTPUT_DIRECTORY           = docs/api
+CREATE_SUBDIRS             = YES
+OUTPUT_LANGUAGE            = English
+# Multi-line README appears as the main page.
+USE_MDFILE_AS_MAINPAGE     = README.md
+
+#=============================================================================
+# Repository & Input Paths
+#=============================================================================
+# Root dir is two levels up: <repo>/RetinaGuard_Vision_Suite
+INPUT                      = ../../src \
+                             ../../include \
+                             ../../tests \
+                             ../../README.md \
+                             ../../CHANGELOG.md
+FILE_PATTERNS              = *.c \
+                             *.h \
+                             *.md
+RECURSIVE                  = YES
+EXCLUDE                    = ../../build \
+                             ../../.git
+EXCLUDE_SYMLINKS           = NO
+EXCLUDE_PATTERNS           = *_private.h \
+                             *_internal.h
+
+#=============================================================================
+# Source Browsing
+#=============================================================================
+SOURCE_BROWSER             = YES
+INLINE_SOURCES             = YES
+STRIP_FROM_PATH            = ../../
+STRIP_FROM_INC_PATH        = ../../include
+GENERATE_TREEVIEW          = YES
+REFERENCED_BY_RELATION     = YES
+REFERENCES_RELATION        = YES
+
+#=============================================================================
+# Extraction Settings
+#=============================================================================
+EXTRACT_ALL                = YES
+EXTRACT_PRIVATE            = YES    # (Reg-Sensitive) Required for full traceability
+EXTRACT_STATIC             = YES
+EXTRACT_LOCAL_CLASSES      = YES
+EXTRACT_ANON_NSPACES       = NO
+HIDE_UNDOC_MEMBERS         = NO
+HIDE_UNDOC_CLASSES         = NO
+
+#=============================================================================
+# Documentation Quality
+#=============================================================================
+WARN_IF_UNDOCUMENTED       = YES
+WARN_IF_DOC_ERROR          = YES
+WARN_NO_PARAMDOC           = YES
+WARN_FORMAT                = "$file:$line: $text"
+WARN_LOGFILE               = docs/doxygen_warnings.log
+QUIET                      = NO
+
+# Treat documentation warnings as build failures in CI.
+WARN_AS_ERROR              = YES
+
+#=============================================================================
+# Build Options
+#=============================================================================
+GENERATE_LATEX             = NO     # Reduce build time; PDF delivered by Sphinx pipeline.
+GENERATE_RTF               = NO
+GENERATE_MAN               = NO
+GENERATE_XML               = YES    # Consumed by downstream Sphinx-Breathe integration.
+GENERATE_JSON              = NO
+GENERATE_DOCSET            = NO
+
+#=============================================================================
+# Graphical Diagrams
+#=============================================================================
+HAVE_DOT                   = YES
+DOT_IMAGE_FORMAT           = svg
+DOT_TRANSPARENT            = YES
+CALL_GRAPH                 = YES
+CALLER_GRAPH               = YES
+DOT_MULTI_TARGETS          = YES
+DOT_CLEANUP                = YES
+INTERACTIVE_SVG            = YES
+
+# Limit overly complex graphs that can choke Graphviz.
+MAX_DOT_GRAPH_DEPTH        = 4
+
+#=============================================================================
+# Preprocessing & Filtering
+#=============================================================================
+ENABLE_PREPROCESSING       = YES
+MACRO_EXPANSION            = YES
+EXPAND_ONLY_PREDEF         = NO
+PREDEFINED                 = __RETINAGUARD__=1 \
+                             RG_TARGET_PLATFORM="embedded"
+# Remove debug-specific code from docs.
+ENABLE_IFDEF               = "DOC"
+
+# C clang-format filter for prettier listing.
+FILTER_PATTERNS            = *.c="clang-format -style=file" \
+                             *.h="clang-format -style=file"
+
+#=============================================================================
+# Advanced: Tag Files for Cross-Project Navigation
+#=============================================================================
+# Example: link to an external common-lib project
+# TAGFILES                  = "../common-lib/docs/api/commonlib.tag=../common-lib/docs/api/html"
+
+#=============================================================================
+# Footers / Headers (Branding)
+#=============================================================================
+HTML_HEADER                = docs/doxygen_templates/header.html
+HTML_FOOTER                = docs/doxygen_templates/footer.html
+HTML_EXTRA_STYLESHEET      = docs/doxygen_templates/retinaguard.css
+HTML_COLORSTYLE_HUE        = 220   # Corporate palette (blue)
+
+#=============================================================================
+# Miscellaneous
+#=============================================================================
+EXTENSION_MAPPING          = c=Cpp
+TAB_SIZE                   = 4
+GENERATE_TAGFILE           = docs/api/retinaguard.tag
+ALIASES                    = "regnote=\xrefitem regulatory \"Reg-Note\" \"Regulatory Notes\" "
+MSCGEN_PATH                =
+PLANTUML_JAR_PATH          =
+
+# End of Doxyfile -------------------------------------------------------------

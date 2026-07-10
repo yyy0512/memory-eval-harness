@@ -1,0 +1,82 @@
+# ---------------------------------------------------------------------------
+# PaletteFlux GraphQL Studio — Test Environment Configuration
+#
+# This TOML file bootstraps a fully-featured local test rig that mirrors the
+# production topology while remaining deterministic and resource-friendly.
+# It is consumed by both the C++ service layer (via toml++) and the Python
+# integration test-harness, so maintain strict TOML 1.0 compliance.
+# ---------------------------------------------------------------------------
+
+[server]
+host              = "127.0.0.1"           # Bind address for the HTTP server
+port              = 8081                  # Test instance port
+graphql_endpoint  = "/api/graphql"        # GraphQL route
+rest_endpoint     = "/api/v1"             # REST fallback route
+graceful_timeout  = 5                     # Seconds to wait before hard shutdown
+
+[database]
+driver            = "postgresql"
+host              = "127.0.0.1"
+port              = 5432
+db_name           = "paletteflux_test"
+user              = "pf_test"
+password          = "pf_test_secret"
+connection_pool   = 5                     # Small pool for unit tests
+migration_on_start= true                  # Run embedded migrations automatically
+statement_timeout = 2000                  # ms; keeps test runs snappy
+
+[cache]
+enabled           = true
+backend           = "redis"
+host              = "127.0.0.1"
+port              = 6379
+ttl_seconds       = 120                   # Low TTL ensures cache-invalidation paths are exercised
+namespaces        = [ "schema", "asset", "image" ]
+
+[pagination]
+default_page_size = 25
+max_page_size     = 100
+
+[features]
+monitoring        = true                  # Exposes /metrics for Prometheus
+api_documentation = true                  # Swagger/OpenAPI generation
+response_caching  = true
+versioning        = true                  # Enables Accept-Version header
+enable_rest       = true                  # Toggle legacy REST controllers
+
+[security]
+jwt_secret              = "CHANGE_ME_FOR_TESTS_ONLY"
+token_ttl_minutes       = 60
+allowed_cors_origins    = [ "*" ]         # Wide-open for local tooling
+rate_limit_per_minute   = 600             # Higher threshold for parallel tests
+
+[logging]
+level             = "debug"
+file              = "logs/testing.log"
+rotation          = "1MB"                 # Rotate when file exceeds 1 MiB
+flush_interval_ms = 250
+
+[testing]
+# Stubbed third-party integrators, mock toggles, and deterministic seeds
+seed                = 42
+mock_external_apis  = true
+strict_mode         = false               # When true, unknown config keys raise errors
+
+[graphql]
+introspection                     = true
+playground_enabled                = true
+defer_stream_unsupported_resolvers= [ "ScenePreview" ]
+
+[service_bus]
+type                   = "in_memory"      # Skip RabbitMQ/Kafka during unit tests
+max_concurrent_commands= 32
+
+[storage]
+asset_bucket   = "paletteflux-test-bucket"
+region         = "us-east-1"
+endpoint_override = "http://127.0.0.1:4566" # LocalStack S3 emulator
+
+[sharding]
+enabled         = false                   # Single-shard DB in unit tests
+
+# End of file ----------------------------------------------------------------

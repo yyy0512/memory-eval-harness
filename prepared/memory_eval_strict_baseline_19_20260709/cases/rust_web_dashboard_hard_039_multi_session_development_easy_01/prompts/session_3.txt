@@ -1,0 +1,9 @@
+You are working in the repository at the current working directory. This is session 3 of a 3-session development task. The previous session has ended and conversation context is unavailable. Use the repository state to continue the task. Do not ask for previous conversation context. Complete only the requirements for this session.
+
+You will implement a new configurable session timeout over three sessions. Follow the instructions for each session precisely.
+
+**Session 3: Verification and Testing**
+To complete the task, you must validate your changes.
+1. Open the test suite file, `tests/test_main.txt`.
+2. Add a new test case that specifically verifies the session timeout logic. 
+3. This test should create a mock configuration with a custom, short timeout value (e.g., 1 or 2 seconds) and assert that a session correctly expires according to this custom value, not the old hardcoded or default one.

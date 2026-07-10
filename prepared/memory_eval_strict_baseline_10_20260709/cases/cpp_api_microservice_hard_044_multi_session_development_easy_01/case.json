@@ -1,0 +1,38 @@
+{
+  "scenario_id": "cpp_api_microservice_hard_044_multi_session_development_easy_01",
+  "case_id": "cpp_api_microservice_hard_044",
+  "category": "extended_development_projects",
+  "original_task_category": "multi_session_development",
+  "project_source": "cases/cpp_api_microservice_hard_044_multi_session_development_easy_01/project",
+  "project_name": "ChronoFlow Nexus",
+  "language": "cpp",
+  "complexity": "hard",
+  "session_count": 2,
+  "turns": [
+    {
+      "session": 1,
+      "file": "turns/session_1.jsonl",
+      "turn_count": 2
+    },
+    {
+      "session": 2,
+      "file": "turns/session_2.jsonl",
+      "turn_count": 1
+    }
+  ],
+  "prompts_for_review": [
+    {
+      "session": 1,
+      "file": "prompts/session_1.txt"
+    },
+    {
+      "session": 2,
+      "file": "prompts/session_2.txt"
+    }
+  ],
+  "hashes": {
+    "scenario_json_sha256": "4eb53b0c49fb089f3ed2e6662b17b51f43c6eb48daa154de2f977e0a160902b9",
+    "project_tree_sha256": "c3d054f9a41f50fe08d1646ce49e79f0896a0576a1a89b1eeb009a0a31b5172d",
+    "prepared_case_sha256": "f58a2df12e2b10ae04e4e2438f1a88465c9c3f9cf757976e53c1bccdbe640842"
+  }
+}

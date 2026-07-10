@@ -1,0 +1,321 @@
+```rust
+//! src/module_25.rs
+//!
+//! “Pigment Predictor” – an internal service that requests AI-powered color-scheme
+//! suggestions, caches them with a short TTL, and exposes a REST endpoint for the
+//! Yew front-end.  The module demonstrates error-handling, session checking, async
+//! networking, and a simple in-memory cache protected by an `RwLock`.
+//!
+//! Route:
+//!     POST /api/v1/colors/suggest
+//!
+//! Expected payload:
+//! ```json
+//! { "base_color": "#ff00ff", "style": "neo-pop", "limit": 6 }
+//! ```
+//!
+//! On success it returns `200 OK` with a JSON array of HEX codes.
+//!
+//! Dependencies (Cargo.toml):
+//! ---------------------------------------------------------------------------
+//! actix-web    = { version = "4", features = ["cookie"] }
+//! once_cell    = "1"
+//! reqwest      = { version = "0.11", features = ["json","rustls-tls"] }
+//! serde        = { version = "1", features = ["derive"] }
+//! thiserror    = "1"
+//! tokio        = { version = "1", features = ["macros", "rt-multi-thread"] }
+//! log          = "0.4"
+//! ---------------------------------------------------------------------------
+
+use actix_web::{
+    dev::ServiceRequest,
+    error::JsonPayloadError,
+    http::header,
+    web::{self, Data, Json, ServiceConfig},
+    HttpMessage, HttpRequest, HttpResponse, ResponseError,
+};
+use log::{error, info};
+use once_cell::sync::Lazy;
+use reqwest::{Client, StatusCode};
+use serde::{Deserialize, Serialize};
+use std::{
+    collections::HashMap,
+    env,
+    time::{Duration, Instant},
+};
+use thiserror::Error;
+use tokio::sync::RwLock;
+
+/// How long a color-scheme lives in the in-memory cache.
+const CACHE_TTL: Duration = Duration::from_secs(60);
+
+/// A wrapper for the authenticated user id.
+///
+/// In production this would be a full-blown session / JWT model,
+/// but here we just propagate a numeric id parsed from headers.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct UserId(pub u64);
+
+/// Domain type returned to the front-end.
+/// We keep it deliberately simple – an array of HEX strings.
+#[derive(Clone, Debug, Serialize)]
+pub struct ColorScheme {
+    pub swatches: Vec<String>,
+}
+
+/// Payload sent by the browser when requesting suggestions.
+#[derive(Debug, Deserialize)]
+pub struct SuggestionRequest {
+    /// Primary color that the AI should pivot from (e.g. "#ff00ff").
+    pub base_color: String,
+    /// Optional style hint (e.g. "retro", "neon", "baroque").
+    #[serde(default)]
+    pub style: Option<String>,
+    /// Maximum number of swatches to return (1-10).
+    #[serde(default = "default_limit")]
+    pub limit: usize,
+}
+
+fn default_limit() -> usize {
+    5
+}
+
+/// Centralised error type so we can unify our `Result`.
+#[derive(Debug, Error)]
+pub enum SuggestionError {
+    #[error("unauthenticated request")]
+    Unauthenticated,
+    #[error("bad request: {0}")]
+    BadRequest(String),
+    #[error("AI service unreachable")]
+    UpstreamUnreachable,
+    #[error("AI service returned non-success status {0}")]
+    UpstreamRejected(StatusCode),
+    #[error("unexpected server error")]
+    Internal(#[from] anyhow::Error),
+}
+
+impl From<JsonPayloadError> for SuggestionError {
+    fn from(e: JsonPayloadError) -> Self {
+        SuggestionError::BadRequest(e.to_string())
+    }
+}
+
+impl ResponseError for SuggestionError {
+    fn status_code(&self) -> StatusCode {
+        match self {
+            SuggestionError::Unauthenticated => StatusCode::UNAUTHORIZED,
+            SuggestionError::BadRequest(_) => StatusCode::BAD_REQUEST,
+            SuggestionError::UpstreamUnreachable => StatusCode::BAD_GATEWAY,
+            SuggestionError::UpstreamRejected(code) => *code,
+            SuggestionError::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
+        }
+    }
+
+    fn error_response(&self) -> HttpResponse {
+        HttpResponse::build(self.status_code()).json(
+            serde_json::json!({
+                "error": self.to_string()
+            }),
+        )
+    }
+}
+
+/// Internal cache value tuple – (ColorScheme, inserted_at)
+type CacheEntry = (ColorScheme, Instant);
+
+/// Global, concurrent cache map.
+static COLOR_CACHE: Lazy<RwLock<HashMap<(String, Option<String>, usize), CacheEntry>>> =
+    Lazy::new(|| RwLock::new(HashMap::new()));
+
+/// Public entry-point – register routes in the global application config.
+pub fn configure(cfg: &mut ServiceConfig) {
+    // The HTTP client is expensive to build; share across workers.
+    cfg.app_data(Data::new(build_http_client()))
+        .service(
+            web::resource("/api/v1/colors/suggest").route(web::post().to(suggest_handler)),
+        );
+}
+
+/// Top level handler executed by Actix when POST /colors/suggest is hit.
+async fn suggest_handler(
+    req: HttpRequest,
+    payload: Json<SuggestionRequest>,
+    client: Data<Client>,
+) -> Result<HttpResponse, SuggestionError> {
+    // 1. Verify caller auth.
+    let user_id = ensure_authenticated(&req)?;
+
+    // 2. Validate incoming payload semantics.
+    validate_payload(&payload)?;
+
+    // 3. Attempt to get cached suggestion or fetch a fresh one.
+    let scheme = get_or_fetch_scheme(&client, &payload).await?;
+
+    info!(
+        target: "pigment-predictor",
+        "user {user_id:?} requested color-scheme 👉 {} swatches",
+        scheme.swatches.len()
+    );
+
+    Ok(HttpResponse::Ok().json(scheme))
+}
+
+/// Header used for ad-hoc authentication.
+const AUTH_HEADER: &str = "x-user-id";
+
+/// Very small authentication shim.
+///
+/// In real life this would query Redis / DB / JWT.
+/// Here we accept any positive integer in `X-USER-ID` header.
+fn ensure_authenticated(req: &HttpRequest) -> Result<UserId, SuggestionError> {
+    let hdr = req
+        .headers()
+        .get(AUTH_HEADER)
+        .ok_or(SuggestionError::Unauthenticated)?;
+
+    let val = hdr
+        .to_str()
+        .map_err(|_| SuggestionError::Unauthenticated)?
+        .parse::<u64>()
+        .map_err(|_| SuggestionError::Unauthenticated)?;
+
+    if val == 0 {
+        return Err(SuggestionError::Unauthenticated);
+    }
+
+    Ok(UserId(val))
+}
+
+/// Basic validation to keep the upstream service happy.
+fn validate_payload(p: &SuggestionRequest) -> Result<(), SuggestionError> {
+    if !(1..=10).contains(&p.limit) {
+        return Err(SuggestionError::BadRequest(
+            "limit must be between 1 and 10".into(),
+        ));
+    }
+
+    if !p.base_color.starts_with('#') || p.base_color.len() != 7 {
+        return Err(SuggestionError::BadRequest(
+            "base_color must be a valid 7-char HEX (e.g. #ff00ff)".into(),
+        ));
+    }
+
+    Ok(())
+}
+
+/// Consult cache or ask external AI service.
+async fn get_or_fetch_scheme(
+    client: &Client,
+    req: &SuggestionRequest,
+) -> Result<ColorScheme, SuggestionError> {
+    let key = (
+        req.base_color.clone(),
+        req.style.clone(),
+        req.limit.min(10),
+    );
+
+    // 1. Fast path – cached?
+    {
+        let map = COLOR_CACHE.read().await;
+        if let Some((scheme, inserted)) = map.get(&key) {
+            if inserted.elapsed() < CACHE_TTL {
+                return Ok(scheme.clone());
+            }
+        }
+    }
+
+    // 2. Slow path – fetch from AI micro-service.
+    let scheme = fetch_from_upstream(client, req).await?;
+
+    // 3. Stash in cache (fire-and-forget).
+    {
+        let mut map = COLOR_CACHE.write().await;
+        map.insert(key, (scheme.clone(), Instant::now()));
+    }
+
+    Ok(scheme)
+}
+
+/// Call AI micro-service and materialise a `ColorScheme`.
+async fn fetch_from_upstream(
+    client: &Client,
+    req: &SuggestionRequest,
+) -> Result<ColorScheme, SuggestionError> {
+    // Compose endpoint once; default to localhost for dev.
+    let endpoint = env::var("CHROMA_AI_ENDPOINT")
+        .unwrap_or_else(|_| "https://localhost:8443/v1/predict/colors".to_string());
+
+    let res = client
+        .post(&endpoint)
+        .json(req)
+        .send()
+        .await
+        .map_err(|e| {
+            error!("upstream unreachable: {e}");
+            SuggestionError::UpstreamUnreachable
+        })?;
+
+    if !res.status().is_success() {
+        error!("upstream rejected with {}", res.status());
+        return Err(SuggestionError::UpstreamRejected(res.status()));
+    }
+
+    let body: UpstreamResponse = res.json().await.map_err(|e| {
+        error!("invalid JSON from upstream: {e}");
+        SuggestionError::UpstreamUnreachable
+    })?;
+
+    Ok(ColorScheme {
+        swatches: body
+            .colors
+            .into_iter()
+            .take(req.limit)
+            .collect::<Vec<String>>(),
+    })
+}
+
+/// Expected payload from the external AI micro-service.
+#[derive(Debug, Deserialize)]
+struct UpstreamResponse {
+    /// An ordered list of HEX colors (e.g. ["#aabbcc","#ddeeff"]).
+    colors: Vec<String>,
+}
+
+/// Build a reqwest client with sane defaults:
+///  – TLS via rustls
+///  – 5s deadline
+///  – Brotli/deflate/gzip decode
+fn build_http_client() -> Client {
+    Client::builder()
+        .user_agent("ChromaticCanvas/1.0 pigment-predictor")
+        .danger_accept_invalid_certs(
+            env::var("ALLOW_INSECURE_AI_CERT")
+                .map(|v| v == "1")
+                .unwrap_or(false),
+        )
+        .timeout(Duration::from_secs(5))
+        .build()
+        .expect("valid reqwest client")
+}
+
+//-----------------------------------------------------------------------------
+//                               MIDDLEWARE HOOK
+//-----------------------------------------------------------------------------
+/// Example middleware that could plug authentication into the Actix stack.
+/// Not wired in the snippet above because ChromaticCanvas has a global
+/// middleware chain; still, exposing it here shows how we could shake hands
+/// with the framework & share the `ensure_authenticated` logic.
+pub async fn auth_middleware(
+    req: ServiceRequest,
+    svc: actix_web::dev::Service<ServiceRequest>,
+) -> Result<actix_web::dev::ServiceResponse, actix_web::Error> {
+    if ensure_authenticated(req.request()).is_err() {
+        let (req, _pl) = req.into_parts();
+
+        return Err(SuggestionError::Unauthenticated.into());
+    }
+
+    svc.call(req).await
+}
+```

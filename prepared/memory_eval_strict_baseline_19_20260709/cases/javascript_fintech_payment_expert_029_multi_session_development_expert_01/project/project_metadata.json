@@ -1,0 +1,450 @@
+{
+  "specification": {
+    "unique_id": "javascript_fintech_payment_expert_029",
+    "name": "PayPalsphere",
+    "description": "PayPalsphere is a socially-driven fintech payment ecosystem where users can create circles (friends, family, communities or business cohorts), share payment timelines, split expenses in real time, and transparently track financial commitments together. Beyond the classic wallet, every transaction becomes a social post that can be tagged, commented on, privately reacted to, or publicly celebrated, turning payments into conversational events. When a member of a circle triggers a payment or a settlement request, the platform automatically orchestrates KYC verification, risk scoring, fraud screening, multi-currency conversion, and regulatory compliance\u2014all surfaced through a collaborative, feed-based interface.\n\nBuilt entirely with a component-based architecture, each bounded context (Accounts, KYC, Risk, Transactions, Compliance, Social Graph, Notification, and Settlement) is encapsulated as a discrete micro-frontend and micro-service pair. CQRS with Event Sourcing records every intent and state transition as immutable events, enabling fine-grained audit trails and historical replay for investigative or social storytelling purposes (\"relive your group trip expenses\"). Security-by-Design governs every component, weaving field-level encryption, role-based policies, and consent management into each workflow. Sagas coordinate long-running, multi-step social payments\u2014such as collective fundraising or group-order settlement\u2014while a dedicated Audit Trail service streams signed logs to cold storage for regulatory and community transparency. The result is a highly modular, socially interactive payment network that can evolve or be forked into new social sub-communities without cross-cutting concerns.\n",
+    "domain": "fintech_payment",
+    "complexity": "expert",
+    "language": "javascript",
+    "architecture": "component_based",
+    "theme": "social",
+    "target_file_count": 94,
+    "target_token_count": 570299,
+    "features": [
+      "kyc_verification",
+      "compliance_reporting",
+      "risk_assessment",
+      "encryption",
+      "settlement",
+      "payment_processing",
+      "audit_logging",
+      "multi_currency",
+      "transaction_management",
+      "regulatory_compliance",
+      "fraud_detection"
+    ],
+    "architecture_patterns": [
+      "Security_by_Design",
+      "CQRS",
+      "Saga_Pattern",
+      "Microservices",
+      "Audit_Trail",
+      "Event_Sourcing"
+    ],
+    "dependencies": [
+      "Node.js (LTS)",
+      "TypeScript",
+      "NestJS (modular microservice framework)",
+      "React + Module Federation (micro-frontends for Social UI)",
+      "Apollo GraphQL Server & Client",
+      "KafkaJS (event bus for CQRS / Saga coordination)",
+      "TypeORM (transactional data components)",
+      "PostgreSQL (ACID ledger + event store)",
+      "Redis (saga orchestration & idempotency)",
+      "BullMQ (background jobs / settlements)",
+      "OpenPGP.js (end-to-end encryption)",
+      "jsonwebtoken & Passport.js (auth)",
+      "Joi / Zod (schema validation)",
+      "AWS KMS SDK (key management)",
+      "Winston + Elasticsearch (centralized audit logging)",
+      "TensorFlow.js (real-time fraud detection models)",
+      "RxJS (reactive streams inside micro-frontends)",
+      "Docker & Kubernetes (container orchestration)",
+      "OpenTelemetry (distributed tracing)"
+    ],
+    "seed": 409682
+  },
+  "generated_timestamp": 1754355647.3888419,
+  "phase_1_complete": true,
+  "uniqueness_factors": {
+    "domain": "fintech_payment",
+    "complexity": "expert",
+    "architecture": "component_based",
+    "theme": "social",
+    "seed": 409682
+  },
+  "files": [
+    {
+      "path": "paypalsphere//.gitignore",
+      "type": "source"
+    },
+    {
+      "path": "paypalsphere//ARCHITECTURE.md",
+      "type": "source"
+    },
+    {
+      "path": "paypalsphere//CONTRIBUTING.md",
+      "type": "source"
+    },
+    {
+      "path": "paypalsphere//README.md",
+      "type": "documentation"
+    },
+    {
+      "path": "paypalsphere//SECURITY.md",
+      "type": "source"
+    },
+    {
+      "path": "paypalsphere//docker-compose.yml",
+      "type": "documentation"
+    },
+    {
+      "path": "paypalsphere//lerna.json",
+      "type": "source"
+    },
+    {
+      "path": "paypalsphere//package.json",
+      "type": "config"
+    },
+    {
+      "path": "paypalsphere//docs//api//README.md",
+      "type": "documentation"
+    },
+    {
+      "path": "paypalsphere//docs//api//openapi-spec.yml",
+      "type": "test"
+    },
+    {
+      "path": "paypalsphere//docs//guides//development-setup.md",
+      "type": "documentation"
+    },
+    {
+      "path": "paypalsphere//docs//guides//deployment-pipeline.md",
+      "type": "documentation"
+    },
+    {
+      "path": "paypalsphere//docs//guides//onboarding-guide.md",
+      "type": "documentation"
+    },
+    {
+      "path": "paypalsphere//docs//patterns//cqrs-and-es.md",
+      "type": "documentation"
+    },
+    {
+      "path": "paypalsphere//docs//patterns//saga-pattern.md",
+      "type": "documentation"
+    },
+    {
+      "path": "paypalsphere//packages//crypto-utils//index.js",
+      "type": "source"
+    },
+    {
+      "path": "paypalsphere//packages//crypto-utils//package.json",
+      "type": "config"
+    },
+    {
+      "path": "paypalsphere//packages//crypto-utils//README.md",
+      "type": "documentation"
+    },
+    {
+      "path": "paypalsphere//packages//event-schemas//transaction.proto",
+      "type": "source"
+    },
+    {
+      "path": "paypalsphere//packages//event-schemas//user.proto",
+      "type": "source"
+    },
+    {
+      "path": "paypalsphere//packages//event-schemas//package.json",
+      "type": "config"
+    },
+    {
+      "path": "paypalsphere//packages//event-schemas//README.md",
+      "type": "documentation"
+    },
+    {
+      "path": "paypalsphere//packages//common-types//index.d.ts",
+      "type": "source"
+    },
+    {
+      "path": "paypalsphere//packages//common-types//package.json",
+      "type": "config"
+    },
+    {
+      "path": "paypalsphere//infra//api-gateway//Dockerfile",
+      "type": "documentation"
+    },
+    {
+      "path": "paypalsphere//infra//api-gateway//index.js",
+      "type": "source"
+    },
+    {
+      "path": "paypalsphere//infra//api-gateway//routes.js",
+      "type": "source"
+    },
+    {
+      "path": "paypalsphere//infra//api-gateway//package.json",
+      "type": "config"
+    },
+    {
+      "path": "paypalsphere//infra//api-gateway//README.md",
+      "type": "documentation"
+    },
+    {
+      "path": "paypalsphere//services//accounts-service//src//api//controller.js",
+      "type": "source"
+    },
+    {
+      "path": "paypalsphere//services//accounts-service//src//api//routes.js",
+      "type": "source"
+    },
+    {
+      "path": "paypalsphere//services//accounts-service//src//domain//user.js",
+      "type": "source"
+    },
+    {
+      "path": "paypalsphere//services//accounts-service//src//domain//circle.js",
+      "type": "source"
+    },
+    {
+      "path": "paypalsphere//services//accounts-service//src//index.js",
+      "type": "source"
+    },
+    {
+      "path": "paypalsphere//services//accounts-service//src//event-consumer.js",
+      "type": "source"
+    },
+    {
+      "path": "paypalsphere//services//accounts-service//tests//user.spec.js",
+      "type": "test"
+    },
+    {
+      "path": "paypalsphere//services//accounts-service//Dockerfile",
+      "type": "documentation"
+    },
+    {
+      "path": "paypalsphere//services//accounts-service//package.json",
+      "type": "config"
+    },
+    {
+      "path": "paypalsphere//services//accounts-service//README.md",
+      "type": "documentation"
+    },
+    {
+      "path": "paypalsphere//services//kyc-service//src//api//controller.js",
+      "type": "source"
+    },
+    {
+      "path": "paypalsphere//services//kyc-service//src//api//routes.js",
+      "type": "source"
+    },
+    {
+      "path": "paypalsphere//services//kyc-service//src//domain//verification.js",
+      "type": "source"
+    },
+    {
+      "path": "paypalsphere//services//kyc-service//src//infrastructure//veriff-client.js",
+      "type": "source"
+    },
+    {
+      "path": "paypalsphere//services//kyc-service//src//index.js",
+      "type": "source"
+    },
+    {
+      "path": "paypalsphere//services//kyc-service//tests//verification.spec.js",
+      "type": "test"
+    },
+    {
+      "path": "paypalsphere//services//kyc-service//Dockerfile",
+      "type": "documentation"
+    },
+    {
+      "path": "paypalsphere//services//kyc-service//package.json",
+      "type": "config"
+    },
+    {
+      "path": "paypalsphere//services//kyc-service//README.md",
+      "type": "documentation"
+    },
+    {
+      "path": "paypalsphere//services//risk-service//src//domain//risk-scorer.js",
+      "type": "source"
+    },
+    {
+      "path": "paypalsphere//services//risk-service//src//event-consumer.js",
+      "type": "source"
+    },
+    {
+      "path": "paypalsphere//services//risk-service//src//index.js",
+      "type": "source"
+    },
+    {
+      "path": "paypalsphere//services//risk-service//tests//risk-scorer.spec.js",
+      "type": "test"
+    },
+    {
+      "path": "paypalsphere//services//risk-service//Dockerfile",
+      "type": "documentation"
+    },
+    {
+      "path": "paypalsphere//services//risk-service//package.json",
+      "type": "config"
+    },
+    {
+      "path": "paypalsphere//services//risk-service//README.md",
+      "type": "documentation"
+    },
+    {
+      "path": "paypalsphere//services//transactions-service//src//api//command.controller.js",
+      "type": "source"
+    },
+    {
+      "path": "paypalsphere//services//transactions-service//src//api//query.controller.js",
+      "type": "source"
+    },
+    {
+      "path": "paypalsphere//services//transactions-service//src//api//routes.js",
+      "type": "source"
+    },
+    {
+      "path": "paypalsphere//services//transactions-service//src//application//commands//create-transaction.handler.js",
+      "type": "source"
+    },
+    {
+      "path": "paypalsphere//services//transactions-service//src//application//queries//get-feed.handler.js",
+      "type": "source"
+    },
+    {
+      "path": "paypalsphere//services//transactions-service//src//application//projections//feed-projection.js",
+      "type": "source"
+    },
+    {
+      "path": "paypalsphere//services//transactions-service//src//domain//transaction.aggregate.js",
+      "type": "source"
+    },
+    {
+      "path": "paypalsphere//services//transactions-service//src//domain//events.js",
+      "type": "source"
+    },
+    {
+      "path": "paypalsphere//services//transactions-service//src//infrastructure//event-store.js",
+      "type": "source"
+    },
+    {
+      "path": "paypalsphere//services//transactions-service//src//index.js",
+      "type": "source"
+    },
+    {
+      "path": "paypalsphere//services//transactions-service//tests//integration//cqrs-flow.spec.js",
+      "type": "test"
+    },
+    {
+      "path": "paypalsphere//services//transactions-service//Dockerfile",
+      "type": "documentation"
+    },
+    {
+      "path": "paypalsphere//services//transactions-service//package.json",
+      "type": "config"
+    },
+    {
+      "path": "paypalsphere//services//transactions-service//README.md",
+      "type": "documentation"
+    },
+    {
+      "path": "paypalsphere//services//settlement-service//src//application//sagas//group-settlement.saga.js",
+      "type": "source"
+    },
+    {
+      "path": "paypalsphere//services//settlement-service//src//infrastructure//payment-gateway.client.js",
+      "type": "source"
+    },
+    {
+      "path": "paypalsphere//services//settlement-service//src//event-consumer.js",
+      "type": "source"
+    },
+    {
+      "path": "paypalsphere//services//settlement-service//src//index.js",
+      "type": "source"
+    },
+    {
+      "path": "paypalsphere//services//settlement-service//tests//sagas//group-settlement.spec.js",
+      "type": "test"
+    },
+    {
+      "path": "paypalsphere//services//settlement-service//Dockerfile",
+      "type": "documentation"
+    },
+    {
+      "path": "paypalsphere//services//settlement-service//package.json",
+      "type": "config"
+    },
+    {
+      "path": "paypalsphere//services//settlement-service//README.md",
+      "type": "documentation"
+    },
+    {
+      "path": "paypalsphere//services//social-graph-service//src//api//controller.js",
+      "type": "source"
+    },
+    {
+      "path": "paypalsphere//services//social-graph-service//src//api//routes.js",
+      "type": "source"
+    },
+    {
+      "path": "paypalsphere//services//social-graph-service//src//domain//comment.js",
+      "type": "source"
+    },
+    {
+      "path": "paypalsphere//services//social-graph-service//src//domain//reaction.js",
+      "type": "source"
+    },
+    {
+      "path": "paypalsphere//services//social-graph-service//src//event-consumer.js",
+      "type": "source"
+    },
+    {
+      "path": "paypalsphere//services//social-graph-service//src//index.js",
+      "type": "source"
+    },
+    {
+      "path": "paypalsphere//services//social-graph-service//Dockerfile",
+      "type": "documentation"
+    },
+    {
+      "path": "paypalsphere//services//social-graph-service//package.json",
+      "type": "config"
+    },
+    {
+      "path": "paypalsphere//services//social-graph-service//README.md",
+      "type": "documentation"
+    },
+    {
+      "path": "paypalsphere//services//notification-service//src//event-consumer.js",
+      "type": "source"
+    },
+    {
+      "path": "paypalsphere//services//notification-service//src//templates//payment-request.email.js",
+      "type": "source"
+    },
+    {
+      "path": "paypalsphere//services//notification-service//src//index.js",
+      "type": "source"
+    },
+    {
+      "path": "paypalsphere//services//notification-service//Dockerfile",
+      "type": "documentation"
+    },
+    {
+      "path": "paypalsphere//services//notification-service//package.json",
+      "type": "config"
+    },
+    {
+      "path": "paypalsphere//services//notification-service//README.md",
+      "type": "documentation"
+    },
+    {
+      "path": "paypalsphere//services//compliance-service//src//application//reporting.js",
+      "type": "source"
+    },
+    {
+      "path": "paypalsphere//services//compliance-service//src//infrastructure//audit-log.writer.js",
+      "type": "source"
+    }
+  ],
+  "generated_stats": {
+    "files_count": 94,
+    "lines_count": 24906,
+    "generation_time": 2068.749247074127,
+    "timestamp": 1754364423.244853
+  }
+}

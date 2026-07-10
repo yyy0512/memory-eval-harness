@@ -1,0 +1,47 @@
+{
+  "scenario_id": "javascript_system_networking_hard_099_multi_session_development_hard_01",
+  "case_id": "javascript_system_networking_hard_099",
+  "category": "extended_development_projects",
+  "original_task_category": "multi_session_development",
+  "project_source": "cases/javascript_system_networking_hard_099_multi_session_development_hard_01/project",
+  "project_name": "StreamPulse Nexus",
+  "language": "javascript",
+  "complexity": "hard",
+  "session_count": 3,
+  "turns": [
+    {
+      "session": 1,
+      "file": "turns/session_1.jsonl",
+      "turn_count": 2
+    },
+    {
+      "session": 2,
+      "file": "turns/session_2.jsonl",
+      "turn_count": 1
+    },
+    {
+      "session": 3,
+      "file": "turns/session_3.jsonl",
+      "turn_count": 1
+    }
+  ],
+  "prompts_for_review": [
+    {
+      "session": 1,
+      "file": "prompts/session_1.txt"
+    },
+    {
+      "session": 2,
+      "file": "prompts/session_2.txt"
+    },
+    {
+      "session": 3,
+      "file": "prompts/session_3.txt"
+    }
+  ],
+  "hashes": {
+    "scenario_json_sha256": "5080a57158ea7d58629b0d070ef382fee10c95513997b1a45f940211193b655f",
+    "project_tree_sha256": "100a9b45befca42b4b328fe355a8607c92ac72607e4fa663f11d0f760e999c1b",
+    "prepared_case_sha256": "746e5c61cffc29bae00ce5ecf632aad5315737702ff9055d69fc340c0b8a48fc"
+  }
+}

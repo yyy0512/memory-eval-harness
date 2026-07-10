@@ -1,0 +1,332 @@
+```python
+"""
+children.py
+QuestSmith – Productivity RPG Forge
+
+This module encapsulates all child–quest logic, including
+repository access, domain model, and a lightweight View-Model
+that the Kivy UI layer can bind to.
+
+Architecture patterns employed:
+    • Repository Pattern – centralised, testable data access
+    • Observer Pattern    – propagates quest-state changes
+    • MVVM                – exposes observable properties to UI
+
+The file is intentionally self-contained; it can function
+stand-alone for unit-testing while integrating seamlessly with
+the wider QuestSmith application when imported there.
+"""
+
+from __future__ import annotations
+
+import contextlib
+import enum
+import logging
+import sqlite3
+import threading
+import time
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Callable, Iterable, List, Optional
+
+# --------------------------------------------------------------------------- #
+# 3rd-party / Project-level dependencies
+# --------------------------------------------------------------------------- #
+
+try:  # The main application ships an event-bus implementation.
+    from core.event_bus import EventBus
+except ModuleNotFoundError:
+    # Provide a tiny pub-sub stub so this module works in isolation.
+    class _LocalEventBus:
+        """Minimalistic synchronous pub-sub fallback."""
+        _subscribers: dict[str, list[Callable]] = {}
+
+        @classmethod
+        def subscribe(cls, topic: str, callback: Callable) -> None:
+            cls._subscribers.setdefault(topic, []).append(callback)
+
+        @classmethod
+        def publish(cls, topic: str, *args, **kwargs) -> None:
+            for cb in cls._subscribers.get(topic, []):
+                try:
+                    cb(*args, **kwargs)
+                except Exception as exc:  # pragma: no cover
+                    logging.exception("EventBus subscriber failed: %s", exc)
+
+    EventBus = _LocalEventBus  # type: ignore
+
+# --------------------------------------------------------------------------- #
+# Logging configuration
+# --------------------------------------------------------------------------- #
+
+_logger = logging.getLogger(__name__)
+if not _logger.handlers:
+    # Avoid duplicate handlers during reloads in development.
+    _handler = logging.StreamHandler()
+    _handler.setFormatter(
+        logging.Formatter("[%(asctime)s] %(levelname)s %(name)s: %(message)s")
+    )
+    _logger.addHandler(_handler)
+    _logger.setLevel(logging.INFO)
+
+# --------------------------------------------------------------------------- #
+# Domain model
+# --------------------------------------------------------------------------- #
+
+
+class ChildQuestState(enum.Enum):
+    """Life-cycle states for a child quest."""
+
+    PENDING = "pending"
+    COMPLETED = "completed"
+    ABANDONED = "abandoned"
+
+    @classmethod
+    def from_db(cls, value: str) -> "ChildQuestState":
+        try:
+            return ChildQuestState(value)
+        except ValueError:
+            _logger.warning("Unknown child-quest state '%s'; falling back to PENDING", value)
+            return cls.PENDING
+
+
+@dataclass(slots=True, frozen=True)
+class ChildQuest:
+    """Immutable value object representing a child quest."""
+
+    id: int
+    parent_id: int
+    title: str
+    description: str
+    state: ChildQuestState
+    created_at: float
+    updated_at: float
+    # For quick sorting by newest
+    sort_index: float = field(init=False, repr=False)
+
+    def __post_init__(self):
+        object.__setattr__(self, "sort_index", -self.created_at)
+
+
+# --------------------------------------------------------------------------- #
+# Repository
+# --------------------------------------------------------------------------- #
+
+
+class ChildrenRepository:
+    """
+    SQLite-backed repository responsible for persistent storage of ChildQuest
+    instances. Thread-safe via an internal lock and short-lived connections.
+    """
+
+    _DDL = """
+    CREATE TABLE IF NOT EXISTS child_quests (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        parent_id   INTEGER NOT NULL,
+        title       TEXT    NOT NULL,
+        description TEXT    DEFAULT '',
+        state       TEXT    NOT NULL,
+        created_at  REAL    NOT NULL,
+        updated_at  REAL    NOT NULL,
+        FOREIGN KEY(parent_id) REFERENCES quests(id)
+    );
+    CREATE INDEX IF NOT EXISTS ix_child_parent ON child_quests(parent_id);
+    """
+
+    def __init__(self, db_path: Path | str):
+        self._db_path = Path(db_path).expanduser()
+        self._lock = threading.RLock()
+        self._ensure_schema()
+
+    # --------------------------------------------------------------------- #
+    # Public API
+    # --------------------------------------------------------------------- #
+
+    def fetch_children(self, parent_id: int) -> List[ChildQuest]:
+        """Return all children for the given parent quest, newest first."""
+        query = "SELECT * FROM child_quests WHERE parent_id = ? ORDER BY created_at DESC"
+        rows = self._execute(query, [parent_id]).fetchall()
+        return [self._row_to_model(r) for r in rows]
+
+    def add_child(
+        self, parent_id: int, title: str, description: str = ""
+    ) -> ChildQuest:
+        """Persist a new child quest."""
+        now = time.time()
+        params = [parent_id, title, description, ChildQuestState.PENDING.value, now, now]
+        query = """
+        INSERT INTO child_quests
+        (parent_id, title, description, state, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """
+        cursor = self._execute(query, params)
+        child_id = cursor.lastrowid
+        child = self._get_by_id(child_id)
+        EventBus.publish("child_quest/added", child)
+        return child
+
+    def update_state(self, child_id: int, new_state: ChildQuestState) -> ChildQuest:
+        """Transition a child quest to a new state."""
+        now = time.time()
+        query = """
+        UPDATE child_quests SET state = ?, updated_at = ? WHERE id = ?
+        """
+        self._execute(query, [new_state.value, now, child_id])
+
+        child = self._get_by_id(child_id)
+        EventBus.publish("child_quest/updated", child)
+        return child
+
+    def delete_child(self, child_id: int) -> None:
+        """Remove a child quest permanently."""
+        child = self._get_by_id(child_id)
+        if child is None:  # Already gone
+            _logger.debug("Child quest %s does not exist; skipping delete.", child_id)
+            return
+
+        query = "DELETE FROM child_quests WHERE id = ?"
+        self._execute(query, [child_id])
+        EventBus.publish("child_quest/deleted", child)
+
+    # --------------------------------------------------------------------- #
+    # Internal helpers
+    # --------------------------------------------------------------------- #
+
+    def _ensure_schema(self) -> None:
+        with self._open() as conn:
+            conn.executescript(self._DDL)
+            conn.commit()
+
+    def _get_by_id(self, child_id: int) -> Optional[ChildQuest]:
+        row = self._execute("SELECT * FROM child_quests WHERE id = ?", [child_id]).fetchone()
+        return self._row_to_model(row) if row else None
+
+    def _row_to_model(self, row: sqlite3.Row) -> ChildQuest:
+        return ChildQuest(
+            id=row["id"],
+            parent_id=row["parent_id"],
+            title=row["title"],
+            description=row["description"],
+            state=ChildQuestState.from_db(row["state"]),
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+        )
+
+    def _execute(self, query: str, params: Iterable = ()) -> sqlite3.Cursor:
+        with self._lock, self._open() as conn:
+            cursor = conn.execute(query, params)
+            conn.commit()
+        return cursor
+
+    @contextlib.contextmanager
+    def _open(self) -> sqlite3.Connection:
+        """Context manager that yields a connection with row_factory set."""
+        conn = sqlite3.connect(
+            self._db_path.as_posix(),
+            timeout=3,
+            isolation_level="DEFERRED",
+            check_same_thread=False,
+        )
+        conn.row_factory = sqlite3.Row
+        try:
+            yield conn
+        finally:
+            conn.close()
+
+
+# --------------------------------------------------------------------------- #
+# View-Model
+# --------------------------------------------------------------------------- #
+
+
+class ChildrenListViewModel:
+    """
+    Lightweight, observable View-Model that UI widgets can bind to.
+
+    It subscribes to EventBus so it stays in sync when other parts
+    of the system mutate child-quest state.
+    """
+
+    def __init__(self, repository: ChildrenRepository, parent_id: int):
+        self._repo = repository
+        self._parent_id = parent_id
+        self._children: List[ChildQuest] = []
+        self._listeners: list[Callable[[List[ChildQuest]], None]] = []
+
+        # Initial load
+        self.refresh()
+
+        # Subscribe to repository events
+        EventBus.subscribe("child_quest/added", self._on_child_event)
+        EventBus.subscribe("child_quest/updated", self._on_child_event)
+        EventBus.subscribe("child_quest/deleted", self._on_child_event)
+
+    # ------------------------------------------------------------------ #
+    # Public API
+    # ------------------------------------------------------------------ #
+
+    @property
+    def children(self) -> List[ChildQuest]:
+        return self._children
+
+    def add_listener(self, callback: Callable[[List[ChildQuest]], None]) -> None:
+        """Register a callback that is invoked whenever `children` changes."""
+        self._listeners.append(callback)
+
+    # Proxy commands to repository for convenience.
+    def create_child(self, title: str, description: str = "") -> ChildQuest:
+        return self._repo.add_child(self._parent_id, title, description)
+
+    def complete_child(self, child_id: int) -> ChildQuest:
+        return self._repo.update_state(child_id, ChildQuestState.COMPLETED)
+
+    def abandon_child(self, child_id: int) -> ChildQuest:
+        return self._repo.update_state(child_id, ChildQuestState.ABANDONED)
+
+    def delete_child(self, child_id: int) -> None:
+        self._repo.delete_child(child_id)
+
+    # ------------------------------------------------------------------ #
+    # Internal helpers
+    # ------------------------------------------------------------------ #
+
+    def refresh(self) -> None:
+        """Reload children from repository and notify listeners."""
+        self._children = self._repo.fetch_children(self._parent_id)
+        self._notify()
+
+    def _on_child_event(self, child: ChildQuest) -> None:
+        """Keep local state in sync with repository events."""
+        if child.parent_id != self._parent_id:
+            return  # Event for different parent quest – ignore.
+
+        _logger.debug("ViewModel caught event for child %s", child.id)
+        self.refresh()
+
+    def _notify(self) -> None:
+        for listener in list(self._listeners):
+            try:
+                listener(self._children)
+            except Exception as exc:  # pragma: no cover
+                _logger.exception("ChildrenListViewModel listener failed: %s", exc)
+
+
+# --------------------------------------------------------------------------- #
+# __main__ for ad-hoc manual testing
+# --------------------------------------------------------------------------- #
+
+if __name__ == "__main__":  # pragma: no cover
+    # Quick demo: python children.py
+    repo = ChildrenRepository(":memory:")
+    vm = ChildrenListViewModel(repo, parent_id=1)
+
+    def printer(children: List[ChildQuest]):
+        print(f"Updated children list: {children}")
+
+    vm.add_listener(printer)
+    vm.create_child("Pack gym bag", "Prepare for tomorrow's workout")
+    vm.create_child("Buy healthy snacks")
+    first_child_id = vm.children[0].id
+    vm.complete_child(first_child_id)
+    vm.delete_child(first_child_id)
+```

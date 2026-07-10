@@ -1,0 +1,98 @@
+# ============================================================
+# PrismPocket - Mobile Utility Sketchbook
+# requirements.txt (production)
+#
+# This file declares all runtime dependencies required to build
+# and run the cross-platform (Android / iOS) PrismPocket app.
+#
+# Sections are grouped by concern to aid maintainability.
+# Pin versions to guarantee deterministic builds and reproducible
+# binary artifacts created by Buildozer / Briefcase pipelines.
+# ============================================================
+
+# ------------------------------------------------------------
+#  UI Layer & Mobile Bridging
+# ------------------------------------------------------------
+# Kivy provides the OpenGL-accelerated, touch-friendly widget set.
+# KivyMD supplies Material Design widgets layered on top of Kivy.
+kivy==2.2.1
+kivymd==1.1.1
+
+# Buildozer compiles Python → native APKs (Android).
+buildozer==1.5.0
+
+# BeeWare Briefcase bundles the app for iOS distribution.
+briefcase==0.3.15
+
+# PyJNIus and PyObjC are pulled in transitively by Buildozer /
+# Briefcase, therefore not explicitly listed here.
+
+# ------------------------------------------------------------
+#  Domain & Reactive Programming
+# ------------------------------------------------------------
+pydantic==2.4.2        # Typed domain models (PrismCard, PaletteMetric, ...)
+rx==3.2.0              # Reactive streams powering Observer bus
+
+# ------------------------------------------------------------
+#  Media Processing (Image / Audio)
+# ------------------------------------------------------------
+Pillow==10.1.0          # Core imaging
+opencv-python==4.8.1.78 # Camera filters, live effects
+scikit-image==0.22.0    # Advanced image transforms
+numpy==1.26.2           # Array backend for the above libs
+pydub==0.25.1           # Audio memo manipulation
+
+# ------------------------------------------------------------
+#  Geolocation & Analytics
+# ------------------------------------------------------------
+geopy==2.3.0            # Reverse geocoding & distance calculations
+pandas==2.1.2           # In-app analytics dataframes
+scipy==1.11.3           # Statistical functions (color clustering, mood score)
+
+# ------------------------------------------------------------
+#  Networking, Sync & Real-time Operations
+# ------------------------------------------------------------
+httpx[http2]==0.25.1    # Async REST & HTTP/2 client
+websockets==12.0        # Full-duplex cloud observer bus
+protobuf==4.24.4        # Efficient binary serialization
+ujson==5.8.0            # Fast JSON (mobile-friendly)
+
+# ------------------------------------------------------------
+#  Persistence Layer
+# ------------------------------------------------------------
+sqlalchemy==2.0.22      # Repository pattern implementation
+aiosqlite==0.19.0       # Async SQLite driver for offline cache
+
+# ------------------------------------------------------------
+#  Security & Cryptography
+# ------------------------------------------------------------
+cryptography==41.0.5    # Token signing, secret storage
+
+# ------------------------------------------------------------
+#  Logging & Crash Reporting
+# ------------------------------------------------------------
+loguru==0.7.2                               # Structured logging
+sentry-sdk[asyncio]==1.32.0                 # Cloud crash aggregation
+
+# ------------------------------------------------------------
+#  Cloud Adapters (optional / feature-flagged)
+# ------------------------------------------------------------
+boto3==1.29.4            # AWS S3 card-asset storage
+google-cloud-storage==2.12.0 ; platform_system!="Windows"  # GCS backend
+
+# ------------------------------------------------------------
+#  Development / QA Utilities  (keep but do not vendor in release APK)
+# ------------------------------------------------------------
+black==23.10.1           # Code formatter
+ruff==0.1.4              # Linting
+pytest==7.4.3            # Unit tests
+pytest-asyncio==0.21.1   # Async test helpers
+coverage[toml]==7.3.2    # Coverage reports
+
+# ------------------------------------------------------------
+#  Pin transitive sub-dependencies that have caused regressions
+# ------------------------------------------------------------
+charset-normalizer==3.3.2
+idna==3.4
+
+# EOF

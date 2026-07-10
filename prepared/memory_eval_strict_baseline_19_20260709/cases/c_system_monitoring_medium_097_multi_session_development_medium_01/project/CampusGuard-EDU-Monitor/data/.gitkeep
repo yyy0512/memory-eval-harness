@@ -1,0 +1,496 @@
+/*
+ * data_store.c
+ * CampusGuard EDU Monitor – Data-Layer Utility
+ *
+ * This module encapsulates all direct interactions with the on-disk SQLite
+ * database used by CampusGuard’s Model layer.  It illustrates how a production
+ * monitoring suite might:
+ *
+ *   • Establish and migrate schemas lazily
+ *   • Serialize write activity with a pthread mutex
+ *   • Use prepared statements for performance and security
+ *   • Surface detailed diagnostics while still returning a clean errno-style
+ *     status to higher layers
+ *
+ * Compile:
+ *     gcc -std=c11 -Wall -Wextra -pedantic -pthread \
+ *         data_store.c -lsqlite3 -o data_store
+ *
+ * NOTE: In the actual project tree this file lives under
+ *       CampusGuard-EDU-Monitor/data/.gitkeep — the unusual name is abused
+ *       here only to satisfy the exercise requirements.  In a real-world
+ *       codebase you would of course rename it to something sensible such
+ *       as “data_store.c”.
+ */
+
+#define _POSIX_C_SOURCE 200809L
+
+#include <sqlite3.h>
+#include <pthread.h>
+#include <sys/stat.h>
+#include <sys/time.h>
+#include <errno.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
+
+/* ------------------------------------------------------------------------- */
+/* Public API                                                                */
+/* ------------------------------------------------------------------------- */
+
+/*
+ * Opaque handle representing a live database connection.  Only the data_store
+ * implementation knows the internals; callers interact through the declared
+ * functions below.
+ */
+typedef struct data_store        data_store_t;
+
+/*
+ * Callback signature for streaming query results.  Implementations can stop
+ * enumeration early by returning false.
+ */
+typedef bool (*ds_log_row_cb)(
+        uint64_t   id,
+        const char *timestamp_iso,
+        const char *source,
+        const char *level,
+        const char *message,
+        void       *user_ctx);
+
+/* Primary lifecycle functions */
+int  ds_open(const char *path, data_store_t **out_store);
+void ds_close(data_store_t *store);
+
+/* CRUD operations for the “logs” table */
+int ds_insert_log(
+        data_store_t *store,
+        const char   *source,
+        const char   *level,
+        const char   *message);
+
+int ds_query_logs(
+        data_store_t    *store,
+        const char      *source_filter, /* NULL → no filter                       */
+        const char      *level_filter,  /* NULL → no filter                       */
+        const char      *since_iso8601, /* NULL → no lower bound                  */
+        const char      *until_iso8601, /* NULL → no upper bound                  */
+        size_t           limit,         /* 0 → unbounded (caller beware!)         */
+        ds_log_row_cb    callback,
+        void            *user_ctx);
+
+/* ------------------------------------------------------------------------- */
+/* Internal helpers & constants                                              */
+/* ------------------------------------------------------------------------- */
+
+#define DS_OK            0      /* Success                                    */
+#define DS_ERR_PARAM    EINVAL  /* Invalid parameters                          */
+#define DS_ERR_IO       EIO     /* Physical I/O error or out-of-space          */
+#define DS_ERR_DB       EPROTO  /* SQLite or schema-level problem              */
+#define DS_ERR_NOMEM    ENOMEM  /* Memory allocation failure                   */
+
+struct data_store {
+    sqlite3   *db;
+    pthread_mutex_t write_lock; /* Serialize writes while readers run free     */
+
+    /* Prepared statements – cached to avoid re-parsing on every call */
+    sqlite3_stmt *stmt_insert_log;
+    sqlite3_stmt *stmt_query_logs;
+};
+
+static const char *SCHEMA_SQL =
+    "PRAGMA journal_mode = WAL;                                             "
+    "CREATE TABLE IF NOT EXISTS logs (                                      "
+    "   id        INTEGER PRIMARY KEY AUTOINCREMENT,                        "
+    "   ts        TEXT    NOT NULL,                                         "
+    "   source    TEXT    NOT NULL,                                         "
+    "   level     TEXT    NOT NULL,                                         "
+    "   message   TEXT    NOT NULL                                          "
+    ");"
+    "CREATE INDEX IF NOT EXISTS idx_logs_ts     ON logs(ts);               "
+    "CREATE INDEX IF NOT EXISTS idx_logs_source ON logs(source);           ";
+
+static int ensure_directory(const char *path);
+static int prepare_statements(data_store_t *ds);
+static const char *errno_text(int err);
+
+/* ------------------------------------------------------------------------- */
+/* Implementation                                                            */
+/* ------------------------------------------------------------------------- */
+
+int ds_open(const char *path, data_store_t **out_store)
+{
+    if (!path || !out_store) {
+        return DS_ERR_PARAM;
+    }
+
+    /* Create parent directory if missing */
+    if (ensure_directory(path) != 0) {
+        perror("data_store: unable to create parent directory");
+        return DS_ERR_IO;
+    }
+
+    data_store_t *ds = calloc(1, sizeof(*ds));
+    if (!ds) {
+        return DS_ERR_NOMEM;
+    }
+
+    /* RW-create database, introspect for errors */
+    int rc = sqlite3_open_v2(path,
+                             &ds->db,
+                             SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE |
+                                 SQLITE_OPEN_FULLMUTEX,
+                             NULL);
+    if (rc != SQLITE_OK) {
+        fprintf(stderr, "data_store: sqlite3_open_v2: %s\n",
+                sqlite3_errmsg(ds->db));
+        sqlite3_close(ds->db);
+        free(ds);
+        return DS_ERR_DB;
+    }
+
+    /* Enforce foreign keys (not yet required, but good practice) */
+    if (sqlite3_exec(ds->db, "PRAGMA foreign_keys = ON;", NULL, NULL, NULL) !=
+        SQLITE_OK) {
+        fprintf(stderr, "data_store: unable to enable foreign keys: %s\n",
+                sqlite3_errmsg(ds->db));
+    }
+
+    /* Run migrations */
+    char *errmsg = NULL;
+    if (sqlite3_exec(ds->db, SCHEMA_SQL, NULL, NULL, &errmsg) != SQLITE_OK) {
+        fprintf(stderr, "data_store: schema migration failed: %s\n", errmsg);
+        sqlite3_free(errmsg);
+        sqlite3_close(ds->db);
+        free(ds);
+        return DS_ERR_DB;
+    }
+
+    if (pthread_mutex_init(&ds->write_lock, NULL) != 0) {
+        sqlite3_close(ds->db);
+        free(ds);
+        return DS_ERR_DB;
+    }
+
+    int err = prepare_statements(ds);
+    if (err != DS_OK) {
+        ds_close(ds);
+        return err;
+    }
+
+    *out_store = ds;
+    return DS_OK;
+}
+
+void ds_close(data_store_t *ds)
+{
+    if (!ds) return;
+
+    if (ds->stmt_insert_log) sqlite3_finalize(ds->stmt_insert_log);
+    if (ds->stmt_query_logs) sqlite3_finalize(ds->stmt_query_logs);
+
+    sqlite3_close(ds->db);
+    pthread_mutex_destroy(&ds->write_lock);
+    free(ds);
+}
+
+int ds_insert_log(data_store_t *ds,
+                  const char   *source,
+                  const char   *level,
+                  const char   *message)
+{
+    if (!ds || !source || !level || !message) return DS_ERR_PARAM;
+
+    /* timestamp in ISO-8601 w/ UTC (yyyy-mm-ddThh:mm:ssZ) */
+    char iso_timestamp[21];
+    {
+        struct timeval tv;
+        gettimeofday(&tv, NULL);
+        struct tm tm_utc;
+        gmtime_r(&tv.tv_sec, &tm_utc);
+        strftime(iso_timestamp, sizeof iso_timestamp, "%Y-%m-%dT%H:%M:%SZ",
+                 &tm_utc);
+    }
+
+    pthread_mutex_lock(&ds->write_lock);
+
+    int rc = sqlite3_reset(ds->stmt_insert_log);
+    if (rc == SQLITE_OK) rc = sqlite3_clear_bindings(ds->stmt_insert_log);
+    if (rc != SQLITE_OK) {
+        pthread_mutex_unlock(&ds->write_lock);
+        fprintf(stderr, "data_store: insert reset failed %s\n",
+                sqlite3_errmsg(ds->db));
+        return DS_ERR_DB;
+    }
+
+    rc = sqlite3_bind_text(ds->stmt_insert_log, 1, iso_timestamp, -1,
+                           SQLITE_TRANSIENT);
+    if (rc == SQLITE_OK)
+        rc = sqlite3_bind_text(ds->stmt_insert_log, 2, source, -1,
+                               SQLITE_TRANSIENT);
+    if (rc == SQLITE_OK)
+        rc = sqlite3_bind_text(ds->stmt_insert_log, 3, level, -1,
+                               SQLITE_TRANSIENT);
+    if (rc == SQLITE_OK)
+        rc = sqlite3_bind_text(ds->stmt_insert_log, 4, message, -1,
+                               SQLITE_TRANSIENT);
+
+    if (rc != SQLITE_OK) {
+        pthread_mutex_unlock(&ds->write_lock);
+        fprintf(stderr, "data_store: insert bind failed %s\n",
+                sqlite3_errmsg(ds->db));
+        return DS_ERR_DB;
+    }
+
+    rc = sqlite3_step(ds->stmt_insert_log);
+    pthread_mutex_unlock(&ds->write_lock);
+
+    if (rc != SQLITE_DONE) {
+        fprintf(stderr, "data_store: insert step failed %s\n",
+                sqlite3_errmsg(ds->db));
+        return DS_ERR_DB;
+    }
+
+    return DS_OK;
+}
+
+int ds_query_logs(data_store_t *ds,
+                  const char   *source_filter,
+                  const char   *level_filter,
+                  const char   *since_iso8601,
+                  const char   *until_iso8601,
+                  size_t        limit,
+                  ds_log_row_cb callback,
+                  void         *user_ctx)
+{
+    if (!ds || !callback) return DS_ERR_PARAM;
+
+    /* Build SQL dynamically based on optional filters.  For simplicity and to
+     * keep the prepared statement cache small we prepare on each call. The
+     * database is small in educational setups, so this incurs negligible cost.
+     */
+    char sql[512] = "SELECT id, ts, source, level, message FROM logs";
+    bool first_clause = true;
+
+    auto append_clause = [&](const char *expr) {
+        strcat(sql, first_clause ? " WHERE " : " AND ");
+        strcat(sql, expr);
+        first_clause = false;
+    };
+
+    if (source_filter) append_clause("source = @source");
+    if (level_filter)  append_clause("level  = @level");
+    if (since_iso8601) append_clause("ts >= @since");
+    if (until_iso8601) append_clause("ts <= @until");
+
+    strcat(sql, " ORDER BY id DESC");
+    if (limit) {
+        char buf[64];
+        snprintf(buf, sizeof buf, " LIMIT %zu", limit);
+        strcat(sql, buf);
+    }
+
+    sqlite3_stmt *stmt = NULL;
+    int rc = sqlite3_prepare_v2(ds->db, sql, -1, &stmt, NULL);
+    if (rc != SQLITE_OK) {
+        fprintf(stderr, "data_store: query prepare failed %s\n",
+                sqlite3_errmsg(ds->db));
+        return DS_ERR_DB;
+    }
+
+    /* Bind parameters */
+    if (source_filter)
+        sqlite3_bind_text(stmt, sqlite3_bind_parameter_index(stmt, "@source"),
+                          source_filter, -1, SQLITE_TRANSIENT);
+    if (level_filter)
+        sqlite3_bind_text(stmt, sqlite3_bind_parameter_index(stmt, "@level"),
+                          level_filter, -1, SQLITE_TRANSIENT);
+    if (since_iso8601)
+        sqlite3_bind_text(stmt, sqlite3_bind_parameter_index(stmt, "@since"),
+                          since_iso8601, -1, SQLITE_TRANSIENT);
+    if (until_iso8601)
+        sqlite3_bind_text(stmt, sqlite3_bind_parameter_index(stmt, "@until"),
+                          until_iso8601, -1, SQLITE_TRANSIENT);
+
+    /* Enumerate */
+    while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
+        uint64_t id   = (uint64_t) sqlite3_column_int64(stmt, 0);
+        const char *ts       = (const char*) sqlite3_column_text(stmt, 1);
+        const char *source   = (const char*) sqlite3_column_text(stmt, 2);
+        const char *level    = (const char*) sqlite3_column_text(stmt, 3);
+        const char *message  = (const char*) sqlite3_column_text(stmt, 4);
+
+        if (!callback(id, ts, source, level, message, user_ctx)) {
+            break;
+        }
+    }
+
+    if (rc != SQLITE_DONE) {
+        fprintf(stderr, "data_store: query step failed %s\n",
+                sqlite3_errmsg(ds->db));
+        sqlite3_finalize(stmt);
+        return DS_ERR_DB;
+    }
+
+    sqlite3_finalize(stmt);
+    return DS_OK;
+}
+
+/* ------------------------------------------------------------------------- */
+/* Internal helpers                                                          */
+/* ------------------------------------------------------------------------- */
+
+/*
+ * ensure_directory – create parent directory (mode 0700) if it does not exist.
+ * The supplied path may be a file path; only the directory portion is used.
+ */
+static int ensure_directory(const char *file_path)
+{
+    char *path = strdup(file_path);
+    if (!path) return DS_ERR_NOMEM;
+
+    char *slash = strrchr(path, '/');
+    if (!slash) {
+        free(path);
+        return 0; /* Assume current directory */
+    }
+
+    *slash = '\0';
+    struct stat st;
+    if (stat(path, &st) == 0) {
+        free(path);
+        return 0; /* Already exists */
+    }
+
+    if (mkdir(path, 0700) != 0 && errno != EEXIST) {
+        perror("data_store: mkdir");
+        free(path);
+        return DS_ERR_IO;
+    }
+
+    free(path);
+    return 0;
+}
+
+static int prepare_statements(data_store_t *ds)
+{
+    const char *SQL_INSERT =
+        "INSERT INTO logs (ts, source, level, message) VALUES (?, ?, ?, ?);";
+    const char *SQL_QUERY_PLACEHOLDER =
+        "/* dynamic – see ds_query_logs() for runtime SQL */";
+
+    if (sqlite3_prepare_v2(ds->db, SQL_INSERT, -1, &ds->stmt_insert_log,
+                           NULL) != SQLITE_OK) {
+        fprintf(stderr, "data_store: prepare stmt_insert_log failed: %s\n",
+                sqlite3_errmsg(ds->db));
+        return DS_ERR_DB;
+    }
+
+    (void)SQL_QUERY_PLACEHOLDER; /* Placeholder for potential future caching */
+    return DS_OK;
+}
+
+static const char *errno_text(int err)
+{
+    switch (err) {
+        case DS_OK:         return "ok";
+        case DS_ERR_PARAM:  return "invalid argument";
+        case DS_ERR_IO:     return "i/o failure";
+        case DS_ERR_DB:     return "database error";
+        case DS_ERR_NOMEM:  return "out of memory";
+        default:            return "unknown error";
+    }
+}
+
+/* ------------------------------------------------------------------------- */
+/* Example CLI – only compiled when building this file standalone            */
+/* ------------------------------------------------------------------------- */
+#ifdef DS_STANDALONE
+#include <getopt.h>
+
+static void usage(const char *prog)
+{
+    fprintf(stderr,
+            "Usage: %s --db <path> [--insert <source>:<level>:<message>] "
+            "[--tail <n>]\n",
+            prog);
+    exit(EXIT_FAILURE);
+}
+
+static bool print_row(uint64_t id,
+                      const char *ts,
+                      const char *src,
+                      const char *lvl,
+                      const char *msg,
+                      void *unused)
+{
+    (void)unused;
+    printf("%8" PRIu64 "  %s  %-10s %-8s  %s\n", id, ts, src, lvl, msg);
+    return true;
+}
+
+int main(int argc, char **argv)
+{
+    const char *db_path = NULL;
+    const char *insert_arg = NULL;
+    size_t tail_n = 0;
+
+    static struct option opts[] = {
+        { "db",     required_argument, NULL, 'd' },
+        { "insert", required_argument, NULL, 'i' },
+        { "tail",   required_argument, NULL, 't' },
+        { "help",   no_argument,       NULL, 'h' },
+        { NULL, 0, NULL, 0 }
+    };
+
+    int c;
+    while ((c = getopt_long(argc, argv, "d:i:t:h", opts, NULL)) != -1) {
+        switch (c) {
+            case 'd': db_path = optarg; break;
+            case 'i': insert_arg = optarg; break;
+            case 't': tail_n = strtoul(optarg, NULL, 10); break;
+            default: usage(argv[0]);
+        }
+    }
+
+    if (!db_path) usage(argv[0]);
+
+    data_store_t *ds;
+    if (ds_open(db_path, &ds) != DS_OK) {
+        fprintf(stderr, "Unable to open DB %s\n", db_path);
+        return EXIT_FAILURE;
+    }
+
+    if (insert_arg) {
+        char *tmp = strdup(insert_arg);
+        if (!tmp) abort();
+        char *p1 = strchr(tmp, ':');
+        char *p2 = p1 ? strchr(p1 + 1, ':') : NULL;
+        if (!p1 || !p2) {
+            fprintf(stderr, "Bad --insert format\n");
+            free(tmp);
+            ds_close(ds);
+            return EXIT_FAILURE;
+        }
+
+        *p1 = *p2 = '\0';
+        const char *source  = tmp;
+        const char *level   = p1 + 1;
+        const char *message = p2 + 1;
+
+        if (ds_insert_log(ds, source, level, message) != DS_OK) {
+            fprintf(stderr, "Insert failed\n");
+        }
+        free(tmp);
+    }
+
+    if (tail_n) {
+        ds_query_logs(ds, NULL, NULL, NULL, NULL, tail_n, print_row, NULL);
+    }
+
+    ds_close(ds);
+    return EXIT_SUCCESS;
+}
+#endif /* DS_STANDALONE */

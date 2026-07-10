@@ -1,0 +1,402 @@
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  ================================================================
+  ️⚕ VitalPulse CloudCare API
+  Order-Management Command Microservice – POM
+  ----------------------------------------------------------------
+  This module represents the command-side of the clinician order
+  aggregate.  It is deployed as an AWS Lambda behind API Gateway
+  and writes strongly-consistent records to DynamoDB while pushing
+  outbound events to EventBridge for CQRS read models.
+  ================================================================
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="
+           http://maven.apache.org/POM/4.0.0
+           http://maven.apache.org/xsd/maven-4.0.0.xsd">
+
+    <modelVersion>4.0.0</modelVersion>
+
+    <!-- ************************************************************
+         Basic Coordinates
+    ************************************************************* -->
+    <groupId>com.vitalpulse.cloudcare</groupId>
+    <artifactId>order-management-command</artifactId>
+    <version>1.2.0</version>
+    <packaging>jar</packaging>
+    <name>VitalPulse CloudCare – Order Management (Command)</name>
+    <description>
+        Serverless microservice handling clinician order commands,
+        transactional validation, and audit logging for the
+        VitalPulse CloudCare platform.
+    </description>
+    <url>https://github.com/vitalpulse/cloudcare</url>
+
+    <!-- ************************************************************
+         Global Properties
+    ************************************************************* -->
+    <properties>
+        <java.version>17</java.version>
+
+        <!-- Dependency Versions -->
+        <aws.lambda.java.core.version>1.2.3</aws.lambda.java.core.version>
+        <aws.sdk.version>2.25.30</aws.sdk.version>
+        <spring.cloud.function.version>4.1.2</spring.cloud.function.version>
+        <jackson.version>2.17.1</jackson.version>
+        <hibernate.validator.version>8.0.1.Final</hibernate.validator.version>
+        <json.schema.validator.version>1.0.83</json.schema.validator.version>
+        <log4j.version>2.23.1</log4j.version>
+        <guava.version>33.0.0-jre</guava.version>
+
+        <!-- Plugin Versions -->
+        <maven.compiler.plugin.version>3.12.1</maven.compiler.plugin.version>
+        <maven.shade.plugin.version>3.5.0</maven.shade.plugin.version>
+        <maven.surefire.plugin.version>3.2.5</maven.surefire.plugin.version>
+        <maven.failsafe.plugin.version>3.2.5</maven.failsafe.plugin.version>
+        <spotbugs.maven.plugin.version>4.7.3.9</spotbugs.maven.plugin.version>
+        <jacoco.maven.plugin.version>0.8.12</jacoco.maven.plugin.version>
+
+        <!-- Build Options -->
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
+        <maven.compiler.source>${java.version}</maven.compiler.source>
+        <maven.compiler.target>${java.version}</maven.compiler.target>
+    </properties>
+
+    <!-- ************************************************************
+         Dependency Management
+    ************************************************************* -->
+    <dependencyManagement>
+        <dependencies>
+            <!-- Spring Cloud Function BOM -->
+            <dependency>
+                <groupId>org.springframework.cloud</groupId>
+                <artifactId>spring-cloud-function-bom</artifactId>
+                <version>${spring.cloud.function.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            <!-- AWS SDK v2 BOM -->
+            <dependency>
+                <groupId>software.amazon.awssdk</groupId>
+                <artifactId>bom</artifactId>
+                <version>${aws.sdk.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+
+    <!-- ************************************************************
+         Runtime Dependencies
+    ************************************************************* -->
+    <dependencies>
+        <!-- AWS Lambda Core & Events -->
+        <dependency>
+            <groupId>com.amazonaws</groupId>
+            <artifactId>aws-lambda-java-core</artifactId>
+            <version>${aws.lambda.java.core.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.amazonaws</groupId>
+            <artifactId>aws-lambda-java-events</artifactId>
+            <version>${aws.lambda.java.core.version}</version>
+        </dependency>
+
+        <!-- AWS SDK v2 – DynamoDB & EventBridge -->
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>dynamodb</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>eventbridge</artifactId>
+        </dependency>
+
+        <!-- Spring Cloud Function (adapter for AWS Lambda) -->
+        <dependency>
+            <groupId>org.springframework.cloud</groupId>
+            <artifactId>spring-cloud-function-context</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.cloud</groupId>
+            <artifactId>spring-cloud-function-adapter-aws</artifactId>
+        </dependency>
+
+        <!-- JSON (Jackson) -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+            <version>${jackson.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.fasterxml.jackson.datatype</groupId>
+            <artifactId>jackson-datatype-jsr310</artifactId>
+            <version>${jackson.version}</version>
+        </dependency>
+
+        <!-- Validation – Bean Validation (JSR-380) -->
+        <dependency>
+            <groupId>org.hibernate.validator</groupId>
+            <artifactId>hibernate-validator</artifactId>
+            <version>${hibernate.validator.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>jakarta.validation</groupId>
+            <artifactId>jakarta.validation-api</artifactId>
+            <version>3.0.2</version>
+        </dependency>
+
+        <!-- JSON Schema Validation (FHIR resource validation) -->
+        <dependency>
+            <groupId>com.networknt</groupId>
+            <artifactId>json-schema-validator</artifactId>
+            <version>${json.schema.validator.version}</version>
+        </dependency>
+
+        <!-- Logging -->
+        <dependency>
+            <groupId>org.apache.logging.log4j</groupId>
+            <artifactId>log4j-api</artifactId>
+            <version>${log4j.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.logging.log4j</groupId>
+            <artifactId>log4j-core</artifactId>
+            <version>${log4j.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.logging.log4j</groupId>
+            <artifactId>log4j-slf4j2-impl</artifactId>
+            <version>${log4j.version}</version>
+        </dependency>
+
+        <!-- Utility -->
+        <dependency>
+            <groupId>com.google.guava</groupId>
+            <artifactId>guava</artifactId>
+            <version>${guava.version}</version>
+        </dependency>
+
+        <!-- ********************************************************
+             Test & Quality-Gate Dependencies
+        ********************************************************* -->
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <version>5.10.2</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.mockito</groupId>
+            <artifactId>mockito-core</artifactId>
+            <version>5.12.0</version>
+            <scope>test</scope>
+        </dependency>
+        <!-- DynamoDB Local for Integration Tests -->
+        <dependency>
+            <groupId>com.github.dynamodb</groupId>
+            <artifactId>DynamoDBLocal</artifactId>
+            <version>2.0.0</version>
+            <scope>test</scope>
+        </dependency>
+        <!-- Testcontainers -->
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <version>1.19.7</version>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <!-- ************************************************************
+         Build Plugins
+    ************************************************************* -->
+    <build>
+        <finalName>${project.artifactId}-${project.version}</finalName>
+
+        <plugins>
+            <!-- Compiler -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>${maven.compiler.plugin.version}</version>
+                <configuration>
+                    <release>${java.version}</release>
+                    <compilerArgs>
+                        <arg>-parameters</arg>
+                    </compilerArgs>
+                </configuration>
+            </plugin>
+
+            <!-- Shade – build an über-jar for Lambda -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-shade-plugin</artifactId>
+                <version>${maven.shade.plugin.version}</version>
+                <executions>
+                    <execution>
+                        <phase>package</phase>
+                        <goals><goal>shade</goal></goals>
+                        <configuration>
+                            <createDependencyReducedPom>false</createDependencyReducedPom>
+                            <minimizeJar>true</minimizeJar>
+                            <relocations>
+                                <!-- Relocate Guava to avoid conflicts with AWS SDK shaded version -->
+                                <relocation>
+                                    <pattern>com.google.common</pattern>
+                                    <shadedPattern>com.vitalpulse.shaded.guava</shadedPattern>
+                                </relocation>
+                            </relocations>
+                            <!-- Ensures Lambda handler appears in MANIFEST.MF -->
+                            <transformers>
+                                <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
+                                    <mainClass>com.vitalpulse.cloudcare.order.command.handler.OrderCommandHandler</mainClass>
+                                </transformer>
+                                <!-- Merge Log4j2 plugin cache files -->
+                                <transformer implementation="org.apache.maven.plugins.shade.resource.AppendingTransformer">
+                                    <resource>META-INF/org.apache.logging.log4j.providers</resource>
+                                </transformer>
+                            </transformers>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <!-- Unit Test Runner -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>${maven.surefire.plugin.version}</version>
+                <configuration>
+                    <useSystemClassLoader>false</useSystemClassLoader>
+                    <includes>
+                        <include>**/*Test.java</include>
+                    </includes>
+                </configuration>
+            </plugin>
+
+            <!-- Integration Test Runner -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-failsafe-plugin</artifactId>
+                <version>${maven.failsafe.plugin.version}</version>
+                <executions>
+                    <execution>
+                        <id>integration-tests</id>
+                        <goals>
+                            <goal>integration-test</goal>
+                            <goal>verify</goal>
+                        </goals>
+                        <configuration>
+                            <includes>
+                                <include>**/*IT.java</include>
+                            </includes>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <!-- SpotBugs Static Analysis -->
+            <plugin>
+                <groupId>com.github.spotbugs</groupId>
+                <artifactId>spotbugs-maven-plugin</artifactId>
+                <version>${spotbugs.maven.plugin.version}</version>
+                <configuration>
+                    <failOnError>true</failOnError>
+                    <effort>Max</effort>
+                    <threshold>Low</threshold>
+                </configuration>
+            </plugin>
+
+            <!-- Code Coverage -->
+            <plugin>
+                <groupId>org.jacoco</groupId>
+                <artifactId>jacoco-maven-plugin</artifactId>
+                <version>${jacoco.maven.plugin.version}</version>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>prepare-agent</goal>
+                        </goals>
+                    </execution>
+                    <execution>
+                        <id>report</id>
+                        <phase>verify</phase>
+                        <goals>
+                            <goal>report</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <!-- Enforcer – keep our house clean -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-enforcer-plugin</artifactId>
+                <version>3.5.0</version>
+                <executions>
+                    <execution>
+                        <id>enforce-java</id>
+                        <goals><goal>enforce</goal></goals>
+                        <configuration>
+                            <rules>
+                                <requireJavaVersion>
+                                    <version>[17,)</version>
+                                </requireJavaVersion>
+                            </rules>
+                            <fail>true</fail>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+
+    <!-- ************************************************************
+         Distribution Management & Release Pipeline (optional)
+         Placeholder for when we publish to GitHub Packages or
+         AWS CodeArtifact.
+    ************************************************************* -->
+    <!--
+    <distributionManagement>
+        <repository>
+            <id>github</id>
+            <name>GitHub Packages</name>
+            <url>https://maven.pkg.github.com/vitalpulse/cloudcare</url>
+        </repository>
+    </distributionManagement>
+    -->
+
+    <!-- ************************************************************
+         CI Meta-data
+    ************************************************************* -->
+    <scm>
+        <connection>scm:git:git@github.com:vitalpulse/cloudcare.git</connection>
+        <developerConnection>scm:git:git@github.com:vitalpulse/cloudcare.git</developerConnection>
+        <url>https://github.com/vitalpulse/cloudcare</url>
+        <tag>HEAD</tag>
+    </scm>
+
+    <developers>
+        <developer>
+            <id>eng-team</id>
+            <name>VitalPulse Engineering</name>
+            <email>engineering@vitalpulse.com</email>
+        </developer>
+    </developers>
+
+    <!-- ************************************************************
+         License Information
+    ************************************************************* -->
+    <licenses>
+        <license>
+            <name>Apache License, Version 2.0</name>
+            <url>https://www.apache.org/licenses/LICENSE-2.0.txt</url>
+            <distribution>repo</distribution>
+        </license>
+    </licenses>
+</project>
+```

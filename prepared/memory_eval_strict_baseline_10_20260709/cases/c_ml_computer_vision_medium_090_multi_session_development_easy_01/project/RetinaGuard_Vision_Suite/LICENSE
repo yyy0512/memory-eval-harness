@@ -1,0 +1,428 @@
+```c
+/*******************************************************************************
+ *  RetinaGuard Vision Suite
+ *  ----------------------------------------------------------------------------
+ *  LICENSE MANAGEMENT & VALIDATION SUBSYSTEM
+ *
+ *  File:     LICENSE            (placed at repository root for easy discovery)
+ *  Language: C11
+ *
+ *  Purpose:
+ *      • Parse and cryptographically validate a clinic-specific license file.
+ *      • Expose a small public API that the rest of the monolith can call at
+ *        start-up to ensure the executable is authorised to run.
+ *      • Offer fine-grained feature gating (compile-time AND run-time) so that
+ *        certain pipeline stages can be disabled if the clinic has not
+ *        purchased the corresponding module.
+ *
+ *  Dependencies:
+ *      OpenSSL 1.1+   (libcrypto)
+ *
+ *      In extremely resource-constrained builds where OpenSSL is not desired,
+ *      build the file with -DLICENSE_NO_CRYPTO=1 to fall back to an ad-hoc
+ *      checksum.  The cryptographic path is strongly recommended for medical
+ *      devices and any production deployment.
+ *
+ *  Build:
+ *      gcc -std=c11 -Wall -Wextra -pedantic -DUSE_OPENSSL -c LICENSE -o LICENSE.o
+ *
+ *  ----------------------------------------------------------------------------
+ *  Copyright (c) 2024 Medical Insight Technologies, LLC
+ *  All rights reserved.
+ *
+ *  SPDX-License-Identifier: Proprietary
+ *
+ ******************************************************************************/
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
+#include <stdint.h>
+#include <errno.h>
+
+#ifndef LICENSE_NO_CRYPTO
+    #include <openssl/sha.h>
+    #include <openssl/evp.h>
+    #include <openssl/buffer.h>
+    #include <openssl/err.h>
+#endif
+
+/* ---------------------------------------------------------------------------
+ *                          INTERNAL CONSTANTS
+ * -------------------------------------------------------------------------*/
+
+/* Hard-coded 256-bit RSA public modulus (hex) stripped of PEM wrapper.
+ * Generated exclusively for RetinaGuard Vision Suite license signatures.
+ * NOTE: Private key is stored in an HSM at Medical Insight Technologies, LLC. */
+static const char *kPublicKeyPem =
+"-----BEGIN PUBLIC KEY-----\n"
+"MFwwDQYJKoZIhvcNAQEBBQADSwAwSAJBAL8FX7+TjJ4H6kFF4Sdnwjs+Fh3XcaLo\n"
+"JzgR21OyVn8mB3uhkaoOkOQqvE1B7/iAqfw1t2mKXZKMOIBrUNKCPk0CAwEAAQ==\n"
+"-----END PUBLIC KEY-----\n";
+
+/* Salt used in the low-security (non-crypto) build.  Must match the server. */
+static const uint32_t kFallbackSalt = 0xC0DEC0DEu;
+
+/* Maximum sensible line length inside the INI-style license file. */
+#define LICENSE_MAX_LINE 512
+
+/* Feature names that the rest of the application references. */
+static const char *const kFeatureNames[] = {
+    "feature_engineering",
+    "model_monitoring",
+    "data_visualization",
+    "model_versioning",
+    "automated_retraining",
+    NULL
+};
+
+/* ---------------------------------------------------------------------------
+ *                              DATA STRUCTURES
+ * -------------------------------------------------------------------------*/
+
+typedef struct
+{
+    char     licensee[128];
+    char     expiration[16];        /* ISO8601 YYYY-MM-DD */
+    unsigned enabled_flags;         /* Bit per feature in kFeatureNames[] */
+} license_t;
+
+/* ---------------------------------------------------------------------------
+ *                    INTERNAL STATE (ONE INSTANCE ONLY)
+ * -------------------------------------------------------------------------*/
+
+static license_t  g_license      = {0};
+static int        g_license_ok   = 0;
+static int        g_initialized  = 0;
+
+/* ---------------------------------------------------------------------------
+ *                        UTILITY & HELPER ROUTINES
+ * -------------------------------------------------------------------------*/
+
+/* Trim leading/trailing whitespace in place. */
+static char *trim(char *s)
+{
+    char *end;
+
+    while (*s && (*s == ' ' || *s == '\t' || *s == '\n' || *s == '\r'))
+        ++s;
+
+    if (*s == 0) return s;
+
+    end = s + strlen(s) - 1;
+    while (end > s && (*end == ' ' || *end == '\t' || *end == '\n' || *end == '\r'))
+        --end;
+    *(end + 1) = '\0';
+    return s;
+}
+
+/* Base64 decode using OpenSSL.  Returns malloc'ed buffer. */
+#ifndef LICENSE_NO_CRYPTO
+static unsigned char *b64_decode(const char *input, size_t *outlen)
+{
+    BIO *bmem, *b64;
+    size_t len = strlen(input);
+    unsigned char *buffer = malloc(len);     /* Upper bound */
+
+    if (!buffer) return NULL;
+
+    b64  = BIO_new(BIO_f_base64());
+    if (!b64) { free(buffer); return NULL; }
+    BIO_set_flags(b64, BIO_FLAGS_BASE64_NO_NL);
+
+    bmem = BIO_new_mem_buf((void*)input, (int)len);
+    if (!bmem) { BIO_free(b64); free(buffer); return NULL; }
+
+    bmem = BIO_push(b64, bmem);
+    *outlen = BIO_read(bmem, buffer, (int)len);
+
+    BIO_free_all(bmem);
+    return buffer;
+}
+#endif
+
+/* Compute SHA-256 hex digest of @msg.  Returns 0 on success. */
+#ifndef LICENSE_NO_CRYPTO
+static int sha256_hex(const unsigned char *msg, size_t len, char out_hex[65])
+{
+    unsigned char hash[SHA256_DIGEST_LENGTH];
+    if (!SHA256(msg, len, hash))
+        return -1;
+
+    for (int i = 0; i < SHA256_DIGEST_LENGTH; ++i)
+        sprintf(out_hex + i*2, "%02x", hash[i]);
+
+    out_hex[64] = '\0';
+    return 0;
+}
+#endif
+
+/* Fallback 32-bit checksum for embedded builds without OpenSSL. */
+#ifdef LICENSE_NO_CRYPTO
+static uint32_t checksum32(const uint8_t *buf, size_t len)
+{
+    uint32_t crc = kFallbackSalt;
+    for (size_t i = 0; i < len; ++i)
+        crc = (crc << 5) ^ (crc >> 27) ^ buf[i];
+    return crc;
+}
+#endif
+
+/* ---------------------------------------------------------------------------
+ *                       CORE PARSING / VALIDATION LOGIC
+ * -------------------------------------------------------------------------*/
+
+static int parse_license_file(const char *path,
+                              char *licensee,
+                              char *expiration,
+                              char *signature,
+                              unsigned *feature_flags)
+{
+    FILE *fp   = fopen(path, "r");
+    char  line[LICENSE_MAX_LINE + 1];
+    int   in_features = 0;
+
+    if (!fp)
+        return -1;
+
+    while (fgets(line, sizeof line, fp))
+    {
+        char *eq, *key, *value;
+
+        if (line[0] == ';' || line[0] == '#')       /* Skip comments */
+            continue;
+
+        key = trim(line);
+        if (*key == '\0')
+            continue;
+
+        if (key[0] == '[' && strchr(key, ']'))
+        {
+            in_features = (strncmp(key, "[Features]", 10) == 0);
+            continue;
+        }
+
+        eq = strchr(key, '=');
+        if (!eq) continue;
+        *eq = '\0';
+        value = trim(eq + 1);
+        key   = trim(key);
+
+        if (!in_features)
+        {
+            if (strcmp(key, "Licensee") == 0)
+                strncpy(licensee, value, 127);
+            else if (strcmp(key, "Expiration") == 0)
+                strncpy(expiration, value, 15);
+            else if (strcmp(key, "Signature") == 0)
+                strncpy(signature, value, 256);
+        }
+        else
+        {
+            for (size_t i = 0; kFeatureNames[i]; ++i)
+            {
+                if (strcmp(key, kFeatureNames[i]) == 0 && strcmp(value, "1") == 0)
+                    *feature_flags |= (1u << i);
+            }
+        }
+    }
+
+    fclose(fp);
+    return 0;
+}
+
+/* Check expiration (YYYY-MM-DD). Returns 0 if valid. */
+static int check_expiration(const char *exp_str)
+{
+    struct tm expiration_tm = {0};
+    time_t    now           = time(NULL);
+    char     *p;
+
+    if (strlen(exp_str) != 10)
+        return -1;
+
+    p = strptime(exp_str, "%Y-%m-%d", &expiration_tm);
+    if (!p || *p != '\0')
+        return -1;
+
+    /* Normalize to midnight UTC */
+    expiration_tm.tm_hour = 0;
+    expiration_tm.tm_min  = 0;
+    expiration_tm.tm_sec  = 0;
+    time_t expiration_time = timegm(&expiration_tm);
+
+    return (expiration_time >= now) ? 0 : -1;
+}
+
+#ifndef LICENSE_NO_CRYPTO
+/* Validate signature (SHA-256 over licensee|expiration|flags). */
+static int validate_signature(const char *licensee,
+                              const char *expiration,
+                              unsigned    feature_flags,
+                              const char *sig_b64)
+{
+    char  plain[512];
+    size_t plain_len;
+    char  expected_hex[65];
+
+    snprintf(plain, sizeof plain, "%s|%s|%08x", licensee, expiration, feature_flags);
+    plain_len = strlen(plain);
+
+    if (sha256_hex((const unsigned char*)plain, plain_len, expected_hex) != 0)
+        return -1;
+
+    /* The signature is a base64 of text hex digest encrypted with the private key.
+     * For simplicity, we do *not* perform full RSA here but merely confirm that
+     * the signature, once decrypted with the public key, equals SHA-256 hex.
+     *
+     * In production, OpenSSL EVP_PKEY_verify should be used. This stub follows
+     * the principle while keeping the code compact. */
+    size_t dec_len;
+    unsigned char *dec = b64_decode(sig_b64, &dec_len);
+    if (!dec) return -1;
+
+    /* Remove any trailing NULs */
+    while (dec_len && dec[dec_len-1] == '\0') --dec_len;
+    dec[dec_len] = '\0';
+
+    int ok = (strncmp((char*)dec, expected_hex, 64) == 0);
+    free(dec);
+    return ok ? 0 : -1;
+}
+#else /* LICENSE_NO_CRYPTO */
+/* Low-security signature validation */
+static int validate_signature(const char *licensee,
+                              const char *expiration,
+                              unsigned    feature_flags,
+                              const char *sig_hex)
+{
+    char  plain[512];
+    uint32_t sig_in, calc;
+
+    snprintf(plain, sizeof plain, "%s|%s|%08x", licensee, expiration, feature_flags);
+    calc = checksum32((const uint8_t*)plain, strlen(plain));
+
+    if (sscanf(sig_hex, "%08x", &sig_in) != 1)
+        return -1;
+
+    return (calc == sig_in) ? 0 : -1;
+}
+#endif /* LICENSE_NO_CRYPTO */
+
+/* ---------------------------------------------------------------------------
+ *                              PUBLIC API
+ * -------------------------------------------------------------------------*/
+
+/* Returns 0 on success, negative on failure. */
+int license_init(const char *license_file_path)
+{
+    if (g_initialized)
+        return g_license_ok ? 0 : -1;
+
+    char signature[256] = {0};
+    unsigned flags      = 0;
+
+    if (parse_license_file(license_file_path,
+                           g_license.licensee,
+                           g_license.expiration,
+                           signature,
+                           &flags) != 0)
+    {
+        fprintf(stderr, "License: failed to read '%s' (%s)\n",
+                license_file_path, strerror(errno));
+        goto fail;
+    }
+
+    g_license.enabled_flags = flags;
+
+    if (check_expiration(g_license.expiration) != 0)
+    {
+        fprintf(stderr, "License: expired on %s\n", g_license.expiration);
+        goto fail;
+    }
+
+    if (validate_signature(g_license.licensee,
+                           g_license.expiration,
+                           g_license.enabled_flags,
+                           signature) != 0)
+    {
+        fprintf(stderr, "License: invalid signature.\n");
+        goto fail;
+    }
+
+    g_license_ok  = 1;
+    g_initialized = 1;
+    return 0;
+
+fail:
+    g_license_ok  = 0;
+    g_initialized = 1;
+    return -1;
+}
+
+/* True if feature is enabled in the current license. */
+int license_feature_allowed(const char *feature_name)
+{
+    if (!g_license_ok)
+        return 0;
+
+    for (size_t i = 0; kFeatureNames[i]; ++i)
+        if (strcmp(feature_name, kFeatureNames[i]) == 0)
+            return (g_license.enabled_flags & (1u << i)) != 0;
+
+    /* Unknown feature => conservative deny */
+    return 0;
+}
+
+/* Returns human-readable name of the licensee or "(unlicensed)" */
+const char *license_get_licensee(void)
+{
+    return g_license_ok ? g_license.licensee : "(unlicensed)";
+}
+
+/* Returns ISO date e.g. “2025-12-31”, or “0000-00-00” if invalid. */
+const char *license_get_expiration(void)
+{
+    return g_license_ok ? g_license.expiration : "0000-00-00";
+}
+
+/* Called during orderly shutdown (currently a NOP). */
+void license_shutdown(void)
+{
+    /* Future: secure erase of in-memory cryptographic material. */
+    memset(&g_license, 0, sizeof g_license);
+    g_initialized = g_license_ok = 0;
+}
+
+/* ---------------------------------------------------------------------------
+ *                              SELF-TEST
+ * -------------------------------------------------------------------------*/
+/* Stand-alone unit test: gcc LICENSE -o lic_test -DLICENSE_SELFTEST -lcrypto */
+#ifdef LICENSE_SELFTEST
+int main(int argc, char **argv)
+{
+    if (argc != 2)
+    {
+        fprintf(stderr, "Usage: %s path/to/license.ini\n", argv[0]);
+        return EXIT_FAILURE;
+    }
+
+    if (license_init(argv[1]) != 0)
+    {
+        fprintf(stderr, "License init failed.\n");
+        return EXIT_FAILURE;
+    }
+
+    printf("License OK for %s (expires %s)\n",
+           license_get_licensee(), license_get_expiration());
+
+    for (size_t i = 0; kFeatureNames[i]; ++i)
+        printf("  %-22s : %s\n", kFeatureNames[i],
+               license_feature_allowed(kFeatureNames[i]) ? "ENABLED" : "DISABLED");
+
+    license_shutdown();
+    return EXIT_SUCCESS;
+}
+#endif /* LICENSE_SELFTEST */
+```

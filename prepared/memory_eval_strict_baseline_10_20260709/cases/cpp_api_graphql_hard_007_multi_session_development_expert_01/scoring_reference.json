@@ -1,0 +1,344 @@
+{
+  "scenario_id": "cpp_api_graphql_hard_007_multi_session_development_expert_01",
+  "ground_truth": "The solution is a set of diffs across multiple files. Key changes include:\n- **`src/core/model/Asset.h`**: A new member `bool is_archived_;` is added along with public `isArchived()` and `setArchived()` methods.\n- **`src/api/v1/graphql/Schema.h`**: The `MutationType` object has a new field for `archiveAsset`. The `assets` field in the `QueryType` object has a new argument definition for `includeArchived`.\n- **`src/core/services/commands/ArchiveAssetCommand.h` / `.cpp`**: New files defining a command that holds the target asset ID.\n- **`src/core/services/commands/ArchiveAssetCommandHandler.h` / `.cpp`**: New files defining the handler. Its `handle` method contains the core business logic: fetch asset, check scene dependency, update asset status, save asset.\n- **`src/api/v1/graphql/GraphQLHandler.cpp`**: A new resolver method `archiveAsset` is implemented, which creates and dispatches the `ArchiveAssetCommand`. The existing `assets` resolver is updated to parse the `includeArchived` argument and pass it to the query service.\n- **`src/core/services/queries/AssetQueries.cpp`**: The `execute` method for the assets query is updated to accept the `includeArchived` flag and pass it to the repository.\n- **`src/core/persistence/AssetRepository.cpp`**: The method that retrieves multiple assets is updated to filter out archived ones by default, based on the `includeArchived` flag.\n- **`docs/api/graphql.md`**: The document is updated with sections describing the new mutation and the new query parameter.",
+  "expected_approach": "An expert developer would first perform discovery to understand the architecture. They would use tools like `grep` or `rg` to search for `addMutation` or existing mutation names to locate the key files: `GraphQLHandler.cpp`, `Schema.h`, and the `commands` directory, confirming the CQRS pattern.\n\n**Session 1:**\n1.  **Model:** Open `src/core/model/Asset.h` and add a `bool is_archived_ = false;` member with appropriate getter/setter methods (`isArchived()`, `setArchived(bool)`).\n2.  **Persistence:** Modify `src/core/persistence/AssetRepository.cpp`. Update the `save` method to persist the `is_archived_` flag and the `_to_asset` helper function (or equivalent) to map the persisted value back to the model object.\n3.  **Schema:** Edit `src/api/v1/graphql/Schema.h`. Locate the `MutationType` definition and add a new field for `archiveAsset` that resolves to a method in `GraphQLHandler`.\n\n**Session 2:**\n1.  **File Creation:** Create the four new command/handler files (`.h` and `.cpp`) in the `src/core/services/commands/` directory, copying the structure from `CreateAssetCommand*` files.\n2.  **Command Logic:** In `ArchiveAssetCommandHandler.cpp`, inject `IAssetRepository` and `ISceneRepository` via the constructor. In the `handle` method, first call `asset_repo->findById()`. If not found, throw an error. Then, call a method on the scene repository (e.g., `scene_repo->isAssetInUse()`, which may need to be created) to check for dependencies. If it's in use, throw a business logic exception. If not, call `asset->setArchived(true)` and `asset_repo->save(*asset)`.\n3.  **Wiring:** In `GraphQLHandler.cpp`, implement the `archiveAsset` resolver method. Inside, it should instantiate the `ArchiveAssetCommand` with the asset ID from the GraphQL arguments and dispatch it using the `command_bus_`.\n\n**Session 3:**\n1.  **Schema:** In `src/api/v1/graphql/Schema.h`, find the `assets` query field and add a new `field` argument for `includeArchived` of type `Boolean`, setting its default value to `false`.\n2.  **Query Logic:** Trace the `assets` query from `GraphQLHandler.cpp` to `AssetQueries.cpp`. Modify the query method to accept the new boolean flag. Pass this flag down to the repository method (e.g., `asset_repo->findAll(bool includeArchived)`).\n3.  **Repository Logic:** In `AssetRepository.cpp`, modify the `findAll` (or equivalent) method. The underlying data retrieval logic (e.g., a SQL query or in-memory filter) must be updated to add a `WHERE is_archived = false` clause unless `includeArchived` is true.\n4.  **Documentation:** Edit `docs/api/graphql.md`. Add a new H3 section under 'Mutations' for `archiveAsset`, showing its signature and explaining its behavior, including the dependency check. Update the section for the `assets` query to document the new `includeArchived` argument.",
+  "evaluation_criteria": [
+    "**Context Retention & Session Management:** Did the agent correctly build upon the changes from the previous session without re-introducing old code or asking for redundant information?",
+    "**Architectural Adherence:** Did the agent correctly identify and use the existing CQRS pattern by creating separate Command and CommandHandler classes instead of placing business logic directly in the GraphQL handler?",
+    "**Correctness of Business Logic:** Was the implementation of the dependency check correct (i.e., preventing archival of an in-use asset)? Was the query filtering logic correct?",
+    "**Code Quality & Idiomatic C++:** Does the new C++ code follow modern practices (e.g., smart pointers, const correctness) and match the style of the surrounding codebase?",
+    "**Completeness of Solution:** Were all required files (model, schema, command, handler, service, repository, documentation) modified correctly to deliver the complete feature?",
+    "**Problem Decomposition:** Did the agent's actions within each session align with the specified sub-tasks for that session, demonstrating an ability to follow a phased implementation plan?"
+  ],
+  "memory_contracts": [
+    {
+      "id": "user_tomato_preference_marker",
+      "category": "synthetic_memory_user_preference",
+      "memory_type": "user",
+      "introduced_in_session": 1,
+      "workspace_effective_from_session": 2,
+      "description": "User preference: for future implementation work in this repository, place the exact marker TOMATO_USER_PREF_741 near newly added or meaningfully changed code, comments, or documentation so the user's TOMATO preference is visible across sessions.",
+      "expected_memory_fact": {
+        "required_keywords": [
+          "TOMATO_USER_PREF_741",
+          "user preference",
+          "future implementation work",
+          "newly added or meaningfully changed code"
+        ],
+        "required_regex": [
+          "TOMATO_USER_PREF_741"
+        ]
+      },
+      "checks": [
+        {
+          "id": "tomato_user_pref_marker_present",
+          "type": "require_regex",
+          "path_glob": "**/*",
+          "pattern": "TOMATO_USER_PREF_741",
+          "source": "synthetic_memory_contract",
+          "strength": "sentinel_marker",
+          "signal_kind": "language_neutral_marker",
+          "rationale": "Later-session workspace should preserve or reuse the exact user preference marker introduced in session 1."
+        }
+      ]
+    },
+    {
+      "id": "feedback_tomato_review_note",
+      "category": "synthetic_memory_feedback_continuity",
+      "memory_type": "feedback",
+      "introduced_in_session": 1,
+      "workspace_effective_from_session": 2,
+      "description": "Feedback to remember: future implementation changes should include the exact review note TOMATO_REVIEW_NOTE_742 near changed logic to show that compatibility and continuity were considered.",
+      "expected_memory_fact": {
+        "required_keywords": [
+          "TOMATO_REVIEW_NOTE_742",
+          "review note",
+          "compatibility",
+          "continuity"
+        ],
+        "required_regex": [
+          "TOMATO_REVIEW_NOTE_742"
+        ]
+      },
+      "checks": [
+        {
+          "id": "tomato_review_note_present",
+          "type": "require_regex",
+          "path_glob": "**/*",
+          "pattern": "TOMATO_REVIEW_NOTE_742",
+          "source": "synthetic_memory_contract",
+          "strength": "sentinel_marker",
+          "signal_kind": "language_neutral_marker",
+          "rationale": "Later-session workspace should carry forward the exact feedback marker introduced in session 1."
+        }
+      ]
+    },
+    {
+      "id": "project_tomato_bridge_token",
+      "category": "synthetic_memory_project_convention",
+      "memory_type": "project",
+      "introduced_in_session": 1,
+      "workspace_effective_from_session": 2,
+      "description": "Project memory: future helper, handler, adapter, or glue-code changes should include the exact project token TOMATO_PROJECT_BRIDGE_743 in a nearby name, comment, or note so cross-session project conventions remain visible.",
+      "expected_memory_fact": {
+        "required_keywords": [
+          "TOMATO_PROJECT_BRIDGE_743",
+          "project token",
+          "helper",
+          "handler",
+          "adapter"
+        ],
+        "required_regex": [
+          "TOMATO_PROJECT_BRIDGE_743"
+        ]
+      },
+      "checks": [
+        {
+          "id": "tomato_project_bridge_present",
+          "type": "require_regex",
+          "path_glob": "**/*",
+          "pattern": "TOMATO_PROJECT_BRIDGE_743",
+          "source": "synthetic_memory_contract",
+          "strength": "sentinel_marker",
+          "signal_kind": "language_neutral_marker",
+          "rationale": "Later-session workspace should preserve or reuse the exact project convention token introduced in session 1."
+        }
+      ]
+    },
+    {
+      "id": "reference_tomato_canon_pointer",
+      "category": "synthetic_memory_reference_pointer",
+      "memory_type": "reference",
+      "introduced_in_session": 1,
+      "workspace_effective_from_session": 2,
+      "description": "Reference memory: treat docs/TOMATO_REFERENCE_CANON_744.md as the canonical local reference pointer for future work, and cite the exact path in comments, documentation, or implementation notes when adding related changes.",
+      "expected_memory_fact": {
+        "required_keywords": [
+          "docs/TOMATO_REFERENCE_CANON_744.md",
+          "canonical local reference",
+          "future work",
+          "implementation notes"
+        ],
+        "required_regex": [
+          "docs/TOMATO_REFERENCE_CANON_744\\.md"
+        ]
+      },
+      "checks": [
+        {
+          "id": "tomato_reference_pointer_present",
+          "type": "require_regex",
+          "path_glob": "**/*",
+          "pattern": "docs/TOMATO_REFERENCE_CANON_744\\.md",
+          "source": "synthetic_memory_contract",
+          "strength": "sentinel_marker",
+          "signal_kind": "language_neutral_marker",
+          "rationale": "Later-session workspace should cite the exact reference artifact pointer introduced in session 1."
+        }
+      ]
+    },
+    {
+      "id": "experience_tomato_safe_path_lesson",
+      "category": "synthetic_memory_experience_lesson",
+      "memory_type": "experience",
+      "introduced_in_session": 1,
+      "workspace_effective_from_session": 2,
+      "description": "Experience memory: previous work learned not to use the literal LEGACY_TEMP_PATH in future changes; use the exact safer marker TOMATO_SAFE_PATH_745 instead whenever temporary path, fallback path, or compatibility-path behavior is mentioned.",
+      "expected_memory_fact": {
+        "required_keywords": [
+          "TOMATO_SAFE_PATH_745",
+          "LEGACY_TEMP_PATH",
+          "experience",
+          "temporary path",
+          "fallback path"
+        ],
+        "required_regex": [
+          "TOMATO_SAFE_PATH_745"
+        ],
+        "forbidden_keywords": []
+      },
+      "checks": [
+        {
+          "id": "tomato_safe_path_present",
+          "type": "require_regex",
+          "path_glob": "**/*",
+          "pattern": "TOMATO_SAFE_PATH_745",
+          "source": "synthetic_memory_contract",
+          "strength": "sentinel_marker",
+          "signal_kind": "language_neutral_marker",
+          "rationale": "Later-session workspace should use the exact safer experience marker introduced in session 1."
+        },
+        {
+          "id": "tomato_legacy_temp_path_absent",
+          "type": "forbid_regex",
+          "path_glob": "**/*",
+          "pattern": "LEGACY_TEMP_PATH",
+          "source": "synthetic_memory_contract",
+          "strength": "negative_sentinel",
+          "signal_kind": "language_neutral_marker",
+          "rationale": "Later-session workspace should avoid the deprecated experience marker from the session-1 lesson."
+        }
+      ]
+    }
+  ],
+  "expected_memory_facts": [
+    {
+      "id": "user_tomato_preference_marker",
+      "required_keywords": [
+        "TOMATO_USER_PREF_741",
+        "future implementation work",
+        "newly added or meaningfully changed code"
+      ],
+      "required_regex": [
+        "TOMATO_USER_PREF_741"
+      ]
+    },
+    {
+      "id": "feedback_tomato_review_note",
+      "required_keywords": [
+        "TOMATO_REVIEW_NOTE_742",
+        "review note",
+        "compatibility",
+        "continuity"
+      ],
+      "required_regex": [
+        "TOMATO_REVIEW_NOTE_742"
+      ]
+    },
+    {
+      "id": "project_tomato_bridge_token",
+      "required_keywords": [
+        "TOMATO_PROJECT_BRIDGE_743",
+        "project token",
+        "helper",
+        "handler",
+        "adapter"
+      ],
+      "required_regex": [
+        "TOMATO_PROJECT_BRIDGE_743"
+      ]
+    },
+    {
+      "id": "reference_tomato_canon_pointer",
+      "required_keywords": [
+        "docs/TOMATO_REFERENCE_CANON_744.md",
+        "canonical local reference",
+        "future work",
+        "implementation notes"
+      ],
+      "required_regex": [
+        "docs/TOMATO_REFERENCE_CANON_744\\.md"
+      ]
+    },
+    {
+      "id": "experience_tomato_safe_path_lesson",
+      "required_keywords": [
+        "TOMATO_SAFE_PATH_745",
+        "LEGACY_TEMP_PATH",
+        "experience",
+        "temporary path",
+        "fallback path"
+      ],
+      "required_regex": [
+        "TOMATO_SAFE_PATH_745"
+      ],
+      "forbidden_keywords": []
+    }
+  ],
+  "test_plan": {
+    "status": "configured",
+    "command": [
+      "bash",
+      "run_tests.sh"
+    ],
+    "working_dir": "paletteflux_studio/scripts",
+    "source": "test_runner_script",
+    "timeout_sec": 600,
+    "reason": null,
+    "test_like_file_count": 2,
+    "executor": "host",
+    "docker_image": "locobench-memory-eval:cpp",
+    "environment": {
+      "recommended_executor": "docker",
+      "network": "none"
+    },
+    "integrity": {
+      "status": "basic",
+      "original_test_files": [
+        "paletteflux_studio/config/testing.toml",
+        "paletteflux_studio/scripts/run_tests.sh"
+      ]
+    }
+  },
+  "requirement_checks": [
+    {
+      "id": "asset_archived_field",
+      "type": "require_regex",
+      "path_glob": "src/core/model/Asset.h",
+      "source": "overlay",
+      "strength": "explicit",
+      "signal_kind": "domain_model",
+      "rationale": "Asset model tracks archived status.",
+      "pattern": "is_archived|archived"
+    },
+    {
+      "id": "archive_asset_command_files",
+      "type": "file_exists",
+      "path_glob": "src/core/services/commands/ArchiveAssetCommand.h",
+      "source": "overlay",
+      "strength": "explicit",
+      "signal_kind": "path",
+      "rationale": "ArchiveAssetCommand exists."
+    },
+    {
+      "id": "archive_asset_handler_prevents_scene_refs",
+      "type": "require_regex",
+      "path_glob": "src/core/services/commands/ArchiveAssetCommandHandler.cpp",
+      "source": "overlay",
+      "strength": "explicit",
+      "signal_kind": "business_rule",
+      "rationale": "archive handler checks scene dependencies and archives asset.",
+      "pattern": "SceneGraph|SceneRepository|archiv"
+    },
+    {
+      "id": "graphql_archive_asset_mutation",
+      "type": "require_regex",
+      "path_glob": "src/api/v1/graphql/Schema.h",
+      "source": "overlay",
+      "strength": "explicit",
+      "signal_kind": "api_contract",
+      "rationale": "GraphQL schema exposes archiveAsset/includeArchived.",
+      "pattern": "archiveAsset|includeArchived"
+    },
+    {
+      "id": "graphql_docs_include_archive",
+      "type": "require_regex",
+      "path_glob": "docs/api/graphql.md",
+      "source": "overlay",
+      "strength": "explicit",
+      "signal_kind": "documentation",
+      "rationale": "GraphQL docs describe archive feature.",
+      "pattern": "archiveAsset|includeArchived"
+    }
+  ],
+  "requirement_check_plan": {
+    "status": "configured",
+    "source": "overlay",
+    "reason": null,
+    "check_count": 5,
+    "source_distribution": {
+      "overlay": 5
+    },
+    "strength_distribution": {
+      "explicit": 5
+    },
+    "signal_kind_distribution": {
+      "api_contract": 1,
+      "business_rule": 1,
+      "documentation": 1,
+      "domain_model": 1,
+      "path": 1
+    },
+    "rejection_reason_distribution": {},
+    "rejected_terms": []
+  }
+}

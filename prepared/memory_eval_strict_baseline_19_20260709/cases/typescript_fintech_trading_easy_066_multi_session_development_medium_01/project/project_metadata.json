@@ -1,0 +1,100 @@
+{
+  "specification": {
+    "unique_id": "typescript_fintech_trading_easy_066",
+    "name": "MediTrade Pulse",
+    "description": "MediTrade Pulse is a lightweight TypeScript-based trading platform that enables hospital groups and healthcare insurers to exchange, hedge, and audit the purchase of medical-grade commodities (e.g., PPE futures, pharmaceutical options) in multiple currencies. By embedding automated risk-assessment rules that reflect clinical supply-chain constraints (expiry dates, batch recalls, patient-safety grades) the system guarantees that trades comply with healthcare regulations while still behaving like a modern fintech engine.\n\nBuilt around a strict hexagonal architecture, the core domain models\u2014Orders, Portfolios, RiskScores, and ClinicalComplianceFlags\u2014are completely isolated from I/O concerns. Adapters on the outside handle REST/GraphQL APIs for hospital ERPs, HL7/FHIR message subscriptions, and secure WebSocket feeds from external exchanges. Event Sourcing ensures every clinically relevant state change (e.g., a temperature excursion for a vaccine batch) is immutable, auditable, and replayable for FDA inspections. Saga-orchestrated workflows coordinate cross-currency settlements, encryption services, and pharmacy-level inventory updates without locking the core.\n\nAlthough the platform reuses familiar fintech primitives (trades, ledgers, settlement), its value proposition is strictly healthcare: clinicians gain real-time visibility into risk-weighted inventory positions, while finance teams obtain compliant, multi-currency reporting that satisfies both IFRS and HIPAA audit trails.",
+    "domain": "fintech_trading",
+    "complexity": "easy",
+    "language": "typescript",
+    "architecture": "hexagonal",
+    "theme": "healthcare",
+    "target_file_count": 14,
+    "target_token_count": 80447,
+    "features": [
+      "encryption",
+      "multi_currency",
+      "transaction_management",
+      "risk_assessment",
+      "audit_logging"
+    ],
+    "architecture_patterns": [
+      "Event_Sourcing",
+      "Saga_Pattern",
+      "CQRS"
+    ],
+    "dependencies": [
+      "TypeScript >= 5.0",
+      "NestJS (for lightweight, adapter-layer REST/GraphQL controllers)",
+      "node-event-sourcing (aggregate/event store implementation)",
+      "RxJS (reactive streams between ports/adapters)",
+      "TypeORM or Prisma (for relational projections/read models)",
+      "class-validator + class-transformer (DTO validation for clinical data)",
+      "crypto / node-jose (end-to-end AES-256 + JWE encryption)",
+      "bullmq or @nestjs/bull (Saga orchestration queues)",
+      "uuid (deterministic UUIDv5 for medical device traceability)",
+      "winston + @nestjs/terminus (structured audit logging & health checks)"
+    ],
+    "seed": 770959
+  },
+  "generated_timestamp": 1754355701.209756,
+  "phase_1_complete": true,
+  "uniqueness_factors": {
+    "domain": "fintech_trading",
+    "complexity": "easy",
+    "architecture": "hexagonal",
+    "theme": "healthcare",
+    "seed": 770959
+  },
+  "files": [
+    {
+      "path": "src/utils.ts",
+      "type": "source"
+    },
+    {
+      "path": "src/config.ts",
+      "type": "config"
+    },
+    {
+      "path": "src/constants.ts",
+      "type": "source"
+    },
+    {
+      "path": "tests/test_main.ts",
+      "type": "test"
+    },
+    {
+      "path": "tests/test_utils.ts",
+      "type": "test"
+    },
+    {
+      "path": "README.md",
+      "type": "documentation"
+    },
+    {
+      "path": "package.json",
+      "type": "config"
+    },
+    {
+      "path": ".gitignore",
+      "type": "source"
+    },
+    {
+      "path": "Dockerfile",
+      "type": "documentation"
+    },
+    {
+      "path": "docs/api.md",
+      "type": "documentation"
+    },
+    {
+      "path": "src/module_1.ts",
+      "type": "source"
+    }
+  ],
+  "generated_stats": {
+    "files_count": 14,
+    "lines_count": 3527,
+    "generation_time": 157.08445858955383,
+    "timestamp": 1754421689.385964
+  }
+}

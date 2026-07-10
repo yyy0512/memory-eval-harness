@@ -1,8 +1,0 @@
-You are working in the repository at the current working directory. This is session 3 of a 3-session development task. The previous session has ended and conversation context is unavailable. Use the repository state and your persistent memory if available. Do not ask for previous conversation context. Complete only the requirements for this session. At the end, update memory with decisions and remaining work.
-
-You will add a new 'Diffusion' training strategy to the CineWave Maestro platform. This will be done over three sessions.
-
-**Session 3: Making the Strategy Configurable**
-Finally, you need to allow the system to be configured to use this new strategy. You must:
-1.  In `cinewave_maestro/common/config_loader/include/config.h`, update the configuration structures (likely an `enum` within the `AppConfig` or a related struct) to formally include 'diffusion' as a selectable training strategy type.
-2.  In `cinewave_maestro/common/config_loader/src/config.c`, update the configuration parsing logic (e.g., in a function like `parse_training_config` or similar) to correctly read the string "diffusion" from a config source and map it to the new type you defined in the header.

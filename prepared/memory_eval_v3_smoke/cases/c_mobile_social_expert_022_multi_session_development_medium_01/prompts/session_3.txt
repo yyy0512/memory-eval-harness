@@ -1,7 +1,0 @@
-You are working in the repository at the current working directory. This is session 3 of a 3-session development task. The previous session has ended and conversation context is unavailable. Use the repository state and your persistent memory if available. Do not ask for previous conversation context. Complete only the requirements for this session. At the end, update memory with decisions and remaining work.
-
-This task is divided into three sessions. You must maintain context between sessions to successfully complete the overall objective.
-
-**Session 3: Feature Implementation**
-*   **Goal:** Complete the implementation of the 'Low-Data Mode'.
-*   **Instructions:** Using the configuration flag you added in Session 2, complete the 'Low-Data Mode' feature. Modify the data-fetching logic within the marketplace or data repository layer. When the mode is active, the application should *only* attempt to load marketplace item previews from the local cache (`data_local_storage`). If the asset is not in the cache, it should not attempt to fetch it from the remote storage (`data_remote_storage`). Ensure your implementation is robust and correctly integrated with the existing data flow.

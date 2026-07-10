@@ -18,7 +18,28 @@ def main() -> None:
     parser.add_argument("--agent-bin", default="codeagentcli")
     parser.add_argument("--scenario-id", default=None)
     parser.add_argument("--session", type=int, default=1)
-    parser.add_argument("--memory-mode", choices=["on", "off", "bare"], default="on")
+    parser.add_argument(
+        "--memory-mode",
+        choices=[
+            "on",
+            "off",
+            "memory_on",
+            "memory_off",
+            "native",
+            "native_memory_on",
+            "openviking",
+            "openviking_on",
+            "bare",
+        ],
+        default="on",
+    )
+    parser.add_argument("--plugin-dir", type=Path, default=None, help="CodeAgent OpenViking plugin directory for OpenViking modes")
+    parser.add_argument("--openviking-url", default="http://127.0.0.1:1933")
+    parser.add_argument("--openviking-account", default="memory-eval")
+    parser.add_argument("--openviking-user-prefix", default=None)
+    parser.add_argument("--openviking-peer-prefix", default=None)
+    parser.add_argument("--run-namespace", default=None)
+    parser.add_argument("--openviking-debug", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--timeout-sec", type=int, default=1800)
     args = parser.parse_args()
@@ -31,6 +52,13 @@ def main() -> None:
         memory_mode=args.memory_mode,
         output_dir=args.output,
         timeout_sec=args.timeout_sec,
+        plugin_dir=args.plugin_dir,
+        openviking_url=args.openviking_url,
+        openviking_account=args.openviking_account,
+        openviking_user_prefix=args.openviking_user_prefix,
+        openviking_peer_prefix=args.openviking_peer_prefix,
+        openviking_debug=args.openviking_debug,
+        run_namespace=args.run_namespace,
     )
     print(f"Smoke status: {summary['status']} ({summary['scenario_id']} session {summary['session']})")
     if summary["status"] != "pass":

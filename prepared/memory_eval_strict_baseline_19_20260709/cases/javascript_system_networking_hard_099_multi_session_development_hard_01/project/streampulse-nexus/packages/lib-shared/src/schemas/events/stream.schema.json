@@ -1,0 +1,295 @@
+```javascript
+/**
+ * @fileoverview JSON-Schema definition and validator for “Stream Events” used
+ * by the StreamPulse Nexus platform.  The schema is compiled once per-process
+ * and the resulting validator is exported for high-performance runtime checks
+ * across every node that produces or consumes stream-level events.
+ *
+ * Why code instead of a raw *.json file?
+ * --------------------------------------
+ *  • We avoid the I/O cost of loading JSON at runtime.
+ *  • We centralise validation utilities next to the schema.
+ *  • We can attach rich JSDoc / inline documentation.
+ *
+ * NOTE: If you need the pure JSON representation, simply
+ *       `JSON.stringify(streamEventSchema, null, 2)`.
+ */
+
+import Ajv from 'ajv';
+import addFormats from 'ajv-formats';
+import { v4 as uuidV4 } from 'uuid';
+
+const ajv = new Ajv({
+  // Fail fast & collect all errors only in dev mode to save cycles in prod
+  allErrors: process.env.NODE_ENV !== 'production',
+  // Strict mode protects us from unknown keywords/typos
+  strict: true,
+});
+
+// Adds support for standard string formats such as `date-time`, `uuid`, etc.
+addFormats(ajv);
+
+/**
+ * Draft-07 JSON Schema describing Stream-Level Domain Events.
+ *
+ *  • The “type” field is a discriminant that routes the event to the correct
+ *    downstream handler.
+ *  • Each variant has its own “payload” sub-schema, enforced via `oneOf`.
+ *  • Additional properties are explicitly disallowed, guaranteeing that
+ *    schemas remain stable and predictable for security-sensitive contexts.
+ *
+ * IMPORTANT: Whenever you add a new event type, remember to append it to
+ *            the `type` enum AND add a corresponding block in `oneOf`.
+ *
+ * @see https://json-schema.org/specification.html
+ * @type {import('ajv').JSONSchemaType<unknown>}
+ */
+export const streamEventSchema = {
+  // Draft identifier
+  $schema: 'http://json-schema.org/draft-07/schema#',
+  $id: 'https://schemas.streampulse.io/events/stream.schema.json',
+  title: 'StreamEvent',
+  description:
+    'Domain events emitted by core streaming services in StreamPulse Nexus.',
+  type: 'object',
+  additionalProperties: false,
+  required: ['eventId', 'streamId', 'timestamp', 'type', 'payload'],
+  properties: {
+    eventId: {
+      description: 'Uniquely identifies this event instance.',
+      type: 'string',
+      format: 'uuid',
+    },
+    streamId: {
+      description: 'Logical identifier for the stream the event belongs to.',
+      type: 'string',
+      minLength: 3,
+      maxLength: 256,
+    },
+    timestamp: {
+      description: 'RFC 3339 timestamp when the event was emitted.',
+      type: 'string',
+      format: 'date-time',
+    },
+    type: {
+      description: 'Discriminator that denotes which variant the payload uses.',
+      type: 'string',
+      enum: [
+        'STREAM_STARTED',
+        'STREAM_ENDED',
+        'STREAM_PAUSED',
+        'STREAM_RESUMED',
+        'METRIC_UPDATE',
+        'ERROR',
+        'HEARTBEAT',
+      ],
+    },
+    // `payload` is dynamic; see `oneOf` for details.
+    payload: {},
+  },
+
+  // Polymorphic payloads using the `type` discriminator.
+  allOf: [
+    {
+      if: { properties: { type: { const: 'STREAM_STARTED' } } },
+      then: {
+        properties: {
+          payload: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['ingestPoint', 'transcodeProfiles'],
+            properties: {
+              ingestPoint: { type: 'string', minLength: 1 },
+              transcodeProfiles: {
+                type: 'array',
+                items: { type: 'string', minLength: 1 },
+                minItems: 1,
+              },
+            },
+          },
+        },
+      },
+    },
+    {
+      if: { properties: { type: { const: 'STREAM_ENDED' } } },
+      then: {
+        properties: {
+          payload: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['reason', 'totalViewers'],
+            properties: {
+              reason: { type: 'string', minLength: 1 },
+              totalViewers: { type: 'integer', minimum: 0 },
+            },
+          },
+        },
+      },
+    },
+    {
+      if: { properties: { type: { const: 'STREAM_PAUSED' } } },
+      then: {
+        properties: {
+          payload: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['operator'],
+            properties: {
+              operator: { type: 'string', minLength: 1 },
+              reason: { type: 'string' },
+            },
+          },
+        },
+      },
+    },
+    {
+      if: { properties: { type: { const: 'STREAM_RESUMED' } } },
+      then: {
+        properties: {
+          payload: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['operator'],
+            properties: {
+              operator: { type: 'string', minLength: 1 },
+            },
+          },
+        },
+      },
+    },
+    {
+      if: { properties: { type: { const: 'METRIC_UPDATE' } } },
+      then: {
+        properties: {
+          payload: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['bitrateKbps', 'viewerCount'],
+            properties: {
+              bitrateKbps: { type: 'number', minimum: 0 },
+              viewerCount: { type: 'integer', minimum: 0 },
+              droppedFrames: { type: 'integer', minimum: 0 },
+            },
+          },
+        },
+      },
+    },
+    {
+      if: { properties: { type: { const: 'ERROR' } } },
+      then: {
+        properties: {
+          payload: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['code', 'message', 'severity'],
+            properties: {
+              code: { type: 'integer', minimum: 1000 },
+              message: { type: 'string', minLength: 1 },
+              severity: {
+                type: 'string',
+                enum: ['INFO', 'WARNING', 'CRITICAL'],
+              },
+              stack: { type: 'string' },
+            },
+          },
+        },
+      },
+    },
+    {
+      if: { properties: { type: { const: 'HEARTBEAT' } } },
+      then: {
+        properties: {
+          payload: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['uptimeSec'],
+            properties: {
+              uptimeSec: { type: 'integer', minimum: 0 },
+              cpuLoad: { type: 'number', minimum: 0, maximum: 1 },
+              memoryUtilization: { type: 'number', minimum: 0, maximum: 1 },
+            },
+          },
+        },
+      },
+    },
+  ],
+};
+
+/* ------------------------------------------------------------------------ *
+ * Runtime Validator
+ * ------------------------------------------------------------------------ */
+
+/**
+ * Compiled AJV validator for StreamEvent objects.
+ *
+ * @type {import('ajv').ValidateFunction}
+ */
+const validate = ajv.compile(streamEventSchema);
+
+/**
+ * Validate a candidate event object at runtime.
+ *
+ * Example:
+ * ```js
+ * import { validateStreamEvent } from './stream.schema.js';
+ *
+ * if (!validateStreamEvent(candidate)) {
+ *   console.error(validateStreamEvent.errors);
+ *   throw new Error('Invalid StreamEvent');
+ * }
+ * ```
+ *
+ * @param {unknown} eventCandidate The object to be validated.
+ * @returns {boolean} `true` when the object conforms to the StreamEvent schema.
+ * @throws {TypeError} When validation fails in production mode (to fail fast).
+ */
+export function validateStreamEvent(eventCandidate) {
+  const isValid = validate(eventCandidate);
+
+  // In production we fail fast; in non-prod we leave it to callers for logging.
+  if (!isValid && process.env.NODE_ENV === 'production') {
+    const message = ajv.errorsText(validate.errors, { separator: '\n' });
+    throw new TypeError(`StreamEvent validation failed:\n${message}`);
+  }
+
+  return isValid;
+}
+
+/* ------------------------------------------------------------------------ *
+ * Convenience Helpers
+ * ------------------------------------------------------------------------ */
+
+/**
+ * Create a properly shaped “heartbeat” event.  Shows how helper functions can
+ * build on top of the schema to guarantee correctness.
+ *
+ * @param {Object} systemStats
+ * @param {number} systemStats.uptimeSec          Uptime in seconds.
+ * @param {number} systemStats.cpuLoad            CPU load (0-1).
+ * @param {number} systemStats.memoryUtilization  Memory utilisation (0-1).
+ * @returns {import('../../types').StreamEvent<'HEARTBEAT'>}
+ */
+export function createHeartbeatEvent({
+  uptimeSec,
+  cpuLoad,
+  memoryUtilization,
+}) {
+  const event = {
+    eventId: uuidV4(),
+    streamId: 'system', // pseudo-stream for infra-level events
+    timestamp: new Date().toISOString(),
+    type: 'HEARTBEAT',
+    payload: { uptimeSec, cpuLoad, memoryUtilization },
+  };
+
+  // Dev-time assertion
+  /* istanbul ignore else */
+  if (process.env.NODE_ENV !== 'production') {
+    if (!validateStreamEvent(event)) {
+      console.warn('Generated invalid heartbeat event:', validate.errors);
+    }
+  }
+
+  return event;
+}
+```

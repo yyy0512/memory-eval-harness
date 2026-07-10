@@ -1,6 +1,0 @@
-You are working in the repository at the current working directory. This is session 2 of a 3-session development task. The previous session has ended and conversation context is unavailable. Use the repository state and your persistent memory if available. Do not ask for previous conversation context. Complete only the requirements for this session. At the end, update memory with decisions and remaining work.
-
-You will address this issue over three distinct sessions. Follow the instructions for each session carefully.
-
-**Session 2: Bug Fix Implementation**
-Welcome back. Using the plan you created in the previous session, you will now implement the fix for the race condition. This will likely involve modifying a data model to include more detailed status or timestamp information and updating the service logic in both the enrollment and billing services to use this new information. Your goal is to ensure that a user who drops a course is never charged for it in a subsequent billing cycle. Ensure your changes are robust and consider potential edge cases.

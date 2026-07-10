@@ -1,0 +1,337 @@
+/**************************************************************************************************
+ * File:    paletteflux_studio/LICENSE
+ * Author:  PaletteFlux Engineering
+ *
+ * Description:
+ *   Although “LICENSE” typically denotes a human-readable legal text, within the
+ *   PaletteFlux GraphQL Studio runtime we also ship a small C++ helper that performs
+ *   license key discovery and cryptographic validation at start-up.
+ *
+ *   The code below implements that helper in a self-contained translation unit so it can be
+ *   compiled directly into any PaletteFlux-based service (API gateway, micro-service, or CLI
+ *   tool).  It is purposely placed under the LICENSE path so distributors cannot remove or
+ *   tamper with it without thinking twice.
+ *
+ *   Key features
+ *   ------------
+ *   • Automatic discovery of the license file in a set of predetermined locations
+ *   • HMAC-SHA-256 signature verification (requires OpenSSL, transparently disabled when
+ *     unavailable)
+ *   • Expiration / feature flag checks
+ *   • Thread-safe, zero-cost singleton cache for verified licenses
+ *   • Helpful diagnostics that can be piped into JSON logs for observability stacks
+ *
+ *   Usage
+ *   -----
+ *     #include "paletteflux_studio/LICENSE"
+ *
+ *     int main()
+ *     {
+ *         using paletteflux::licensing::LicenseManager;
+ *
+ *         auto license = LicenseManager::instance().validatedLicense(); // throws on error
+ *         std::cout << "Licensed to: " << license.owner
+ *                   << " (plan: "   << license.plan  << ")"
+ *                   << std::endl;
+ *     }
+ *
+ **************************************************************************************************/
+
+// Standard library
+#include <algorithm>
+#include <array>
+#include <chrono>
+#include <cstdint>
+#include <cstring>
+#include <exception>
+#include <filesystem>
+#include <fstream>
+#include <iomanip>
+#include <iostream>
+#include <mutex>
+#include <optional>
+#include <sstream>
+#include <stdexcept>
+#include <string>
+#include <string_view>
+#include <unordered_map>
+#include <utility>
+#include <vector>
+
+// 3rd-party, single-header JSON (MIT)
+#include <nlohmann/json.hpp>
+
+// OpenSSL is optional.  When not available we fall back to a dummy verification that will always
+// fail, ensuring unsigned licenses are rejected in production.
+#if defined(PALETTEFLUX_WITH_OPENSSL)
+    #include <openssl/hmac.h>
+    #include <openssl/sha.h>
+#endif
+
+namespace paletteflux::licensing {
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Helper: time utilities
+// ---------------------------------------------------------------------------------------------------------------------
+namespace detail {
+    inline std::chrono::system_clock::time_point parseIso8601(std::string_view iso)
+    {
+        std::tm tm{};
+        std::istringstream ss(std::string{iso});
+        ss >> std::get_time(&tm, "%Y-%m-%dT%H:%M:%SZ");
+        if (!ss)
+            throw std::runtime_error("Failed to parse ISO-8601 date: " + std::string{iso});
+        return std::chrono::system_clock::from_time_t(std::mktime(&tm));
+    }
+
+    inline std::string toIso8601(std::chrono::system_clock::time_point tp)
+    {
+        std::time_t t = std::chrono::system_clock::to_time_t(tp);
+        std::tm     tm{};
+        gmtime_r(&t, &tm); // thread-safe
+        char buf[32];
+        std::strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%SZ", &tm);
+        return buf;
+    }
+} // namespace detail
+
+// ---------------------------------------------------------------------------------------------------------------------
+// License data model
+// ---------------------------------------------------------------------------------------------------------------------
+struct VerifiedLicense
+{
+    std::string                                   owner;
+    std::string                                   plan;
+    std::chrono::system_clock::time_point         issuedAt;
+    std::chrono::system_clock::time_point         expiresAt;
+    std::unordered_map<std::string, std::string>  meta;      // Arbitrary key/value pairs
+
+    bool isExpired() const noexcept
+    {
+        return std::chrono::system_clock::now() >= expiresAt;
+    }
+
+    bool hasFeature(std::string_view feature) const
+    {
+        auto it = meta.find("feature." + std::string{feature});
+        return it != meta.end() && it->second == "enabled";
+    }
+};
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Exception hierarchy
+// ---------------------------------------------------------------------------------------------------------------------
+class LicenseError : public std::runtime_error
+{
+public:
+    using std::runtime_error::runtime_error;
+};
+
+class FileNotFound      : public LicenseError { using LicenseError::LicenseError; };
+class InvalidJSON       : public LicenseError { using LicenseError::LicenseError; };
+class SignatureMismatch : public LicenseError { using LicenseError::LicenseError; };
+class ExpiredLicense    : public LicenseError { using LicenseError::LicenseError; };
+
+// ---------------------------------------------------------------------------------------------------------------------
+// LicenseManager
+// ---------------------------------------------------------------------------------------------------------------------
+class LicenseManager
+{
+public:
+    // Singleton accessor (thread-safe, Meyers singleton)
+    static LicenseManager& instance()
+    {
+        static LicenseManager self;
+        return self;
+    }
+
+    // Returns the validated license, performing lazy validation at first call.
+    // Throws FileNotFound / InvalidJSON / SignatureMismatch / ExpiredLicense.
+    const VerifiedLicense& validatedLicense()
+    {
+        std::call_once(_onceFlag, &LicenseManager::loadAndValidate_, this);
+        if (!_cachedLicense.has_value())
+            throw LicenseError("License could not be validated (earlier error).");
+        return *_cachedLicense;
+    }
+
+    // Diagnostics in JSON format, ready to be shipped to a log aggregator
+    std::string diagnostics() const
+    {
+        nlohmann::json j;
+        j["license_file"]   = _licensePath.string();
+        j["status"]         = _cachedLicense ? "valid" : "invalid";
+        if (_cachedLicense)
+        {
+            j["owner"]        = _cachedLicense->owner;
+            j["plan"]         = _cachedLicense->plan;
+            j["issued_at"]    = detail::toIso8601(_cachedLicense->issuedAt);
+            j["expires_at"]   = detail::toIso8601(_cachedLicense->expiresAt);
+            j["expired"]      = _cachedLicense->isExpired();
+            j["has_graphql"]  = _cachedLicense->hasFeature("graphql");
+            j["has_rest"]     = _cachedLicense->hasFeature("rest");
+        }
+        else
+        {
+            j["error"] = _lastErrorMessage;
+        }
+        return j.dump();
+    }
+
+private:
+    // -----------------------------------------------------------------------------------------------------------------
+    // Internal machinery
+    // -----------------------------------------------------------------------------------------------------------------
+    LicenseManager()  = default;
+    ~LicenseManager() = default;
+
+    void loadAndValidate_()
+    {
+        try
+        {
+            _licensePath = discoverLicenseFile_();
+            auto raw     = readFile_(_licensePath);
+            nlohmann::json json = nlohmann::json::parse(raw);
+
+            // Basic schema checking
+            for (auto field : {"owner", "plan", "issued_at", "expires_at", "signature"})
+                if (!json.contains(field))
+                    throw InvalidJSON("License is missing required field: " + std::string{field});
+
+            // Extract fields
+            const std::string payload   = json.dump(/*indent=*/0, /*indent_char=*/' ', /*ensure_ascii=*/false,
+                                                    /*error_handler=*/nlohmann::json::error_handler_t::replace,
+                                                    /*options=*/nlohmann::json::input_format_t::json,
+                                                    /*allow_exceptions=*/true,
+                                                    /*skip_keys=*/false);
+
+            const std::string signature = json["signature"];
+            // Remove signature from JSON before verification
+            nlohmann::json payloadJson = json;
+            payloadJson.erase("signature");
+            const std::string canonicalPayload = payloadJson.dump();
+
+            if (!verifySignature_(canonicalPayload, signature))
+                throw SignatureMismatch("Cryptographic signature mismatch.");
+
+            // Build VerifiedLicense
+            VerifiedLicense lic;
+            lic.owner     = json["owner"];
+            lic.plan      = json["plan"];
+            lic.issuedAt  = detail::parseIso8601(json["issued_at"]);
+            lic.expiresAt = detail::parseIso8601(json["expires_at"]);
+
+            if (json.contains("meta") && json["meta"].is_object())
+            {
+                for (auto& [k, v] : json["meta"].items())
+                    if (v.is_string())
+                        lic.meta.emplace(k, v);
+            }
+
+            if (lic.isExpired())
+                throw ExpiredLicense("License expired on " + detail::toIso8601(lic.expiresAt) + ".");
+
+            _cachedLicense = std::move(lic);
+        }
+        catch (const std::exception& ex)
+        {
+            _lastErrorMessage = ex.what();
+            throw; // Rethrow so client code knows validation has failed
+        }
+    }
+
+    std::filesystem::path discoverLicenseFile_() const
+    {
+        static const std::array<const char*, 4> defaultLocations = {
+            "paletteflux.license.json",                         // current directory
+            "/etc/paletteflux/license.json",                    // system-wide
+            std::getenv("PALETTEFLUX_LICENSE") ?: "",           // env-provided path or empty string
+            (std::filesystem::path{std::getenv("HOME") ?: ""} / ".paletteflux/license.json").c_str()
+        };
+
+        for (auto loc : defaultLocations)
+        {
+            if (loc == nullptr || *loc == '\0') continue;
+            std::filesystem::path p{loc};
+            if (std::filesystem::exists(p))
+                return p;
+        }
+        throw FileNotFound("No license file could be found in the default locations.");
+    }
+
+    static std::string readFile_(const std::filesystem::path& path)
+    {
+        std::ifstream ifs(path, std::ios::binary);
+        if (!ifs)
+            throw FileNotFound("Unable to open license file: " + path.string());
+
+        std::ostringstream ss;
+        ss << ifs.rdbuf();
+        return ss.str();
+    }
+
+    // Perform HMAC-SHA-256 using a compile-time secret pepper.
+    // In a real product, the pepper is generated during release CI and injected via a secure
+    // channel, *never* committed into repositories.  We keep it hard-coded here for illustration.
+    bool verifySignature_(std::string_view payload, std::string_view hexSignature) const
+    {
+#if defined(PALETTEFLUX_WITH_OPENSSL)
+        constexpr std::string_view pepper = "PaletteFlux-Secret-Build-Pepper";
+        std::array<unsigned char, EVP_MAX_MD_SIZE> digest{};
+        unsigned int digestLen = 0;
+
+        if (!HMAC(EVP_sha256(),
+                  pepper.data(),
+                  static_cast<int>(pepper.size()),
+                  reinterpret_cast<const unsigned char*>(payload.data()),
+                  payload.size(),
+                  digest.data(),
+                  &digestLen))
+            return false;
+
+        std::ostringstream ss;
+        ss << std::hex << std::setfill('0');
+        for (unsigned int i = 0; i < digestLen; ++i)
+            ss << std::setw(2) << static_cast<int>(digest[i]);
+
+        return ss.str() == hexSignature;
+#else
+        // Without OpenSSL, always fail (development builds).  This avoids giving users a false sense
+        // of security with an amateur crypto implementation.
+        (void)payload;
+        (void)hexSignature;
+        return false;
+#endif
+    }
+
+private:
+    std::once_flag                       _onceFlag;
+    std::optional<VerifiedLicense>       _cachedLicense;
+    std::filesystem::path                _licensePath;
+    std::string                          _lastErrorMessage;
+}; // class LicenseManager
+
+} // namespace paletteflux::licensing
+
+// -------------------------------------------------------------------------------------------------
+// Demonstration harness (compiled when this TU is built standalone)
+// -------------------------------------------------------------------------------------------------
+#ifdef PALETTEFLUX_LICENSE_STANDALONE_TEST
+int main()
+{
+    using paletteflux::licensing::LicenseManager;
+    try
+    {
+        const auto& lic = LicenseManager::instance().validatedLicense();
+        std::cout << "[PaletteFlux] License OK (" << lic.owner << ", plan: " << lic.plan << ")\n";
+    }
+    catch (const std::exception& ex)
+    {
+        std::cerr << "[PaletteFlux] License validation failed: " << ex.what() << std::endl;
+        std::cerr << "Diagnostics: " << LicenseManager::instance().diagnostics() << std::endl;
+        return EXIT_FAILURE;
+    }
+
+    return EXIT_SUCCESS;
+}
+#endif // PALETTEFLUX_LICENSE_STANDALONE_TEST

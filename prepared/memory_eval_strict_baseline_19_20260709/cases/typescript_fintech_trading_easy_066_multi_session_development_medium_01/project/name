@@ -1,0 +1,314 @@
+```typescript
+/**
+ * MediTrade Pulse – Clinical & Financial Risk Engine
+ *
+ * This file contains the domain-layer implementation of a deterministic
+ * risk-scoring algorithm used by the trading engine to validate whether an
+ * Order is eligible for execution in a regulated, healthcare-centric market.
+ *
+ * NOTE:
+ *  • This file is 100 % pure domain logic – it has zero knowledge of I/O,
+ *    frameworks, or persistence layers. Hexagonal­-architecture FTW. ⚙️
+ *  • In a real project most types would live in their own modules; they are
+ *    inlined here to keep the file self-contained and compilable.
+ */
+
+/* -------------------------------------------------------------------------- */
+/*                               Domain Models                                */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * ISO-4217 currency codes supported by the platform.
+ * Extend as needed.
+ */
+export type Currency = 'USD' | 'EUR' | 'GBP' | 'JPY' | 'CHF';
+
+/**
+ * Enumerates the clinical/operational flags that can be attached to a trade.
+ * All flags are orthogonal – an Order may contain multiple flags at once.
+ */
+export enum ClinicalComplianceFlag {
+  BatchRecall = 'BATCH_RECALL',
+  TempExcursion = 'TEMP_EXCURSION',
+  ExpiryNear = 'EXPIRY_NEAR',
+  ControlledSubstance = 'CONTROLLED_SUBSTANCE',
+  UnapprovedSupplier = 'UNAPPROVED_SUPPLIER',
+}
+
+/**
+ * Commodity meta-info relevant for risk calculation.
+ */
+export interface CommodityMeta {
+  /** Unique ISO-like identifier, e.g., “PPE-MASK-FFP2” */
+  code: string;
+  /** “VACCINE”, “PPE”, “API”, … */
+  category: string;
+  /** True if item is temperature-sensitive (e.g., vaccines) */
+  coldChain: boolean;
+  /** Shelf life in months; 0 = non-perishable */
+  shelfLifeMonths: number;
+  /** Whether the commodity is a controlled substance subject to DEA controls */
+  controlledSubstance: boolean;
+}
+
+/**
+ * Order aggregate root (simplified for demo).
+ */
+export interface Order {
+  /** ULID, UUID v4, or similar opaque identifier */
+  id: string;
+  /** Commodity meta-data snapshot taken at order creation time */
+  commodity: CommodityMeta;
+  /** Nominal units requested, e.g., “1000” masks */
+  quantity: number;
+  /** Price per unit in the given currency */
+  unitPrice: number;
+  /** Trading currency */
+  currency: Currency;
+  /** ISO-8601 timestamp of desired delivery date */
+  deliveryDate: string;
+  /** (Optional) ISO-8601 date string if order references a specific batch */
+  batchExpiryDate?: string;
+  /** Flags raised by upstream clinical systems (FHIR, HL7 events, etc.) */
+  complianceFlags: Set<ClinicalComplianceFlag>;
+}
+
+/**
+ * Numeric risk value & severity buckets.
+ */
+export enum RiskLevel {
+  Low = 'LOW',
+  Medium = 'MEDIUM',
+  High = 'HIGH',
+  Critical = 'CRITICAL',
+}
+
+/**
+ * Immutable outcome of a risk assessment.
+ */
+export interface RiskScore {
+  /** Total weighted score in range [0; 100+] */
+  value: number;
+  /** Discrete bucket derived from `value` */
+  level: RiskLevel;
+  /** Human-readable reasons that contributed to the score */
+  reasons: string[];
+  /** Timestamp of assessment (UTC, ISO-8601) */
+  assessedAt: string;
+}
+
+/**
+ * Domain-level exception that can be thrown when data is missing or invalid.
+ */
+export class DomainError extends Error {
+  readonly name = 'DomainError';
+  constructor(message: string, public readonly details?: unknown) {
+    super(message);
+    Object.setPrototypeOf(this, new.target.prototype);
+  }
+}
+
+/* -------------------------------------------------------------------------- */
+/*                             Risk Weighting Table                           */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Centralised weighting system for every possible compliance condition.
+ * Values were chosen with domain experts (clinicians + quants); adjust
+ * cautiously – audit trails depend on deterministic outputs.
+ */
+const RISK_WEIGHTS: Readonly<Record<ClinicalComplianceFlag, number>> = {
+  [ClinicalComplianceFlag.BatchRecall]: 50,
+  [ClinicalComplianceFlag.TempExcursion]: 40,
+  [ClinicalComplianceFlag.ExpiryNear]: 30,
+  [ClinicalComplianceFlag.ControlledSubstance]: 25,
+  [ClinicalComplianceFlag.UnapprovedSupplier]: 20,
+};
+
+/**
+ * Helper to convert a numeric value into a discrete RiskLevel bucket.
+ */
+function bucketize(value: number): RiskLevel {
+  if (value < 20) return RiskLevel.Low;
+  if (value < 50) return RiskLevel.Medium;
+  if (value < 80) return RiskLevel.High;
+  return RiskLevel.Critical;
+}
+
+/* -------------------------------------------------------------------------- */
+/*                               Risk Engine                                  */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Domain service: calculates a deterministic RiskScore for an Order based on
+ * current clinical compliance flags and commodity metadata.
+ */
+export class RiskEngine {
+  /** Lowest possible risk (empty score). */
+  private static readonly BASE_SCORE: RiskScore = Object.freeze({
+    value: 0,
+    level: RiskLevel.Low,
+    reasons: [],
+    assessedAt: '',
+  });
+
+  /**
+   * Perform a full risk assessment. This method is synchronous, deterministic
+   * and side-effect free; callers may cache or memoize results inside
+   * sagas/aggregates if required.
+   */
+  public static assess(order: Order): RiskScore {
+    if (!order) {
+      throw new DomainError('Order must be defined');
+    }
+
+    const reasons: string[] = [];
+    let score = 0;
+
+    // 1) Process explicit compliance flags
+    for (const flag of order.complianceFlags) {
+      const weight = RISK_WEIGHTS[flag];
+      score += weight;
+      reasons.push(`Flagged ${flag} (+${weight})`);
+    }
+
+    // 2) Automatic flagging based on metadata
+    // 2.a) Cold-chain commodity without temperature excursion flag? If we
+    // don't know status, raise medium precaution.
+    if (
+      order.commodity.coldChain &&
+      !order.complianceFlags.has(ClinicalComplianceFlag.TempExcursion)
+    ) {
+      const weight = 10;
+      score += weight;
+      reasons.push(
+        `Cold-chain commodity without temperature status (+${weight})`,
+      );
+    }
+
+    // 2.b) Expiry proximity analysis if batch expiry date is known.
+    if (order.batchExpiryDate) {
+      const expiresInDays = RiskEngine.daysBetween(
+        new Date(),
+        new Date(order.batchExpiryDate),
+      );
+
+      if (expiresInDays < 0) {
+        const weight = 100; // already expired
+        score += weight;
+        reasons.push(`Batch already expired (${expiresInDays}d) (+${weight})`);
+      } else if (expiresInDays <= 30) {
+        const weight = 30;
+        score += weight;
+        reasons.push(
+          `Batch expiry within 30 days (${expiresInDays}d) (+${weight})`,
+        );
+      } else if (expiresInDays <= 90) {
+        const weight = 10;
+        score += weight;
+        reasons.push(
+          `Batch expiry within 90 days (${expiresInDays}d) (+${weight})`,
+        );
+      }
+    } else if (order.commodity.shelfLifeMonths > 0) {
+      // Unknown expiry for perishable goods
+      const weight = 15;
+      score += weight;
+      reasons.push(`Unknown batch expiry (+${weight})`);
+    }
+
+    // 2.c) Controlled substance implicit risk boost if flag missing.
+    if (
+      order.commodity.controlledSubstance &&
+      !order.complianceFlags.has(ClinicalComplianceFlag.ControlledSubstance)
+    ) {
+      const weight = RISK_WEIGHTS[ClinicalComplianceFlag.ControlledSubstance];
+      score += weight;
+      reasons.push(
+        `Unflagged controlled substance (+${weight})`,
+      );
+    }
+
+    // 3) Financial sanity checks
+    if (order.unitPrice <= 0) {
+      throw new DomainError('Unit price must be greater than zero', order);
+    }
+    if (order.quantity <= 0) {
+      throw new DomainError('Quantity must be greater than zero', order);
+    }
+
+    // 4) Large order premium (non-linear)
+    const notional = order.quantity * order.unitPrice;
+    if (notional >= 1_000_000) {
+      const weight = 25;
+      score += weight;
+      reasons.push(`Large notional value (${notional}) (+${weight})`);
+    }
+
+    // 5) Compute final bucket & timestamp
+    const finalScore: RiskScore = {
+      value: score,
+      level: bucketize(score),
+      reasons,
+      assessedAt: new Date().toISOString(),
+    };
+
+    return finalScore;
+  }
+
+  /* ----------------------------- Utilities ------------------------------ */
+
+  /**
+   * Returns the number of whole days (rounded down) between two dates.
+   */
+  private static daysBetween(a: Date, b: Date): number {
+    const diffMs = b.getTime() - a.getTime();
+    return Math.floor(diffMs / (1000 * 60 * 60 * 24));
+  }
+}
+
+/* -------------------------------------------------------------------------- */
+/*                               Unit Tests                                   */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Simple inline tests. In production we would place jest/vitest specs
+ * elsewhere, but the following ensures the algorithm behaves as expected.
+ * Comment out or remove if a real test runner is in place.
+ */
+function selfTest() {
+  const order: Order = {
+    id: '01HPYZTZ7J1Y7Q4BQM4ZJE8FWM',
+    commodity: {
+      code: 'VACCINE-COVID19',
+      category: 'VACCINE',
+      coldChain: true,
+      shelfLifeMonths: 9,
+      controlledSubstance: false,
+    },
+    quantity: 10_000,
+    unitPrice: 12.5,
+    currency: 'USD',
+    deliveryDate: new Date(Date.now() + 7 * 864e5).toISOString(), // +7d
+    batchExpiryDate: new Date(Date.now() + 25 * 864e5).toISOString(), // +25d
+    complianceFlags: new Set<ClinicalComplianceFlag>([
+      ClinicalComplianceFlag.TempExcursion,
+    ]),
+  };
+
+  const result = RiskEngine.assess(order);
+  console.assert(
+    result.level === RiskLevel.High || result.level === RiskLevel.Critical,
+    `Unexpected risk level: ${result.level}`,
+  );
+}
+
+// Run self-test only when this file is executed directly (ts-node, ts-node-dev, etc.)
+if (require.main === module) {
+  // eslint-disable-next-line no-console
+  console.log('Running RiskEngine self-test…');
+  selfTest();
+  // eslint-disable-next-line no-console
+  console.log('✅ All RiskEngine self-tests passed');
+}
+```

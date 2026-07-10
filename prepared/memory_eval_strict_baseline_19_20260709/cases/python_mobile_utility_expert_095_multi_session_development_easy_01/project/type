@@ -1,0 +1,341 @@
+```python
+"""
+PrismPocket – domain “type” helpers
+===================================
+
+This module centralises *strongly-typed* value objects and supporting
+utilities that are used throughout PrismPocket’s domain layer:
+
+    • Runtime-validated ID wrappers (e.g. ``PrismCardID``)
+    • Enumerations that describe core concepts (media kinds, mood scores…)
+    • A reflection-friendly registry that maps string aliases to Python
+      classes – invaluable when the cloud workspace sends JSON payloads
+      that need to be re-hydrated into rich domain entities.
+
+The code purposely avoids third-party runtime-validation libraries to
+stay lightweight on mobile but still enforces correctness early.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import re
+import uuid
+from dataclasses import asdict, dataclass
+from enum import Enum, unique
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Generic,
+    Optional,
+    Tuple,
+    Type,
+    TypeVar,
+    Union,
+)
+
+__all__ = [
+    # ID wrappers
+    "TypedID",
+    "PrismCardID",
+    "UserID",
+    "RemixSessionID",
+    # Enumerations
+    "MediaKind",
+    "MoodScore",
+    "CardLifecycle",
+    # Value objects
+    "HSVColor",
+    "GeoPoint",
+    "PaletteMetric",
+    # Utilities
+    "TypeRegistry",
+    "parse_typed_id",
+]
+
+_LOGGER = logging.getLogger(__name__)
+_LOGGER.addHandler(logging.NullHandler())  # Library neutrality
+
+_HEX32_RE = re.compile(r"^[a-f0-9]{32}$", re.IGNORECASE)
+
+T_contra = TypeVar("T_contra", bound=str, contravariant=True)
+
+
+class TypedID(str, Generic[T_contra]):
+    """
+    A **strongly-typed, 32-char hexadecimal** identifier used by every
+    aggregate root in the domain layer.
+
+    Sub-classing is trivial and automatically inherits validation::
+
+        class PrismCardID(TypedID["PrismCardID"]):
+            \"\"\"Identifier of a ``PrismCard`` aggregate\"\"\"
+
+            pass
+    """
+
+    __slots__: Tuple[str, ...] = ()
+
+    # --------------------------------------------------------------------- #
+    # Construction helpers
+    # --------------------------------------------------------------------- #
+
+    def __new__(cls: Type["TypedID"], value: Union[str, uuid.UUID, None] = None) -> "TypedID":
+        """
+        Args
+        ----
+        value:
+            – *None*      → generates a random UUID
+            – *uuid.UUID* → converted to its compact hex form
+            – *str*       → expected to be 32 hexadecimal characters
+        """
+        if value is None:
+            value = uuid.uuid4().hex
+        elif isinstance(value, uuid.UUID):
+            value = value.hex
+        else:
+            value = str(value)
+
+        if not _HEX32_RE.fullmatch(value):
+            raise ValueError(f"{value!r} is not a valid 32-character hexadecimal ID")
+
+        return str.__new__(cls, value)
+
+    # ------------------------------------------------------------------ #
+    # Convenience API
+    # ------------------------------------------------------------------ #
+
+    @classmethod
+    def generate(cls: Type["TypedID"]) -> "TypedID":
+        """Factory shortcut mirroring ``uuid.uuid4`` semantics."""
+        return cls(uuid.uuid4().hex)
+
+    def json(self) -> str:
+        """JSON-serialisable representation (just the plain string)."""
+        return str(self)
+
+    # Python data-model niceties --------------------------------------- #
+
+    def __repr__(self) -> str:  # pragma: no cover
+        return f"<{self.__class__.__name__} {str(self)}>"
+
+
+# Concrete ID classes ------------------------------------------------------ #
+
+
+class PrismCardID(TypedID["PrismCardID"]):
+    """Identifier of a *PrismCard* aggregate."""
+
+
+class UserID(TypedID["UserID"]):
+    """Identifier of a *User* aggregate."""
+
+
+class RemixSessionID(TypedID["RemixSessionID"]):
+    """Identifier of a *RemixSession* aggregate."""
+
+
+# Enumerations ------------------------------------------------------------- #
+
+
+@unique
+class MediaKind(Enum):
+    """Supported raw capture types."""
+
+    TEXT = "text"
+    PHOTO = "photo"
+    VIDEO = "video"
+    VOICE = "voice"
+    GEOTAG = "geotag"
+    DOODLE = "doodle"
+
+    # Python-first convenience
+    __str__ = str  # type: ignore[assignment]
+
+
+@unique
+class MoodScore(Enum):
+    """Simplified sentiment categories – fine-grained floats live elsewhere."""
+
+    POSITIVE = "positive"
+    NEUTRAL = "neutral"
+    NEGATIVE = "negative"
+
+    __str__ = str  # type: ignore[assignment]
+
+
+@unique
+class CardLifecycle(Enum):
+    """Finite-state machine describing a *PrismCard*’s journey."""
+
+    DRAFT = "draft"            # Local only
+    SYNCED = "synced"          # Uploaded to cloud
+    PUBLISHED = "published"    # Visible to collaborators / social
+    ARCHIVED = "archived"      # Hidden but retrievable
+    DELETED = "deleted"        # Scheduled for removal
+
+    __str__ = str  # type: ignore[assignment]
+
+
+# Value objects ------------------------------------------------------------ #
+
+
+@dataclass(frozen=True, slots=True)
+class HSVColor:
+    """
+    Lightweight HSV color – better matches artists' mental model than RGB.
+    The class is *hashable* and *immutable*, making it repository-cache-friendly.
+    """
+
+    h: float  # 0 – 360
+    s: float  # 0 – 1
+    v: float  # 0 – 1
+
+    def to_hex(self) -> str:
+        """Return the nearest 24-bit hexadecimal colour."""
+        import colorsys
+
+        r, g, b = colorsys.hsv_to_rgb(self.h / 360.0, self.s, self.v)
+        return f"#{int(r*255):02x}{int(g*255):02x}{int(b*255):02x}"
+
+    def to_json(self) -> str:
+        return json.dumps(asdict(self))
+
+
+@dataclass(frozen=True, slots=True)
+class GeoPoint:
+    """A WGS-84 coordinate (used by maps & geotagging)."""
+
+    lat: float
+    lon: float
+
+    def to_json(self) -> str:
+        return json.dumps(asdict(self))
+
+
+@dataclass(frozen=True, slots=True)
+class PaletteMetric:
+    """
+    Captures analytics around user-generated colour palettes.
+    Intentionally minimal – heavy lifting is done server-side.
+    """
+
+    dominant_colors: Tuple[HSVColor, ...]
+    mood_score: float  # Normalised in range [-1, 1]
+    usage_count: int = 1
+
+    # ------------------------------------------------------------------ #
+
+    def increment_usage(self) -> "PaletteMetric":
+        """Return a *new* instance with ``usage_count+1``. Immutable FTW."""
+        return PaletteMetric(
+            dominant_colors=self.dominant_colors,
+            mood_score=self.mood_score,
+            usage_count=self.usage_count + 1,
+        )
+
+    def to_json(self) -> str:
+        data = asdict(self)
+        # HSVColors aren’t JSON-serialisable by default → convert explicitly
+        data["dominant_colors"] = [c.to_hex() for c in self.dominant_colors]
+        return json.dumps(data)
+
+
+# Reflection utilities ----------------------------------------------------- #
+
+
+class TypeRegistry:
+    """
+    Runtime mapping *string → class* used when deserialising polymorphic
+    JSON from the cloud API (e.g. analytics events, bus notifications).
+
+    Example
+    -------
+    >>> @TypeRegistry.register("prism_card_id")
+    ... class PrismCardID(TypedID["PrismCardID"]): pass
+    """
+
+    _registry: Dict[str, Type[Any]] = {}
+
+    # ------------------------------------------------------------------ #
+    # Public API
+    # ------------------------------------------------------------------ #
+
+    @classmethod
+    def register(cls, alias: str) -> Callable[[Type[Any]], Type[Any]]:
+        """
+        Decorator that registers *alias* for the decorated class.
+        Throws ``ValueError`` on duplicates to avoid silent data confusion.
+        """
+
+        def decorator(target: Type[Any]) -> Type[Any]:
+            alias_l = alias.lower()
+            if alias_l in cls._registry:
+                raise ValueError(f"Alias {alias!r} already registered to {cls._registry[alias_l]}")
+            cls._registry[alias_l] = target
+            _LOGGER.debug("Registered type alias %s → %s", alias_l, target)
+            return target
+
+        return decorator
+
+    # ..................................................................
+
+    @classmethod
+    def resolve(cls, alias: str) -> Type[Any]:
+        """
+        Retrieve a class previously registered under *alias*.
+
+        Raises
+        ------
+        KeyError:
+            If the alias is unknown – calling code should decide whether
+            to fall back, raise, or download an updated plugin package.
+        """
+        try:
+            return cls._registry[alias.lower()]
+        except KeyError as exc:
+            raise KeyError(f"No type registered under alias {alias!r}") from exc
+
+    # ------------------------------------------------------------------ #
+    # House-keeping utilities
+    # ------------------------------------------------------------------ #
+
+    @classmethod
+    def aliases(cls) -> Tuple[str, ...]:
+        """Read-only view of known aliases (helpful for telemetry)."""
+        return tuple(cls._registry)
+
+
+# Helper functions --------------------------------------------------------- #
+
+
+def parse_typed_id(raw: str, expected_cls: Type[TypedID]) -> TypedID:
+    """
+    Attempt to coerce *raw* into *expected_cls*.  
+    Raises a detailed ``TypeError`` instead of the lax ``ValueError`` that
+    ``TypedID`` uses internally – provides clearer stack-traces higher up.
+    """
+    try:
+        return expected_cls(raw)
+    except ValueError as exc:
+        raise TypeError(
+            f"Expected {expected_cls.__name__}-compatible value, got {raw!r}"
+        ) from exc
+
+
+# ------------------------------------------------------------------------- #
+# Defensive logging so that accidental execution in top-level scripts
+# doesn’t spam stderr while still preserving breadcrumbs for crash reports.
+# ------------------------------------------------------------------------- #
+
+if __name__ == "__main__":  # pragma: no cover
+    logging.basicConfig(level=logging.INFO)
+    _LOGGER.warning(
+        "The %s module is a library component and should not be executed "
+        "directly. Printing registry contents for debugging purposes only.",
+        __name__,
+    )
+    print("Known type aliases:", TypeRegistry.aliases())
+```

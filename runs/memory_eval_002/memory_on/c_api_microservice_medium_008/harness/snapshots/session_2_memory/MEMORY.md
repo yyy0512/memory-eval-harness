@@ -1,1 +1,0 @@
-- [Order service incremental sessions](order_service_incremental_sessions.md) — Sessions 1-2 scaffold/model/handler done; Session 3 should integrate API behavior.

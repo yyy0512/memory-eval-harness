@@ -1,0 +1,201 @@
+{
+  "specification": {
+    "unique_id": "c_system_monitoring_medium_097",
+    "name": "CampusGuard EDU Monitor",
+    "description": "CampusGuard EDU Monitor is a medium-scale, C-based system monitoring suite designed specifically for university computer-science programs.  The application does more than keep servers healthy; it teaches students how professional monitoring, log aggregation, security scanning, backup/recovery, and automated deployments are built using the Model-View-Controller (MVC) paradigm.\n\nIn practice, students interact with the \"View\" through a lightweight GTK or ncurses dashboard that visualizes real-time metrics and security alerts emitted by the Observer pattern.  Controllers route user requests\u2014such as opening historical logs, starting a scan, or initiating a disaster-recovery drill\u2014through a Chain-of-Responsibility that validates permissions, queues jobs on an Event-Driven message bus, and dispatches them across a simulated Service Mesh of micro-agents running on lab VMs.  The Models encapsulate log archives, scan results, backup snapshots, deployment manifests, and alert rules, stored in SQLite and exposed over an internal REST layer so that students can experiment with data-science tooling.  By packaging professional monitoring concepts into an educative sandbox, CampusGuard helps learners explore DevSecOps practices while studying clean MVC separation and advanced design patterns.",
+    "domain": "system_monitoring",
+    "complexity": "medium",
+    "language": "c",
+    "architecture": "mvc",
+    "theme": "education",
+    "target_file_count": 36,
+    "target_token_count": 128358,
+    "features": [
+      "log_aggregation",
+      "security_scanning",
+      "backup_recovery",
+      "system_monitoring",
+      "alerting",
+      "deployment_automation"
+    ],
+    "architecture_patterns": [
+      "Observer_Pattern",
+      "Chain_of_Responsibility",
+      "Event_Driven",
+      "Service_Mesh"
+    ],
+    "dependencies": [
+      "glib (core utilities, event loop, GObject Observer implementation)",
+      "libevent or libuv (Event_Driven message bus)",
+      "json-c (configuration and API payloads)",
+      "SQLite3 (embedded data store for Models)",
+      "OpenSSL / LibreSSL (secure communication & security_scanning primitives)",
+      "libcurl (HTTP interactions with external update feeds)",
+      "GTK 3 or ncurses (alternative graphical / terminal Views)",
+      "CMake (build & deployment_automation scripts)",
+      "systemd-unit templates or Ansible playbooks (deployment_automation examples)"
+    ],
+    "seed": 265171
+  },
+  "generated_timestamp": 1754355587.365788,
+  "phase_1_complete": true,
+  "uniqueness_factors": {
+    "domain": "system_monitoring",
+    "complexity": "medium",
+    "architecture": "mvc",
+    "theme": "education",
+    "seed": 265171
+  },
+  "files": [
+    {
+      "path": "CampusGuard-EDU-Monitor//.gitignore",
+      "type": "source"
+    },
+    {
+      "path": "CampusGuard-EDU-Monitor//Makefile",
+      "type": "source"
+    },
+    {
+      "path": "CampusGuard-EDU-Monitor//README.md",
+      "type": "documentation"
+    },
+    {
+      "path": "CampusGuard-EDU-Monitor//config//monitor.conf",
+      "type": "config"
+    },
+    {
+      "path": "CampusGuard-EDU-Monitor//config//agents.json",
+      "type": "config"
+    },
+    {
+      "path": "CampusGuard-EDU-Monitor//config//rules//security_rules.json",
+      "type": "config"
+    },
+    {
+      "path": "CampusGuard-EDU-Monitor//config//rules//backup_targets.json",
+      "type": "config"
+    },
+    {
+      "path": "CampusGuard-EDU-Monitor//data//.gitkeep",
+      "type": "source"
+    },
+    {
+      "path": "CampusGuard-EDU-Monitor//data//logs//.gitkeep",
+      "type": "source"
+    },
+    {
+      "path": "CampusGuard-EDU-Monitor//data//db//.gitkeep",
+      "type": "source"
+    },
+    {
+      "path": "CampusGuard-EDU-Monitor//docs//README.md",
+      "type": "documentation"
+    },
+    {
+      "path": "CampusGuard-EDU-Monitor//docs//api//Doxyfile",
+      "type": "documentation"
+    },
+    {
+      "path": "CampusGuard-EDU-Monitor//docs//api//main_page.md",
+      "type": "documentation"
+    },
+    {
+      "path": "CampusGuard-EDU-Monitor//docs//design//01_Architecture_Overview.md",
+      "type": "documentation"
+    },
+    {
+      "path": "CampusGuard-EDU-Monitor//docs//design//02_Design_Patterns.md",
+      "type": "documentation"
+    },
+    {
+      "path": "CampusGuard-EDU-Monitor//docs//design//03_API_Specification.md",
+      "type": "test"
+    },
+    {
+      "path": "CampusGuard-EDU-Monitor//docs//guides//01_Setup_Guide.md",
+      "type": "documentation"
+    },
+    {
+      "path": "CampusGuard-EDU-Monitor//docs//guides//02_Student_Guide.md",
+      "type": "documentation"
+    },
+    {
+      "path": "CampusGuard-EDU-Monitor//docs//guides//03_Agent_Deployment.md",
+      "type": "documentation"
+    },
+    {
+      "path": "CampusGuard-EDU-Monitor//include//campus_guard.h",
+      "type": "source"
+    },
+    {
+      "path": "CampusGuard-EDU-Monitor//include//core//event_bus.h",
+      "type": "source"
+    },
+    {
+      "path": "CampusGuard-EDU-Monitor//include//core//logger.h",
+      "type": "source"
+    },
+    {
+      "path": "CampusGuard-EDU-Monitor//include//model//data_store.h",
+      "type": "source"
+    },
+    {
+      "path": "CampusGuard-EDU-Monitor//include//model//rest_api.h",
+      "type": "source"
+    },
+    {
+      "path": "CampusGuard-EDU-Monitor//include//view//view.h",
+      "type": "source"
+    },
+    {
+      "path": "CampusGuard-EDU-Monitor//include//controller//request_handler.h",
+      "type": "source"
+    },
+    {
+      "path": "CampusGuard-EDU-Monitor//include//patterns//observer.h",
+      "type": "source"
+    },
+    {
+      "path": "CampusGuard-EDU-Monitor//include//patterns//chain_of_responsibility.h",
+      "type": "source"
+    },
+    {
+      "path": "CampusGuard-EDU-Monitor//scripts//build.sh",
+      "type": "source"
+    },
+    {
+      "path": "CampusGuard-EDU-Monitor//scripts//run_monitor.sh",
+      "type": "source"
+    },
+    {
+      "path": "CampusGuard-EDU-Monitor//scripts//run_disaster_recovery_drill.sh",
+      "type": "source"
+    },
+    {
+      "path": "CampusGuard-EDU-Monitor//src//main.c",
+      "type": "source"
+    },
+    {
+      "path": "CampusGuard-EDU-Monitor//src//agents//metric_agent.c",
+      "type": "source"
+    },
+    {
+      "path": "CampusGuard-EDU-Monitor//src//agents//security_agent.c",
+      "type": "source"
+    },
+    {
+      "path": "CampusGuard-EDU-Monitor//src//agents//backup_agent.c",
+      "type": "source"
+    },
+    {
+      "path": "CampusGuard-EDU-Monitor//src//controller//request_router.c",
+      "type": "source"
+    }
+  ],
+  "generated_stats": {
+    "files_count": 36,
+    "lines_count": 10710,
+    "generation_time": 2618.870267868042,
+    "timestamp": 1754384224.891788
+  }
+}

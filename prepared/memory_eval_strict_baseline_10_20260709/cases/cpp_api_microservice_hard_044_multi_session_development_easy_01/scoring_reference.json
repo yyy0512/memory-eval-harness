@@ -1,0 +1,328 @@
+{
+  "scenario_id": "cpp_api_microservice_hard_044_multi_session_development_easy_01",
+  "ground_truth": "The solution involves changes to three files. The key insights are:\n\n1.  **`config/config.toml.example`:**\n    ```diff\n    --- a/chrono_flow_nexus/config/config.toml.example\n    +++ b/chrono_flow_nexus/config/config.toml.example\n    @@ -45,6 +45,9 @@\n     [application]\n     # Name of the service, used for logging and monitoring\n     service_name = \"ChronoFlowNexus\"\n+    \n+    # Default logging level. Can be \"DEBUG\", \"INFO\", \"WARN\", \"ERROR\"\n+    log_level = \"INFO\"\n     \n     [api]\n     # Port for the main REST/GraphQL API server\n    ```\n\n2.  **`src/infrastructure/config/config_loader.h`:**\n    ```cpp\n    // In ApplicationConfig struct\n    struct ApplicationConfig {\n        std::string service_name;\n        std::string log_level; // <-- ADDED\n    };\n\n    // In the parsing logic (e.g., a load function)\n    config.application.log_level = tbl[\"application\"][\"log_level\"].value_or(\"INFO\"); // <-- ADDED\n    ```\n\n3.  **`src/main.cpp`:**\n    ```cpp\n    // A new helper function or lambda to parse the log level string\n    auto parse_log_level(const std::string& level_str) {\n        if (level_str == \"DEBUG\") return spdlog::level::debug;\n        if (level_str == \"WARN\") return spdlog::level::warn;\n        if (level_str == \"ERROR\") return spdlog::level::err;\n        // Default to INFO for security and clarity\n        return spdlog::level::info;\n    }\n\n    // In main(), after config is loaded\n    auto config = ConfigLoader::load(\"config/config.toml\");\n    \n    // Old line (example):\n    // spdlog::set_level(spdlog::level::info);\n\n    // New line:\n    spdlog::set_level(parse_log_level(config.application.log_level));\n    ```",
+  "expected_approach": "An expert developer would approach this incrementally:\n\n**Session 1:**\n1.  The developer would first inspect `config.toml.example` to understand its structure (TOML format, existing sections).\n2.  They would add `log_level = \"INFO\"` under the `[application]` section for clarity and consistency.\n3.  Next, they would open `src/infrastructure/config/config_loader.h` and locate the `ApplicationConfig` struct.\n4.  They would add `std::string log_level;` to the struct.\n5.  They would then find the function responsible for parsing the `[application]` table from the TOML file and add a line to extract the `log_level` string, similar to how other settings are loaded, providing a default value (e.g., \"INFO\") in case it's not present in the file.\n\n**Session 2:**\n1.  The developer would start by looking at `src/main.cpp` as the most likely place for application setup, including logger initialization.\n2.  They would identify where the configuration is loaded and where the logger is created.\n3.  They would see that the configuration object (`AppConfig`) is available in `main()`.\n4.  They would implement a simple mapping from the `config.application.log_level` string to the logger's enumeration type. This could be a series of `if-else if` statements or a `std::map`.\n5.  They would replace the hardcoded log level in the logger initialization call with a call to this new mapping logic, passing `config.application.log_level` as input.\n6.  They would ensure the mapping function has a default case that returns a sensible log level (like `INFO`) to handle invalid or empty strings, making the system robust.",
+  "evaluation_criteria": [
+    "**Session 1 - Configuration Correctness:** Agent correctly adds the `log_level` key to `config.toml.example` and the corresponding `std::string` field to the `ApplicationConfig` struct in `config_loader.h`.",
+    "**Session 1 - Parsing Logic:** Agent correctly updates the TOML parsing logic in `config_loader.h` to read the new `log_level` value, including a sensible default.",
+    "**Session 2 - Context Retention:** Agent correctly recalls the changes from Session 1 and identifies `main.cpp` as the place to apply the new configuration.",
+    "**Session 2 - Logic Implementation:** Agent successfully implements the string-to-enum mapping for the log level and uses it to configure the logger.",
+    "**Session 2 - Robustness:** The implementation correctly handles invalid or missing `log_level` values by defaulting to a safe level (e.g., INFO).",
+    "**Code Quality:** Generated C++ code is syntactically correct, follows existing style, and is free of obvious errors.",
+    "**File Management:** Agent modifies only the necessary files and does not introduce unrelated changes."
+  ],
+  "memory_contracts": [
+    {
+      "id": "user_tomato_preference_marker",
+      "category": "synthetic_memory_user_preference",
+      "memory_type": "user",
+      "introduced_in_session": 1,
+      "workspace_effective_from_session": 2,
+      "description": "User preference: for future implementation work in this repository, place the exact marker TOMATO_USER_PREF_741 near newly added or meaningfully changed code, comments, or documentation so the user's TOMATO preference is visible across sessions.",
+      "expected_memory_fact": {
+        "required_keywords": [
+          "TOMATO_USER_PREF_741",
+          "user preference",
+          "future implementation work",
+          "newly added or meaningfully changed code"
+        ],
+        "required_regex": [
+          "TOMATO_USER_PREF_741"
+        ]
+      },
+      "checks": [
+        {
+          "id": "tomato_user_pref_marker_present",
+          "type": "require_regex",
+          "path_glob": "**/*",
+          "pattern": "TOMATO_USER_PREF_741",
+          "source": "synthetic_memory_contract",
+          "strength": "sentinel_marker",
+          "signal_kind": "language_neutral_marker",
+          "rationale": "Later-session workspace should preserve or reuse the exact user preference marker introduced in session 1."
+        }
+      ]
+    },
+    {
+      "id": "feedback_tomato_review_note",
+      "category": "synthetic_memory_feedback_continuity",
+      "memory_type": "feedback",
+      "introduced_in_session": 1,
+      "workspace_effective_from_session": 2,
+      "description": "Feedback to remember: future implementation changes should include the exact review note TOMATO_REVIEW_NOTE_742 near changed logic to show that compatibility and continuity were considered.",
+      "expected_memory_fact": {
+        "required_keywords": [
+          "TOMATO_REVIEW_NOTE_742",
+          "review note",
+          "compatibility",
+          "continuity"
+        ],
+        "required_regex": [
+          "TOMATO_REVIEW_NOTE_742"
+        ]
+      },
+      "checks": [
+        {
+          "id": "tomato_review_note_present",
+          "type": "require_regex",
+          "path_glob": "**/*",
+          "pattern": "TOMATO_REVIEW_NOTE_742",
+          "source": "synthetic_memory_contract",
+          "strength": "sentinel_marker",
+          "signal_kind": "language_neutral_marker",
+          "rationale": "Later-session workspace should carry forward the exact feedback marker introduced in session 1."
+        }
+      ]
+    },
+    {
+      "id": "project_tomato_bridge_token",
+      "category": "synthetic_memory_project_convention",
+      "memory_type": "project",
+      "introduced_in_session": 1,
+      "workspace_effective_from_session": 2,
+      "description": "Project memory: future helper, handler, adapter, or glue-code changes should include the exact project token TOMATO_PROJECT_BRIDGE_743 in a nearby name, comment, or note so cross-session project conventions remain visible.",
+      "expected_memory_fact": {
+        "required_keywords": [
+          "TOMATO_PROJECT_BRIDGE_743",
+          "project token",
+          "helper",
+          "handler",
+          "adapter"
+        ],
+        "required_regex": [
+          "TOMATO_PROJECT_BRIDGE_743"
+        ]
+      },
+      "checks": [
+        {
+          "id": "tomato_project_bridge_present",
+          "type": "require_regex",
+          "path_glob": "**/*",
+          "pattern": "TOMATO_PROJECT_BRIDGE_743",
+          "source": "synthetic_memory_contract",
+          "strength": "sentinel_marker",
+          "signal_kind": "language_neutral_marker",
+          "rationale": "Later-session workspace should preserve or reuse the exact project convention token introduced in session 1."
+        }
+      ]
+    },
+    {
+      "id": "reference_tomato_canon_pointer",
+      "category": "synthetic_memory_reference_pointer",
+      "memory_type": "reference",
+      "introduced_in_session": 1,
+      "workspace_effective_from_session": 2,
+      "description": "Reference memory: treat docs/TOMATO_REFERENCE_CANON_744.md as the canonical local reference pointer for future work, and cite the exact path in comments, documentation, or implementation notes when adding related changes.",
+      "expected_memory_fact": {
+        "required_keywords": [
+          "docs/TOMATO_REFERENCE_CANON_744.md",
+          "canonical local reference",
+          "future work",
+          "implementation notes"
+        ],
+        "required_regex": [
+          "docs/TOMATO_REFERENCE_CANON_744\\.md"
+        ]
+      },
+      "checks": [
+        {
+          "id": "tomato_reference_pointer_present",
+          "type": "require_regex",
+          "path_glob": "**/*",
+          "pattern": "docs/TOMATO_REFERENCE_CANON_744\\.md",
+          "source": "synthetic_memory_contract",
+          "strength": "sentinel_marker",
+          "signal_kind": "language_neutral_marker",
+          "rationale": "Later-session workspace should cite the exact reference artifact pointer introduced in session 1."
+        }
+      ]
+    },
+    {
+      "id": "experience_tomato_safe_path_lesson",
+      "category": "synthetic_memory_experience_lesson",
+      "memory_type": "experience",
+      "introduced_in_session": 1,
+      "workspace_effective_from_session": 2,
+      "description": "Experience memory: previous work learned not to use the literal LEGACY_TEMP_PATH in future changes; use the exact safer marker TOMATO_SAFE_PATH_745 instead whenever temporary path, fallback path, or compatibility-path behavior is mentioned.",
+      "expected_memory_fact": {
+        "required_keywords": [
+          "TOMATO_SAFE_PATH_745",
+          "LEGACY_TEMP_PATH",
+          "experience",
+          "temporary path",
+          "fallback path"
+        ],
+        "required_regex": [
+          "TOMATO_SAFE_PATH_745"
+        ],
+        "forbidden_keywords": []
+      },
+      "checks": [
+        {
+          "id": "tomato_safe_path_present",
+          "type": "require_regex",
+          "path_glob": "**/*",
+          "pattern": "TOMATO_SAFE_PATH_745",
+          "source": "synthetic_memory_contract",
+          "strength": "sentinel_marker",
+          "signal_kind": "language_neutral_marker",
+          "rationale": "Later-session workspace should use the exact safer experience marker introduced in session 1."
+        },
+        {
+          "id": "tomato_legacy_temp_path_absent",
+          "type": "forbid_regex",
+          "path_glob": "**/*",
+          "pattern": "LEGACY_TEMP_PATH",
+          "source": "synthetic_memory_contract",
+          "strength": "negative_sentinel",
+          "signal_kind": "language_neutral_marker",
+          "rationale": "Later-session workspace should avoid the deprecated experience marker from the session-1 lesson."
+        }
+      ]
+    }
+  ],
+  "expected_memory_facts": [
+    {
+      "id": "user_tomato_preference_marker",
+      "required_keywords": [
+        "TOMATO_USER_PREF_741",
+        "future implementation work",
+        "newly added or meaningfully changed code"
+      ],
+      "required_regex": [
+        "TOMATO_USER_PREF_741"
+      ]
+    },
+    {
+      "id": "feedback_tomato_review_note",
+      "required_keywords": [
+        "TOMATO_REVIEW_NOTE_742",
+        "review note",
+        "compatibility",
+        "continuity"
+      ],
+      "required_regex": [
+        "TOMATO_REVIEW_NOTE_742"
+      ]
+    },
+    {
+      "id": "project_tomato_bridge_token",
+      "required_keywords": [
+        "TOMATO_PROJECT_BRIDGE_743",
+        "project token",
+        "helper",
+        "handler",
+        "adapter"
+      ],
+      "required_regex": [
+        "TOMATO_PROJECT_BRIDGE_743"
+      ]
+    },
+    {
+      "id": "reference_tomato_canon_pointer",
+      "required_keywords": [
+        "docs/TOMATO_REFERENCE_CANON_744.md",
+        "canonical local reference",
+        "future work",
+        "implementation notes"
+      ],
+      "required_regex": [
+        "docs/TOMATO_REFERENCE_CANON_744\\.md"
+      ]
+    },
+    {
+      "id": "experience_tomato_safe_path_lesson",
+      "required_keywords": [
+        "TOMATO_SAFE_PATH_745",
+        "LEGACY_TEMP_PATH",
+        "experience",
+        "temporary path",
+        "fallback path"
+      ],
+      "required_regex": [
+        "TOMATO_SAFE_PATH_745"
+      ],
+      "forbidden_keywords": []
+    }
+  ],
+  "test_plan": {
+    "status": "configured",
+    "command": [
+      "bash",
+      "run.sh"
+    ],
+    "working_dir": "chrono_flow_nexus/scripts",
+    "source": "test_runner_script",
+    "timeout_sec": 600,
+    "reason": null,
+    "test_like_file_count": 7,
+    "executor": "host",
+    "docker_image": "locobench-memory-eval:cpp",
+    "environment": {
+      "recommended_executor": "docker",
+      "network": "none"
+    },
+    "integrity": {
+      "status": "basic",
+      "original_test_files": [
+        "chrono_flow_nexus/tests/e2e/test_productivity_flow.py",
+        "chrono_flow_nexus/tests/integration/test_api_endpoints.cpp",
+        "chrono_flow_nexus/tests/integration/test_repository_integration.cpp",
+        "chrono_flow_nexus/tests/test_main.cpp",
+        "chrono_flow_nexus/tests/unit/test_application_services.cpp",
+        "chrono_flow_nexus/tests/unit/test_domain_models.cpp"
+      ]
+    }
+  },
+  "requirement_checks": [
+    {
+      "id": "config_example_log_level",
+      "type": "require_regex",
+      "path_glob": "chrono_flow_nexus/config/config.toml.example",
+      "source": "overlay",
+      "strength": "explicit",
+      "signal_kind": "config_value",
+      "rationale": "config example defines default log_level.",
+      "pattern": "log_level\\s*=\\s*\"INFO\""
+    },
+    {
+      "id": "application_config_log_level",
+      "type": "require_regex",
+      "path_glob": "chrono_flow_nexus/src/infrastructure/config/config_loader.h",
+      "source": "overlay",
+      "strength": "explicit",
+      "signal_kind": "config_schema",
+      "rationale": "ApplicationConfig includes log_level.",
+      "pattern": "log_level|std::string"
+    },
+    {
+      "id": "main_uses_configured_log_level",
+      "type": "require_regex",
+      "path_glob": "chrono_flow_nexus/src/main.cpp",
+      "source": "overlay",
+      "strength": "explicit",
+      "signal_kind": "runtime_integration",
+      "rationale": "main maps configured log_level to logger initialization.",
+      "pattern": "log_level|LogLevel::(Debug|Info|Warn|Error)|DEBUG|INFO|WARN|ERROR"
+    }
+  ],
+  "requirement_check_plan": {
+    "status": "configured",
+    "source": "overlay",
+    "reason": null,
+    "check_count": 3,
+    "source_distribution": {
+      "overlay": 3
+    },
+    "strength_distribution": {
+      "explicit": 3
+    },
+    "signal_kind_distribution": {
+      "config_schema": 1,
+      "config_value": 1,
+      "runtime_integration": 1
+    },
+    "rejection_reason_distribution": {},
+    "rejected_terms": []
+  }
+}

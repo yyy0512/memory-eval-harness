@@ -1,9 +1,0 @@
-You are working in the repository at the current working directory. This is session 2 of a 2-session development task. The previous session has ended and conversation context is unavailable. Use the repository state and your persistent memory if available. Do not ask for previous conversation context. Complete only the requirements for this session. At the end, update memory with decisions and remaining work.
-
-This task is divided into two sessions. You must retain context between sessions to complete the full task.
-
-**Session 2: Service Integration**
-Now that the configuration is available, you need to use it within the `ingestion_service`.
-1.  Recall the configuration parameter `heartbeat_interval_ms` you added in the previous session.
-2.  Modify the main processing loop in `pulsesphere/services/ingestion_service/src/main.c` to use this value from the loaded configuration. The existing implementation likely uses a static `sleep` or `usleep` call.
-3.  Add an informational log message at the startup of the `ingestion_service` that prints the configured heartbeat interval, for example: "Ingestion service configured with heartbeat interval: 5000 ms".

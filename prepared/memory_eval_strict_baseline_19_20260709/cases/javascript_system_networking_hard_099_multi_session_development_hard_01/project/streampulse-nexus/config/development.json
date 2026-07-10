@@ -1,0 +1,181 @@
+{
+  "$schema": "https://schemata.streampulse.dev/v1/nexus-config.schema.json",
+  "environment": "development",
+  "version": "2.4.0",
+  "description": "Development-stage configuration for the StreamPulse Nexus node. Values here override defaults defined in base.json and are unsafe for production.",
+  "network": {
+    "nodeId": "dev-node-${HOSTNAME}",
+    "host": "0.0.0.0",
+    "port": 4600,
+    "publicAddress": "http://localhost:4600",
+    "ingress": {
+      "http": {
+        "enabled": true,
+        "port": 4601,
+        "rateLimit": {
+          "windowMs": 60000,
+          "maxRequests": 5000
+        }
+      },
+      "rtmp": {
+        "enabled": true,
+        "port": 1935,
+        "maxBitrateKbps": 15000
+      },
+      "srt": {
+        "enabled": false,
+        "port": 9000
+      }
+    },
+    "egress": {
+      "hls": {
+        "enabled": true,
+        "segmentLength": 6,
+        "playlistSize": 5
+      },
+      "dash": {
+        "enabled": true,
+        "segmentLength": 4,
+        "playlistSize": 6
+      },
+      "webrtc": {
+        "enabled": true,
+        "stunServers": [
+          "stun:stun.l.google.com:19302",
+          "stun:stun1.l.google.com:19302"
+        ],
+        "turnServers": [
+          {
+            "url": "turn:dev-turn.streampulse.local:3478",
+            "username": "dev",
+            "credential": "devpass"
+          }
+        ]
+      }
+    }
+  },
+  "security": {
+    "mode": "permissive",
+    "cors": {
+      "allowedOrigins": [
+        "http://localhost:3000",
+        "http://localhost:4600"
+      ]
+    },
+    "jwt": {
+      "issuer": "streampulse-dev",
+      "audience": "streampulse-dev-audience",
+      "publicKeyPath": "./certs/dev_jwt_public.pem",
+      "algorithm": "RS256",
+      "clockToleranceSeconds": 15
+    },
+    "zeroTrust": {
+      "enableServiceMesh": false,
+      "packetInspection": false
+    },
+    "headers": {
+      "contentSecurityPolicy": "default-src 'self' ws: http:",
+      "hsts": false,
+      "xssProtection": true,
+      "referrerPolicy": "no-referrer"
+    }
+  },
+  "logging": {
+    "level": "debug",
+    "transport": {
+      "console": {
+        "enabled": true,
+        "colorize": true
+      },
+      "file": {
+        "enabled": true,
+        "path": "./logs/dev-node.log",
+        "maxSizeMb": 20,
+        "maxFiles": 3
+      }
+    },
+    "sampling": {
+      "rate": 1.0
+    },
+    "redact": ["req.headers.authorization", "user.password"]
+  },
+  "modules": {
+    "edgeCache": {
+      "implementation": "@streampulse/cache-memory",
+      "options": {
+        "defaultTtlSeconds": 120,
+        "maxItems": 10000
+      }
+    },
+    "transcoder": {
+      "implementation": "@streampulse/transcode-ffmpeg",
+      "options": {
+        "presets": ["1080p", "720p", "540p"],
+        "crf": 23,
+        "presetSpeed": "veryfast",
+        "watermark": null
+      }
+    },
+    "analytics": {
+      "implementation": "@streampulse/analytics-elk",
+      "options": {
+        "elkEndpoint": "http://localhost:9200",
+        "indexPrefix": "nexus-dev"
+      }
+    },
+    "backup": {
+      "implementation": "@streampulse/backup-localfs",
+      "options": {
+        "directory": "./backups",
+        "snapshotIntervalMinutes": 15,
+        "retainSnapshots": 48
+      }
+    },
+    "alerting": {
+      "implementation": "@streampulse/alert-console",
+      "options": {
+        "thresholds": {
+          "cpu": 0.8,
+          "mem": 0.85,
+          "latencyMs": 2000
+        }
+      }
+    },
+    "loadBalancing": {
+      "strategy": "@streampulse/strategy-roundrobin",
+      "options": {
+        "maxConnectionsPerNode": 20000
+      }
+    }
+  },
+  "featureFlags": {
+    "enableArSync": true,
+    "enableTriviaOverlay": true,
+    "enableAutoHighlightReels": false,
+    "allowDeveloperPlugins": true
+  },
+  "monitoring": {
+    "healthProbeIntervalSeconds": 10,
+    "metricsPort": 9201,
+    "metricsPath": "/metrics",
+    "prometheus": {
+      "enabled": true,
+      "pushGateway": null
+    }
+  },
+  "development": {
+    "hotReload": true,
+    "stackTraceLimit": 50,
+    "exposeGraphqlPlayground": true
+  },
+  "testing": {
+    "mockDataBurstIntervalMs": 3000,
+    "simulateNetworkFlaps": false,
+    "simulateHighCpu": false
+  },
+  "limits": {
+    "maxConcurrentStreams": 25,
+    "maxViewersPerStream": 15000,
+    "maxChatMessagesPerSecond": 2000
+  }
+}

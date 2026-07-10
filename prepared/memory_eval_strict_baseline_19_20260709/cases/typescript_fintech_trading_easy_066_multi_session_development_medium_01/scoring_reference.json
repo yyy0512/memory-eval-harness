@@ -1,0 +1,345 @@
+{
+  "scenario_id": "typescript_fintech_trading_easy_066_multi_session_development_medium_01",
+  "ground_truth": "The final solution should contain the following key changes:\n\n-   **`src/config.ts`:**\n    ```typescript\n    // ... existing config\n    export const feeConfig = {\n      percentage: 0.001, // 0.1%\n      minimumFee: 0.50,    // $0.50\n    };\n    ```\n-   **`src/types.ts`:**\n    ```typescript\n    export interface Transaction {\n      // ... existing fields\n      feeApplied?: number;\n    }\n    ```\n-   **`src/utils.ts`:**\n    ```typescript\n    import { feeConfig } from './config';\n    // ... existing utils\n    export function calculateTransactionFee(transactionAmount: number): number {\n      const percentageFee = transactionAmount * feeConfig.percentage;\n      const finalFee = Math.max(percentageFee, feeConfig.minimumFee);\n      return parseFloat(finalFee.toFixed(2)); // Ensure currency-friendly rounding\n    }\n    ```\n-   **`src/core.ts`:**\n    ```typescript\n    // In the transaction processing function\n    import { calculateTransactionFee } from './utils';\n    // ...\n    const fee = calculateTransactionFee(transaction.amount);\n    transaction.feeApplied = fee;\n    sourceAccount.balance -= (transaction.amount + fee);\n    // ...\n    ```\n-   **`tests/test_main.ts`:**\n    - Existing tests that assert on user balance after a transaction are updated.\n    - A new test `it('should apply percentage fee on large transactions')` is added.\n    - A new test `it('should apply minimum fee on small transactions')` is added.",
+  "expected_approach": "An expert developer would approach this incrementally, mirroring the session structure.\n\n1.  **Session 1 (Setup):**\n    - Read `src/config.ts` to understand its structure, then add the `feeConfig` object with default values.\n    - Read `src/types.ts`, locate the `Transaction` interface, and add the `feeApplied?: number;` field.\n\n2.  **Session 2 (Logic):**\n    - Analyze `src/utils.ts` for existing patterns. Create the `calculateTransactionFee` function, ensuring it imports the new `feeConfig` from `config.ts` to perform its calculation.\n    - Analyze `src/core.ts` to identify the primary transaction execution function (e.g., `executeTrade` or `processTransaction`).\n    - Import the new utility function into `src/core.ts`.\n    - In the transaction function, call `calculateTransactionFee` with the transaction amount.\n    - Modify the transaction object to include the `feeApplied` value.\n    - Locate the line where the account balance is updated and ensure the fee is subtracted along with the principal amount.\n\n3.  **Session 3 (Testing):**\n    - Run the existing test suite, expecting failures in transaction-related tests.\n    - Open `tests/test_main.ts` and carefully adjust the `expect` assertions for final balances in the failing tests.\n    - Write a new test case for a large transaction (e.g., $10,000) and assert that the fee applied matches the percentage calculation.\n    - Write another test case for a small transaction (e.g., $20) and assert that the fee applied is the configured minimum fee.\n    - Run the full test suite again to confirm all tests pass, including the new ones.",
+  "evaluation_criteria": [
+    "**Context Retention:** Agent must correctly use the config and types defined in Session 1 during Session 2, and use the logic from Session 2 to inform the tests in Session 3.",
+    "**Correctness of Implementation:** The fee calculation logic must correctly implement the `Math.max(percentage, minimum)` rule.",
+    "**File Modification Accuracy:** Agent correctly identifies and modifies the five specified files (`config.ts`, `types.ts`, `utils.ts`, `core.ts`, `test_main.ts`) without extraneous changes.",
+    "**Test-Driven Validation:** Agent successfully updates existing tests and adds new, meaningful tests that cover both primary fee scenarios.",
+    "**Code Integration:** New functions and variables are correctly imported/exported and integrated without breaking the existing application structure.",
+    "**Session Adherence:** Agent completes the work for each session as instructed without prematurely starting on subsequent tasks."
+  ],
+  "memory_contracts": [
+    {
+      "id": "user_tomato_preference_marker",
+      "category": "synthetic_memory_user_preference",
+      "memory_type": "user",
+      "introduced_in_session": 1,
+      "workspace_effective_from_session": 2,
+      "description": "User preference: for future implementation work in this repository, place the exact marker TOMATO_USER_PREF_741 near newly added or meaningfully changed code, comments, or documentation so the user's TOMATO preference is visible across sessions.",
+      "expected_memory_fact": {
+        "required_keywords": [
+          "TOMATO_USER_PREF_741",
+          "user preference",
+          "future implementation work",
+          "newly added or meaningfully changed code"
+        ],
+        "required_regex": [
+          "TOMATO_USER_PREF_741"
+        ]
+      },
+      "checks": [
+        {
+          "id": "tomato_user_pref_marker_present",
+          "type": "require_regex",
+          "path_glob": "**/*",
+          "pattern": "TOMATO_USER_PREF_741",
+          "source": "synthetic_memory_contract",
+          "strength": "sentinel_marker",
+          "signal_kind": "language_neutral_marker",
+          "rationale": "Later-session workspace should preserve or reuse the exact user preference marker introduced in session 1."
+        }
+      ]
+    },
+    {
+      "id": "feedback_tomato_review_note",
+      "category": "synthetic_memory_feedback_continuity",
+      "memory_type": "feedback",
+      "introduced_in_session": 1,
+      "workspace_effective_from_session": 2,
+      "description": "Feedback to remember: future implementation changes should include the exact review note TOMATO_REVIEW_NOTE_742 near changed logic to show that compatibility and continuity were considered.",
+      "expected_memory_fact": {
+        "required_keywords": [
+          "TOMATO_REVIEW_NOTE_742",
+          "review note",
+          "compatibility",
+          "continuity"
+        ],
+        "required_regex": [
+          "TOMATO_REVIEW_NOTE_742"
+        ]
+      },
+      "checks": [
+        {
+          "id": "tomato_review_note_present",
+          "type": "require_regex",
+          "path_glob": "**/*",
+          "pattern": "TOMATO_REVIEW_NOTE_742",
+          "source": "synthetic_memory_contract",
+          "strength": "sentinel_marker",
+          "signal_kind": "language_neutral_marker",
+          "rationale": "Later-session workspace should carry forward the exact feedback marker introduced in session 1."
+        }
+      ]
+    },
+    {
+      "id": "project_tomato_bridge_token",
+      "category": "synthetic_memory_project_convention",
+      "memory_type": "project",
+      "introduced_in_session": 1,
+      "workspace_effective_from_session": 2,
+      "description": "Project memory: future helper, handler, adapter, or glue-code changes should include the exact project token TOMATO_PROJECT_BRIDGE_743 in a nearby name, comment, or note so cross-session project conventions remain visible.",
+      "expected_memory_fact": {
+        "required_keywords": [
+          "TOMATO_PROJECT_BRIDGE_743",
+          "project token",
+          "helper",
+          "handler",
+          "adapter"
+        ],
+        "required_regex": [
+          "TOMATO_PROJECT_BRIDGE_743"
+        ]
+      },
+      "checks": [
+        {
+          "id": "tomato_project_bridge_present",
+          "type": "require_regex",
+          "path_glob": "**/*",
+          "pattern": "TOMATO_PROJECT_BRIDGE_743",
+          "source": "synthetic_memory_contract",
+          "strength": "sentinel_marker",
+          "signal_kind": "language_neutral_marker",
+          "rationale": "Later-session workspace should preserve or reuse the exact project convention token introduced in session 1."
+        }
+      ]
+    },
+    {
+      "id": "reference_tomato_canon_pointer",
+      "category": "synthetic_memory_reference_pointer",
+      "memory_type": "reference",
+      "introduced_in_session": 1,
+      "workspace_effective_from_session": 2,
+      "description": "Reference memory: treat docs/TOMATO_REFERENCE_CANON_744.md as the canonical local reference pointer for future work, and cite the exact path in comments, documentation, or implementation notes when adding related changes.",
+      "expected_memory_fact": {
+        "required_keywords": [
+          "docs/TOMATO_REFERENCE_CANON_744.md",
+          "canonical local reference",
+          "future work",
+          "implementation notes"
+        ],
+        "required_regex": [
+          "docs/TOMATO_REFERENCE_CANON_744\\.md"
+        ]
+      },
+      "checks": [
+        {
+          "id": "tomato_reference_pointer_present",
+          "type": "require_regex",
+          "path_glob": "**/*",
+          "pattern": "docs/TOMATO_REFERENCE_CANON_744\\.md",
+          "source": "synthetic_memory_contract",
+          "strength": "sentinel_marker",
+          "signal_kind": "language_neutral_marker",
+          "rationale": "Later-session workspace should cite the exact reference artifact pointer introduced in session 1."
+        }
+      ]
+    },
+    {
+      "id": "experience_tomato_safe_path_lesson",
+      "category": "synthetic_memory_experience_lesson",
+      "memory_type": "experience",
+      "introduced_in_session": 1,
+      "workspace_effective_from_session": 2,
+      "description": "Experience memory: previous work learned not to use the literal LEGACY_TEMP_PATH in future changes; use the exact safer marker TOMATO_SAFE_PATH_745 instead whenever temporary path, fallback path, or compatibility-path behavior is mentioned.",
+      "expected_memory_fact": {
+        "required_keywords": [
+          "TOMATO_SAFE_PATH_745",
+          "LEGACY_TEMP_PATH",
+          "experience",
+          "temporary path",
+          "fallback path"
+        ],
+        "required_regex": [
+          "TOMATO_SAFE_PATH_745"
+        ],
+        "forbidden_keywords": []
+      },
+      "checks": [
+        {
+          "id": "tomato_safe_path_present",
+          "type": "require_regex",
+          "path_glob": "**/*",
+          "pattern": "TOMATO_SAFE_PATH_745",
+          "source": "synthetic_memory_contract",
+          "strength": "sentinel_marker",
+          "signal_kind": "language_neutral_marker",
+          "rationale": "Later-session workspace should use the exact safer experience marker introduced in session 1."
+        },
+        {
+          "id": "tomato_legacy_temp_path_absent",
+          "type": "forbid_regex",
+          "path_glob": "**/*",
+          "pattern": "LEGACY_TEMP_PATH",
+          "source": "synthetic_memory_contract",
+          "strength": "negative_sentinel",
+          "signal_kind": "language_neutral_marker",
+          "rationale": "Later-session workspace should avoid the deprecated experience marker from the session-1 lesson."
+        }
+      ]
+    }
+  ],
+  "expected_memory_facts": [
+    {
+      "id": "user_tomato_preference_marker",
+      "required_keywords": [
+        "TOMATO_USER_PREF_741",
+        "future implementation work",
+        "newly added or meaningfully changed code"
+      ],
+      "required_regex": [
+        "TOMATO_USER_PREF_741"
+      ]
+    },
+    {
+      "id": "feedback_tomato_review_note",
+      "required_keywords": [
+        "TOMATO_REVIEW_NOTE_742",
+        "review note",
+        "compatibility",
+        "continuity"
+      ],
+      "required_regex": [
+        "TOMATO_REVIEW_NOTE_742"
+      ]
+    },
+    {
+      "id": "project_tomato_bridge_token",
+      "required_keywords": [
+        "TOMATO_PROJECT_BRIDGE_743",
+        "project token",
+        "helper",
+        "handler",
+        "adapter"
+      ],
+      "required_regex": [
+        "TOMATO_PROJECT_BRIDGE_743"
+      ]
+    },
+    {
+      "id": "reference_tomato_canon_pointer",
+      "required_keywords": [
+        "docs/TOMATO_REFERENCE_CANON_744.md",
+        "canonical local reference",
+        "future work",
+        "implementation notes"
+      ],
+      "required_regex": [
+        "docs/TOMATO_REFERENCE_CANON_744\\.md"
+      ]
+    },
+    {
+      "id": "experience_tomato_safe_path_lesson",
+      "required_keywords": [
+        "TOMATO_SAFE_PATH_745",
+        "LEGACY_TEMP_PATH",
+        "experience",
+        "temporary path",
+        "fallback path"
+      ],
+      "required_regex": [
+        "TOMATO_SAFE_PATH_745"
+      ],
+      "forbidden_keywords": []
+    }
+  ],
+  "test_plan": {
+    "status": "configured",
+    "command": [
+      "npm",
+      "test"
+    ],
+    "working_dir": ".",
+    "source": "package_json_test_script",
+    "timeout_sec": 300,
+    "reason": null,
+    "test_like_file_count": 3,
+    "executor": "host",
+    "docker_image": "locobench-memory-eval:javascript",
+    "environment": {
+      "recommended_executor": "docker",
+      "network": "none"
+    },
+    "integrity": {
+      "status": "basic",
+      "original_test_files": [
+        "tests/test_main.ts",
+        "tests/test_utils.ts"
+      ]
+    }
+  },
+  "requirement_checks": [
+    {
+      "id": "fee_config",
+      "type": "require_regex",
+      "path_glob": "src/config.ts",
+      "source": "overlay",
+      "strength": "explicit",
+      "signal_kind": "config_value",
+      "rationale": "config defines feeConfig.",
+      "pattern": "feeConfig|percentage|minimumFee"
+    },
+    {
+      "id": "transaction_fee_field",
+      "type": "require_regex",
+      "path_glob": "src/types.ts",
+      "source": "overlay",
+      "strength": "explicit",
+      "signal_kind": "domain_model",
+      "rationale": "Transaction includes feeApplied.",
+      "pattern": "feeApplied"
+    },
+    {
+      "id": "calculate_transaction_fee",
+      "type": "require_regex",
+      "path_glob": "src/utils.ts",
+      "source": "overlay",
+      "strength": "explicit",
+      "signal_kind": "business_logic",
+      "rationale": "utility calculates transaction fee.",
+      "pattern": "calculateTransactionFee|minimumFee|percentage"
+    },
+    {
+      "id": "core_applies_fee",
+      "type": "require_regex",
+      "path_glob": "src/core.ts",
+      "source": "overlay",
+      "strength": "explicit",
+      "signal_kind": "runtime_integration",
+      "rationale": "transaction processing stores and deducts fee.",
+      "pattern": "calculateTransactionFee|feeApplied|minimumFee|feeConfig"
+    },
+    {
+      "id": "fee_tests",
+      "type": "require_regex",
+      "path_glob": "tests/test_main.ts",
+      "source": "overlay",
+      "strength": "explicit",
+      "signal_kind": "test_coverage",
+      "rationale": "tests cover percentage and minimum fee cases.",
+      "pattern": "feeApplied|calculateTransactionFee|minimumFee|percentage"
+    }
+  ],
+  "requirement_check_plan": {
+    "status": "configured",
+    "source": "overlay",
+    "reason": null,
+    "check_count": 5,
+    "source_distribution": {
+      "overlay": 5
+    },
+    "strength_distribution": {
+      "explicit": 5
+    },
+    "signal_kind_distribution": {
+      "business_logic": 1,
+      "config_value": 1,
+      "domain_model": 1,
+      "runtime_integration": 1,
+      "test_coverage": 1
+    },
+    "rejection_reason_distribution": {},
+    "rejected_terms": []
+  }
+}

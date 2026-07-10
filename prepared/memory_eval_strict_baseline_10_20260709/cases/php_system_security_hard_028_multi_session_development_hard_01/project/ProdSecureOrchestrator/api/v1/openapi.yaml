@@ -1,0 +1,457 @@
+```yaml
+openapi: 3.1.0
+info:
+  title: ProdSecure Orchestrator – Public API
+  description: |
+    The **ProdSecure Orchestrator** API enables third-party services, automation
+    scripts, and infrastructure tooling to integrate with the platform’s
+    security, monitoring, and remediation capabilities.
+
+    All endpoints use **JSON** for request and response bodies unless otherwise
+    specified.  
+    Date-times follow **RFC 3339 / ISO-8601** in UTC (e.g. `2023-10-29T12:34:56Z`).
+
+    # Authentication
+    Requests **must** be authenticated via one of the supported schemes:
+
+    1. **OAuth 2.0 / OpenID Connect** (`bearerAuth`) – recommended  
+    2. **API Key** in `X-API-Key` header (`apiKeyAuth`) – limited scope
+
+    ```mermaid
+    graph TD
+        A[Client] -->|JWT / API Key| B[ProdSecure Gateway]
+        B --> C{Policy Engine}
+        C -->|Allow| D[Micro-service Mesh]
+        C -->|Deny| E[4xx Error]
+    ```
+  version: "1.0.0"
+  contact:
+    name: SecOps Platform Team
+    url: https://prodsecure.example.com/support
+    email: support@prodsecure.example.com
+servers:
+  - url: https://api.prodsecure.example.com/v1
+    description: Production
+  - url: https://staging-api.prodsecure.example.com/v1
+    description: Staging
+tags:
+  - name: Alerts
+    description: Intrusion detection, vulnerability, and anomaly alerts
+  - name: Metrics
+    description: Real-time and historical performance metrics
+  - name: Backups
+    description: Backup & recovery operations
+  - name: Deployments
+    description: Deployment automation and rollout orchestration
+  - name: System
+    description: Health-check and general utility endpoints
+paths:
+  /alerts:
+    get:
+      summary: List alerts
+      description: Retrieves a paginated list of security alerts.
+      tags: [Alerts]
+      security:
+        - bearerAuth: [alerts:read]
+        - apiKeyAuth: []
+      parameters:
+        - $ref: '#/components/parameters/TraceId'
+        - in: query
+          name: severity
+          description: Filter by alert severity
+          schema:
+            $ref: '#/components/schemas/AlertSeverity'
+        - in: query
+          name: status
+          description: Filter by alert status
+          schema:
+            $ref: '#/components/schemas/AlertStatus'
+        - $ref: '#/components/parameters/PageSize'
+        - $ref: '#/components/parameters/PageCursor'
+      responses:
+        "200":
+          description: Paginated list of alerts
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AlertCollection'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+  /alerts/{alertId}:
+    parameters:
+      - $ref: '#/components/parameters/AlertId'
+    get:
+      summary: Get alert details
+      description: Returns the full JSON representation of the alert.
+      tags: [Alerts]
+      security:
+        - bearerAuth: [alerts:read]
+        - apiKeyAuth: []
+      parameters:
+        - $ref: '#/components/parameters/TraceId'
+      responses:
+        "200":
+          description: Alert details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Alert'
+        "404":
+          $ref: '#/components/responses/NotFound'
+    patch:
+      summary: Update alert status
+      description: |
+        Acknowledge, suppress, or resolve an existing alert. Only mutable
+        properties listed in the schema can be updated.
+      tags: [Alerts]
+      security:
+        - bearerAuth: [alerts:write]
+      parameters:
+        - $ref: '#/components/parameters/TraceId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AlertPatch'
+      responses:
+        "204":
+          description: Updated successfully – no content returned
+        "400":
+          $ref: '#/components/responses/BadRequest'
+        "404":
+          $ref: '#/components/responses/NotFound'
+  /metrics/system:
+    get:
+      summary: Stream system metrics
+      description: |
+        Returns near real-time system performance metrics as a **Server-Sent
+        Events (SSE)** stream. Consumers should handle reconnect logic and
+        exponential backoff on network failures.
+      tags: [Metrics]
+      security:
+        - bearerAuth: [metrics:read]
+      parameters:
+        - $ref: '#/components/parameters/TraceId'
+        - in: header
+          name: Last-Event-ID
+          description: ID of the last received event for SSE resume support
+          schema:
+            type: string
+        - in: query
+          name: types
+          description: |
+            Comma-separated list of metric types to subscribe to
+            (`cpu,memory,network,disk`)
+          schema:
+            type: array
+            items:
+              $ref: '#/components/schemas/MetricType'
+            explode: false
+      responses:
+        "200":
+          description: Stream begins – each SSE `data:` line contains a `MetricSample`
+          content:
+            text/event-stream:
+              schema:
+                $ref: '#/components/schemas/MetricSample'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+  /backups:
+    post:
+      summary: Trigger a backup job
+      description: Initiates a backup operation for the selected scope.
+      tags: [Backups]
+      security:
+        - bearerAuth: [backups:write]
+      parameters:
+        - $ref: '#/components/parameters/TraceId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BackupRequest'
+      responses:
+        "202":
+          description: Backup job accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BackupJob'
+        "400":
+          $ref: '#/components/responses/BadRequest'
+  /deployments/{deploymentId}/rollback:
+    post:
+      summary: Roll back a deployment
+      description: Executes an automated rollback to the previous valid state.
+      tags: [Deployments]
+      security:
+        - bearerAuth: [deployments:write]
+      parameters:
+        - $ref: '#/components/parameters/TraceId'
+        - $ref: '#/components/parameters/DeploymentId'
+      requestBody:
+        description: Optional rollback options
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RollbackOptions'
+      responses:
+        "202":
+          description: Rollback initiated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Deployment'
+        "404":
+          $ref: '#/components/responses/NotFound'
+  /system/health:
+    get:
+      summary: Health check
+      description: Lightweight endpoint for Kubernetes or load-balancer probes.
+      tags: [System]
+      responses:
+        "200":
+          description: Alive and ready
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    enum: [ok]
+                  timestamp:
+                    type: string
+                    format: date-time
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        OAuth 2.0 Bearer token.  
+        Scopes follow `<resource>:<permission>` format,
+        e.g. `alerts:read`, `deployments:write`.
+    apiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: |
+        Legacy API Key. Access is limited and rate-limited more aggressively
+        than OAuth tokens.
+  parameters:
+    TraceId:
+      name: X-Trace-Id
+      in: header
+      description: Client-supplied correlation identifier for distributed tracing.
+      required: false
+      schema:
+        type: string
+        maxLength: 64
+    PageSize:
+      name: page[size]
+      in: query
+      description: Number of items per page (max 500)
+      schema:
+        type: integer
+        default: 100
+        minimum: 1
+        maximum: 500
+    PageCursor:
+      name: page[cursor]
+      in: query
+      description: Cursor for next page
+      schema:
+        type: string
+    AlertId:
+      name: alertId
+      in: path
+      description: Unique alert identifier
+      required: true
+      schema:
+        type: string
+    DeploymentId:
+      name: deploymentId
+      in: path
+      description: Deployment identifier
+      required: true
+      schema:
+        type: string
+  schemas:
+    AlertCollection:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Alert'
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+    Alert:
+      type: object
+      required: [id, severity, status, title, createdAt]
+      properties:
+        id:
+          type: string
+        severity:
+          $ref: '#/components/schemas/AlertSeverity'
+        status:
+          $ref: '#/components/schemas/AlertStatus'
+        title:
+          type: string
+          maxLength: 256
+        description:
+          type: string
+        source:
+          type: string
+          description: Service or component that generated the alert
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        metadata:
+          type: object
+          description: Arbitrary key/value pairs
+    AlertPatch:
+      type: object
+      description: Fields that can be patched on an alert
+      properties:
+        status:
+          $ref: '#/components/schemas/AlertStatus'
+        assignee:
+          type: string
+        comment:
+          type: string
+      additionalProperties: false
+    AlertSeverity:
+      type: string
+      enum: [critical, high, medium, low, info]
+    AlertStatus:
+      type: string
+      enum: [open, acknowledged, suppressed, resolved]
+    MetricType:
+      type: string
+      enum: [cpu, memory, network, disk, io, custom]
+    MetricSample:
+      type: object
+      required: [type, value, unit, timestamp]
+      properties:
+        id:
+          type: string
+        type:
+          $ref: '#/components/schemas/MetricType'
+        value:
+          type: number
+        unit:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+        timestamp:
+          type: string
+          format: date-time
+    BackupRequest:
+      type: object
+      required: [scope]
+      properties:
+        scope:
+          type: string
+          description: Target scope (e.g. database, file-system, full-vm)
+        encryptionKeyId:
+          type: string
+        retentionDays:
+          type: integer
+          minimum: 1
+          maximum: 365
+    BackupJob:
+      type: object
+      required: [id, scope, status, createdAt]
+      properties:
+        id:
+          type: string
+        scope:
+          type: string
+        status:
+          type: string
+          enum: [pending, running, success, failed]
+        snapshotId:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        completedAt:
+          type: string
+          format: date-time
+    RollbackOptions:
+      type: object
+      properties:
+        reason:
+          type: string
+          maxLength: 500
+        force:
+          type: boolean
+          default: false
+    Deployment:
+      type: object
+      required: [id, status, startedAt]
+      properties:
+        id:
+          type: string
+        status:
+          type: string
+          enum: [running, success, failed, rolling_back, rolled_back]
+        appVersion:
+          type: string
+        targetEnvironment:
+          type: string
+        startedAt:
+          type: string
+          format: date-time
+        completedAt:
+          type: string
+          format: date-time
+    Pagination:
+      type: object
+      required: [nextCursor]
+      properties:
+        nextCursor:
+          type: string
+          nullable: true
+  responses:
+    Unauthorized:
+      description: Authentication required or failed
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    BadRequest:
+      description: Invalid request parameters or body
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+  schemas:
+    Error:
+      type: object
+      required: [error, message]
+      properties:
+        error:
+          type: string
+        message:
+          type: string
+        traceId:
+          type: string
+```

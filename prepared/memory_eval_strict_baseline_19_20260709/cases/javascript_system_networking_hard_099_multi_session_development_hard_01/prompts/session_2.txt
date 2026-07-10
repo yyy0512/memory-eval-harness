@@ -1,0 +1,11 @@
+You are working in the repository at the current working directory. This is session 2 of a 3-session development task. The previous session has ended and conversation context is unavailable. Use the repository state to continue the task. Do not ask for previous conversation context. Complete only the requirements for this session.
+
+You are tasked with implementing Geofencing for stream publishing over three distinct sessions.
+
+**Session 2: Dynamic Configuration**
+In the previous session, you hardcoded the geofencing rules. Now, you must make this configuration dynamic and manageable on a per-stream basis. The `service-media-orchestrator` is the source of truth for stream configurations.
+
+*   **Action:** Extend the system's stream data model to include geofencing rules. Modify the relevant JSON schema in `packages/lib-shared/src/schemas/events/` to include an optional `geofencing` object containing an `allowedCountries` array of ISO 3166-1 alpha-2 country codes.
+*   **Action:** Update the `StreamManager` in `packages/service-media-orchestrator/src/core/StreamManager.js` to handle and persist this new configuration property for each stream.
+*   **Action:** Ensure the `service-ingress-gateway` receives this configuration when it authenticates a stream. You may need to inspect the event listeners in the `media-orchestrator` (`packages/service-media-orchestrator/src/events/listeners/`) and the auth logic in the `ingress-gateway` to understand how stream metadata is currently shared.
+*   **Action:** Update the logic from Session 1 in `streamKey.auth.js` to use the dynamically fetched configuration instead of the hardcoded rule.

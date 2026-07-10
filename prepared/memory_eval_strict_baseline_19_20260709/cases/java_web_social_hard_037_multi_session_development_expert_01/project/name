@@ -1,0 +1,336 @@
+```java
+package com.circleconnect.nexus.infrastructure.web.ratelimiting;
+
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.InitializingBean;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpStatus;
+import org.springframework.lang.NonNull;
+import org.springframework.stereotype.Component;
+import org.springframework.util.StringUtils;
+import org.springframework.web.method.HandlerMethod;
+import org.springframework.web.servlet.HandlerInterceptor;
+import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
+import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
+
+import javax.servlet.http.HttpServletRequest;
+import javax.servlet.http.HttpServletResponse;
+import java.lang.annotation.ElementType;
+import java.lang.annotation.Retention;
+import java.lang.annotation.RetentionPolicy;
+import java.lang.annotation.Target;
+import java.time.Duration;
+import java.time.Instant;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
+import java.util.Objects;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+
+/**
+ * A Spring MVC {@link HandlerInterceptor} that enforces method–level
+ * rate limits using an in–memory token–bucket implementation backed by
+ * Caffeine cache. <p>
+ *
+ * Usage:
+ * <pre>{@code
+ * @RestController
+ * class PledgeController {
+ *
+ *     @RateLimit(limit = 20, refreshPeriodSeconds = 60)
+ *     @GetMapping("/api/v1/pledges")
+ *     public List<PledgeDto> listPledges() {
+ *         ...
+ *     }
+ * }
+ * }</pre>
+ *
+ * Global defaults can be configured via {@code application.yml}:
+ * <pre>
+ * nexus:
+ *   ratelimit:
+ *     default-limit: 100
+ *     default-window-sec: 60
+ * </pre>
+ */
+@Component
+public class RateLimitingInterceptor implements HandlerInterceptor, WebMvcConfigurer, InitializingBean {
+
+    private static final Logger log = LoggerFactory.getLogger(RateLimitingInterceptor.class);
+
+    private final Cache<String, TokenBucket> tokenBuckets;
+
+    /**
+     * Default limit to apply when no annotation is present.
+     */
+    private final int defaultLimit;
+
+    /**
+     * Default window in seconds when no annotation is present.
+     */
+    private final int defaultWindowSec;
+
+    public RateLimitingInterceptor(
+            @Value("${nexus.ratelimit.default-limit:100}") int defaultLimit,
+            @Value("${nexus.ratelimit.default-window-sec:60}") int defaultWindowSec) {
+        this.defaultLimit = defaultLimit;
+        this.defaultWindowSec = defaultWindowSec;
+        this.tokenBuckets = Caffeine.newBuilder()
+                                    // Keep buckets around for twice the window size
+                                    .expireAfterAccess(defaultWindowSec * 2L, TimeUnit.SECONDS)
+                                    .maximumSize(50_000)
+                                    .build();
+    }
+
+    /**
+     * Register this interceptor automatically.
+     */
+    @Override
+    public void addInterceptors(@NonNull InterceptorRegistry registry) {
+        registry.addInterceptor(this)
+                .order(0); // Place early so we short–circuit heavy calls
+    }
+
+    @Override
+    public void afterPropertiesSet() {
+        log.info("RateLimitingInterceptor initialized – default {} calls / {} seconds",
+                 defaultLimit, defaultWindowSec);
+    }
+
+    /**
+     * Main pre–handle check. Extracts key + metadata and verifies token bucket.
+     */
+    @Override
+    public boolean preHandle(@NonNull HttpServletRequest request,
+                             @NonNull HttpServletResponse response,
+                             @NonNull Object handler) {
+
+        // Only protect controller methods
+        if (!(handler instanceof HandlerMethod)) {
+            return true;
+        }
+
+        HandlerMethod handlerMethod = (HandlerMethod) handler;
+        RateLimit annotation = resolveRateLimit(handlerMethod);
+
+        int limit = annotation != null ? annotation.limit() : defaultLimit;
+        int window = annotation != null ? annotation.refreshPeriodSeconds() : defaultWindowSec;
+
+        String key = resolveKey(request, annotation);
+        TokenBucket bucket = tokenBuckets.get(key, k -> new TokenBucket(limit, window));
+
+        boolean granted = bucket.tryConsume();
+        long remaining = bucket.remainingTokens();
+        long resetEpochSec = bucket.epochSecondResetAt();
+
+        setRateLimitHeaders(response, limit, remaining, resetEpochSec);
+
+        if (!granted) {
+            log.debug("Rate limit exceeded for key={} on {} {} – remaining=0, limit={}/{}s",
+                    key, request.getMethod(), request.getRequestURI(), limit, window);
+
+            response.setStatus(HttpStatus.TOO_MANY_REQUESTS.value());
+            // Provide advice for retry
+            response.setHeader("Retry-After", String.valueOf(Math.max(1, resetEpochSec - Instant.now().getEpochSecond())));
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
+     * Adds standard <code>RateLimit-*</code> headers so that clients can adjust traffic.
+     */
+    private void setRateLimitHeaders(HttpServletResponse response,
+                                     int limit,
+                                     long remaining,
+                                     long resetEpochSec) {
+
+        response.setHeader("RateLimit-Limit", String.valueOf(limit));
+        response.setHeader("RateLimit-Remaining", String.valueOf(Math.max(remaining, 0)));
+        // RFC 9298 timestamp
+        String resetIso = DateTimeFormatter.ISO_INSTANT
+                .withZone(ZoneOffset.UTC)
+                .format(Instant.ofEpochSecond(resetEpochSec));
+
+        response.setHeader("RateLimit-Reset", resetIso);
+    }
+
+    /**
+     * Resolve the {@link RateLimit} annotation, if present, on method or controller class.
+     */
+    private RateLimit resolveRateLimit(HandlerMethod method) {
+        RateLimit annotation = method.getMethodAnnotation(RateLimit.class);
+        if (annotation != null) {
+            return annotation;
+        }
+        // fallback to class–level
+        return method.getBeanType().getAnnotation(RateLimit.class);
+    }
+
+    /**
+     * Builds the key to use for rate limiting.
+     *
+     * Order of preference:
+     *  1. If annotation specifies {@code key} property, that SpEL expression is evaluated.
+     *  2. If user is authenticated, principal.getName()
+     *  3. Remote IP address
+     */
+    private String resolveKey(HttpServletRequest request, RateLimit annotation) {
+        // 1. explicit key
+        if (annotation != null && StringUtils.hasText(annotation.key())) {
+            // For security, restrict evaluation to request/headers. A real implementation might use
+            // Spring's SpEL but here we support simple placeholders.
+            switch (annotation.key()) {
+                case "#ip":
+                    return ipAddress(request);
+                case "#user":
+                    return authenticatedUser(request);
+                default:
+                    // fallthrough – treat as literal
+                    return annotation.key();
+            }
+        }
+
+        // 2. Authenticated user
+        String user = authenticatedUser(request);
+        if (user != null) {
+            return user;
+        }
+
+        // 3. IP address
+        return ipAddress(request);
+    }
+
+    private String authenticatedUser(HttpServletRequest request) {
+        return request.getUserPrincipal() != null ? request.getUserPrincipal().getName() : null;
+    }
+
+    private String ipAddress(HttpServletRequest request) {
+        // Support X-Forwarded-For if behind reverse proxy
+        String header = request.getHeader("X-Forwarded-For");
+        if (StringUtils.hasText(header)) {
+            return header.split(",")[0].trim();
+        }
+        return request.getRemoteAddr();
+    }
+
+    /* ====================================================================================
+     *  Annotation + TokenBucket implementation
+     * ==================================================================================== */
+
+    /**
+     * Annotation used to decorate controller methods or classes with
+     * request–per–window limits.
+     */
+    @Retention(RetentionPolicy.RUNTIME)
+    @Target({ElementType.METHOD, ElementType.TYPE})
+    public @interface RateLimit {
+
+        /**
+         * Number of allowed calls during one window.
+         */
+        int limit();
+
+        /**
+         * Window size in seconds during which {@link #limit()} calls can be made.
+         */
+        int refreshPeriodSeconds();
+
+        /**
+         * Optional key to override default rate–limiting key resolution.
+         * Supports the special tokens:
+         *  - <code>#ip</code>   Current remote IP
+         *  - <code>#user</code> Current authenticated principal
+         * Otherwise the literal value is used.
+         */
+        String key() default "";
+    }
+
+    /**
+     * Simple, thread-safe Token-Bucket.
+     */
+    private static final class TokenBucket {
+        private final int capacity;
+        private final long refillWindowSec;
+
+        private final AtomicInteger tokens;
+        private volatile long windowResetEpochSec;
+
+        TokenBucket(int capacity, long refillWindowSec) {
+            this.capacity = capacity;
+            this.refillWindowSec = refillWindowSec;
+            this.tokens = new AtomicInteger(capacity);
+            this.windowResetEpochSec = Instant.now().getEpochSecond() + refillWindowSec;
+        }
+
+        /**
+         * Try to consume a single token.
+         * @return true if a token was granted, false otherwise.
+         */
+        boolean tryConsume() {
+            refillIfNecessary();
+            int current;
+            do {
+                current = tokens.get();
+                if (current == 0) {
+                    return false;
+                }
+            } while (!tokens.compareAndSet(current, current - 1));
+            return true;
+        }
+
+        long remainingTokens() {
+            refillIfNecessary();
+            return tokens.get();
+        }
+
+        long epochSecondResetAt() {
+            refillIfNecessary();
+            return windowResetEpochSec;
+        }
+
+        private void refillIfNecessary() {
+            long now = Instant.now().getEpochSecond();
+            if (now >= windowResetEpochSec) {
+                synchronized (this) {
+                    // double-check
+                    if (now >= windowResetEpochSec) {
+                        tokens.set(capacity);
+                        windowResetEpochSec = now + refillWindowSec;
+                    }
+                }
+            }
+        }
+
+        @Override
+        public String toString() {
+            return "TokenBucket{" +
+                    "capacity=" + capacity +
+                    ", refillWindowSec=" + refillWindowSec +
+                    ", tokens=" + tokens +
+                    ", windowResetEpochSec=" + windowResetEpochSec +
+                    '}';
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(capacity, refillWindowSec, windowResetEpochSec);
+        }
+
+        @Override
+        public boolean equals(Object obj) {
+            if (!(obj instanceof TokenBucket)) {
+                return false;
+            }
+            TokenBucket other = (TokenBucket) obj;
+            return capacity == other.capacity
+                    && refillWindowSec == other.refillWindowSec
+                    && windowResetEpochSec == other.windowResetEpochSec;
+        }
+    }
+}
+```

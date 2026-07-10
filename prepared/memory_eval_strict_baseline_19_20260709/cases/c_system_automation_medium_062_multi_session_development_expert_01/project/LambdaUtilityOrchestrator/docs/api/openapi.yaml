@@ -1,0 +1,402 @@
+```yaml
+openapi: 3.0.3
+info:
+  title: LambdaUtility Orchestrator Public API
+  description: |
+    The LambdaUtility Orchestrator (LUO) exposes a lightweight, REST-based control
+    plane that allows external systems and operators to trigger on-demand utilities
+    (e.g., deployments, backups, configuration pushes) and query their execution status.
+    All endpoints are serverless and map directly to discrete C-based AWS Lambda
+    functions.  
+    This specification documents **version 1** of the LUO API.
+  version: "1.0.0"
+  contact:
+    name: DevOps & Automation Team
+    email: devops@acme.example.com
+    url: https://github.com/acme/lambda-utility-orchestrator
+  license:
+    name: MIT License
+    url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: https://api.acme.example.com/luo
+    description: Production
+  - url: https://staging-api.acme.example.com/luo
+    description: Staging
+
+tags:
+  - name: Health
+    description: Service health-check endpoints
+  - name: Command
+    description: Generic command execution & status APIs
+  - name: Utility
+    description: Convenience wrappers for common utilities
+  - name: Notification
+    description: Observer-driven alert fan-out endpoints
+
+security:
+  - ApiKeyAuth: []
+  - BearerToken: []
+
+paths:
+  /healthz:
+    get:
+      tags: [Health]
+      summary: Liveness probe
+      description: Returns HTTP 200 when the Orchestrator API is up and the backing Lambda can cold-start within the SLO.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthzResponse"
+
+  /v1/commands/{commandName}:
+    post:
+      tags: [Command]
+      summary: Trigger a command
+      description: |
+        Queues a command for asynchronous execution.  
+        The command name **MUST** match a registered Lambda alias (`deploy`, `backup`, etc.).
+      operationId: queueCommand
+      parameters:
+        - in: path
+          name: commandName
+          required: true
+          description: Canonical name of the command Lambda
+          schema:
+            type: string
+            pattern: "^[a-zA-Z0-9_-]{1,64}$"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CommandInvocationRequest"
+            examples:
+              deployExample:
+                summary: Trigger deploy
+                value:
+                  correlationId: "b4b6d5fc-7f28-4ca8-92d3-313474b8b26e"
+                  parameters:
+                    environment: "prod"
+                    artifactUri: "s3://artifacts/releases/api-1.9.3.tar.gz"
+      responses:
+        "202":
+          description: Accepted – command queued for execution
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CommandInvocationResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+      security:
+        - ApiKeyAuth: []
+        - BearerToken: []
+
+  /v1/commands/{invocationId}:
+    get:
+      tags: [Command]
+      summary: Fetch command status
+      description: Retrieve the current state and recent log snippets for a previously queued command.
+      operationId: getCommandStatus
+      parameters:
+        - in: path
+          name: invocationId
+          required: true
+          description: UUID of the command invocation
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CommandStatusResponse"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+      security:
+        - ApiKeyAuth: []
+        - BearerToken: []
+
+  /v1/utilities/backup:
+    post:
+      tags: [Utility]
+      summary: Snapshot and back up a volume/database
+      description: Shorthand wrapper for the `backup` command to simplify common backup workflow.
+      operationId: createBackup
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BackupRequest"
+            examples:
+              rdsExample:
+                summary: RDS snapshot
+                value:
+                  targetType: "rds"
+                  identifier: "acme-prod-db"
+                  retentionDays: 30
+      responses:
+        "202":
+          description: Backup initiated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CommandInvocationResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+      security:
+        - ApiKeyAuth: []
+        - BearerToken: []
+
+  /v1/notifications:
+    post:
+      tags: [Notification]
+      summary: Send custom notification
+      description: Publishes an ad-hoc message to the Observer pipeline (Slack, SMS, Email, etc.).
+      operationId: sendNotification
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NotificationRequest"
+      responses:
+        "202":
+          description: Notification accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotificationResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+      security:
+        - ApiKeyAuth: []
+        - BearerToken: []
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: >
+        A static API key issued per automation account. Rotate regularly.
+    BearerToken:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: >
+        OAuth 2.0 access token obtained via the corporate IdP.
+
+  schemas:
+    HealthzResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: ["ok"]
+        timestamp:
+          type: string
+          format: date-time
+      required: [status, timestamp]
+
+    CommandInvocationRequest:
+      type: object
+      description: Payload for generic command executions
+      properties:
+        correlationId:
+          type: string
+          format: uuid
+          description: |
+            Optional UUID supplied by the caller for trace-ability.  
+            If omitted, the orchestrator assigns one.
+        parameters:
+          type: object
+          additionalProperties: true
+          description: Command-specific name/value pairs
+      required: [parameters]
+
+    CommandInvocationResponse:
+      type: object
+      properties:
+        invocationId:
+          type: string
+          format: uuid
+        correlationId:
+          type: string
+          format: uuid
+        queuedAt:
+          type: string
+          format: date-time
+        statusEndpoint:
+          type: string
+          format: uri
+      required: [invocationId, queuedAt, statusEndpoint]
+
+    CommandStatusResponse:
+      type: object
+      properties:
+        invocationId:
+          type: string
+          format: uuid
+        commandName:
+          type: string
+        state:
+          type: string
+          enum: [QUEUED, RUNNING, SUCCEEDED, FAILED, TIMED_OUT, CANCELLED]
+        startedAt:
+          type: string
+          format: date-time
+        finishedAt:
+          type: string
+          format: date-time
+        exitCode:
+          type: integer
+          minimum: 0
+        lastLogLines:
+          type: array
+          items:
+            type: string
+        outputArtifactUri:
+          type: string
+          format: uri
+      required: [invocationId, commandName, state]
+
+    BackupRequest:
+      type: object
+      properties:
+        targetType:
+          type: string
+          enum: [rds, ebs, s3, dynamodb]
+        identifier:
+          type: string
+          description: Resource identifier (DB instance id, volume id, bucket, etc.)
+        retentionDays:
+          type: integer
+          minimum: 1
+          maximum: 365
+        tags:
+          type: object
+          additionalProperties:
+            type: string
+      required: [targetType, identifier]
+
+    NotificationRequest:
+      type: object
+      properties:
+        channel:
+          type: string
+          enum: [slack, email, sms, pagerduty, webhook]
+        message:
+          type: string
+          minLength: 1
+          maxLength: 10240
+        severity:
+          type: string
+          enum: [INFO, WARNING, ERROR, CRITICAL]
+        correlationId:
+          type: string
+          format: uuid
+      required: [channel, message, severity]
+
+    NotificationResponse:
+      type: object
+      properties:
+        messageId:
+          type: string
+          format: uuid
+        publishedAt:
+          type: string
+          format: date-time
+      required: [messageId, publishedAt]
+
+    ErrorResponse:
+      type: object
+      properties:
+        errorId:
+          type: string
+          format: uuid
+        statusCode:
+          type: integer
+        message:
+          type: string
+        details:
+          type: array
+          items:
+            type: string
+      required: [errorId, statusCode, message]
+
+  responses:
+    BadRequest:
+      description: Invalid request (client error)
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          examples:
+            missingField:
+              value:
+                errorId: "7d61b496-1c6c-4481-aca0-41eb0a9e6768"
+                statusCode: 400
+                message: "required field 'parameters' missing"
+    Unauthorized:
+      description: API key or token missing/invalid
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          examples:
+            invalidToken:
+              value:
+                errorId: "ec2337d3-103e-4462-8773-d533ceea9ad5"
+                statusCode: 401
+                message: "invalid bearer token"
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          examples:
+            commandNotFound:
+              value:
+                errorId: "9ef6eeba-3781-43dd-9e0b-6418423c9bb7"
+                statusCode: 404
+                message: "invocation not found"
+    InternalError:
+      description: Server-side failure
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          examples:
+            lambdaFailure:
+              value:
+                errorId: "e2e02828-2e34-4aae-9c63-58d235a7ad2a"
+                statusCode: 500
+                message: "upstream Lambda error"
+```

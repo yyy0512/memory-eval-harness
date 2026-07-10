@@ -1,0 +1,462 @@
+/*
+ * RetinaGuard Vision Suite
+ * dr_detection_v2.c
+ *
+ * Thin inference wrapper for the diabetic-retinopathy detection model
+ * (dr_detection_v2.onnx).  Encapsulates ONNX Runtime session management,
+ * image–tensor conversion, and a small Observer mechanism so that downstream
+ * components (model registry, monitoring dashboard, etc.) can subscribe to
+ * inference–related events.
+ *
+ * Build dependencies:
+ *   – ONNX Runtime C API (>= 1.14)
+ *   – A C99-capable compiler
+ *
+ * Compile example:
+ *   cc -std=c99 -O2 -Wall -Wextra -I/path/to/onnxruntime/include \
+ *      dr_detection_v2.c -L/path/to/onnxruntime/lib -lonnxruntime -lpthread \
+ *      -o dr_detection_v2_demo
+ *
+ * NOTE: This unit is intentionally kept self-contained so that it can be
+ *       re-used by both the production pipeline and any on-device tooling
+ *       (model introspection, QA harnesses, etc.).
+ */
+
+#include <assert.h>
+#include <inttypes.h>
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
+
+#include <onnxruntime_c_api.h>  /* External dependency – ONNX Runtime */
+
+/* -------------------------------------------------------------------------- */
+/*  Diagnostic & Logging Helpers                                              */
+/* -------------------------------------------------------------------------- */
+
+#define DRD_LOG_TAG    "[dr_detection_v2]"
+#define DRD_LOG_FMT(lv, fmt, ...) \
+        fprintf(lv <= LOG_WARNING ? stderr : stdout, \
+                DRD_LOG_TAG " %s:%d: " fmt "\n", __func__, __LINE__, \
+                ##__VA_ARGS__)
+
+typedef enum { LOG_ERROR = 0, LOG_WARNING, LOG_INFO, LOG_DEBUG } log_level_t;
+static log_level_t g_log_verbosity = LOG_INFO;
+
+#define LOGE(fmt, ...) do { if (g_log_verbosity >= LOG_ERROR)   DRD_LOG_FMT(LOG_ERROR,   fmt, ##__VA_ARGS__); } while (0)
+#define LOGW(fmt, ...) do { if (g_log_verbosity >= LOG_WARNING) DRD_LOG_FMT(LOG_WARNING, fmt, ##__VA_ARGS__); } while (0)
+#define LOGI(fmt, ...) do { if (g_log_verbosity >= LOG_INFO)    DRD_LOG_FMT(LOG_INFO,    fmt, ##__VA_ARGS__); } while (0)
+#define LOGD(fmt, ...) do { if (g_log_verbosity >= LOG_DEBUG)   DRD_LOG_FMT(LOG_DEBUG,   fmt, ##__VA_ARGS__); } while (0)
+
+/* -------------------------------------------------------------------------- */
+/*  Error-handling convenience                                                */
+/* -------------------------------------------------------------------------- */
+
+#define ORT_CALL(expr)                                                              \
+    do {                                                                            \
+        OrtStatus *_status = (expr);                                                \
+        if (_status != NULL) {                                                      \
+            const char *_msg = g_ort->GetErrorMessage(_status);                     \
+            LOGE("ONNX Runtime error: %s", _msg);                                   \
+            g_ort->ReleaseStatus(_status);                                          \
+            goto ort_fail;                                                          \
+        }                                                                           \
+    } while (0)
+
+/* -------------------------------------------------------------------------- */
+/*  Observer Pattern Implementation                                           */
+/* -------------------------------------------------------------------------- */
+
+typedef enum {
+    EVENT_INFERENCE_STARTED,
+    EVENT_INFERENCE_FINISHED,
+    EVENT_INFERENCE_FAILED
+} dr_event_t;
+
+typedef struct {
+    dr_event_t       type;
+    const char      *model_name;
+    double           latency_ms;
+    float            confidence;  /* Primary class confidence [0-1] */
+    int              error_code;  /* Non-zero if failed */
+    const char      *error_msg;   /* Informational */
+} dr_event_payload_t;
+
+typedef void (*dr_event_cb_t)(const dr_event_payload_t *payload, void *user);
+
+/* Simple linked list of subscribers */
+typedef struct dr_observer_node {
+    dr_event_cb_t             cb;
+    void                     *user;
+    struct dr_observer_node  *next;
+} dr_observer_node_t;
+
+static dr_observer_node_t *g_observers = NULL;
+
+void dr_subscribe(dr_event_cb_t cb, void *user)
+{
+    dr_observer_node_t *n = calloc(1, sizeof(*n));
+    if (!n) { LOGE("OOM in dr_subscribe"); return; }
+    n->cb = cb;
+    n->user = user;
+
+    n->next = g_observers;
+    g_observers = n;
+}
+
+static void notify_observers(const dr_event_payload_t *p)
+{
+    for (dr_observer_node_t *n = g_observers; n; n = n->next) {
+        if (n->cb) n->cb(p, n->user);
+    }
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Public API                                                                */
+/* -------------------------------------------------------------------------- */
+
+typedef struct {
+    const OrtApi     *api;
+    OrtEnv           *env;
+    OrtSession       *session;
+    OrtMemoryInfo    *mem_info;
+    OrtAllocator     *allocator;
+
+    /* Metadata */
+    char            **input_names;
+    size_t            num_inputs;
+    char            **output_names;
+    size_t            num_outputs;
+} dr_model_t;
+
+/* Singleton ONNX Runtime API pointer */
+static const OrtApi *g_ort = NULL;
+
+/* Forward decl. */
+static bool load_io_meta(dr_model_t *mdl);
+
+static inline double time_now_ms(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (double)ts.tv_sec * 1000.0 + (double)ts.tv_nsec / 1e6;
+}
+
+/* Release helpers --------------------------------------------------------- */
+
+static void free_str_array(char **arr, size_t n)
+{
+    if (!arr) return;
+    for (size_t i = 0; i < n; i++) free(arr[i]);
+    free(arr);
+}
+
+static void dr_model_release(dr_model_t *mdl)
+{
+    if (!mdl) return;
+
+    if (mdl->session)   mdl->api->ReleaseSession(mdl->session);
+    if (mdl->mem_info)  mdl->api->ReleaseMemoryInfo(mdl->mem_info);
+    if (mdl->env)       mdl->api->ReleaseEnv(mdl->env);
+    free_str_array(mdl->input_names,  mdl->num_inputs);
+    free_str_array(mdl->output_names, mdl->num_outputs);
+    memset(mdl, 0, sizeof(*mdl));
+}
+
+/* Initialization ---------------------------------------------------------- */
+
+bool dr_model_init(dr_model_t *mdl,
+                   const char *model_path,
+                   uint32_t    intra_threads,
+                   uint32_t    inter_threads)
+{
+    memset(mdl, 0, sizeof(*mdl));
+    if (!model_path) { LOGE("model_path cannot be NULL"); return false; }
+
+    /* Get API handle once */
+    g_ort = OrtGetApiBase()->GetApi(ORT_API_VERSION);
+    mdl->api = g_ort;
+
+    ORT_CALL(g_ort->CreateEnv(ORT_LOGGING_LEVEL_WARNING,
+                              "dr_detection_v2", &mdl->env));
+
+    OrtSessionOptions *sess_opts = NULL;
+    ORT_CALL(g_ort->CreateSessionOptions(&sess_opts));
+    g_ort->SetIntraOpNumThreads(sess_opts, (int)intra_threads);
+    g_ort->SetInterOpNumThreads(sess_opts, (int)inter_threads);
+    g_ort->SetGraphOptimizationLevel(sess_opts,
+                                     ORT_ENABLE_BASIC);
+
+    LOGI("Loading ONNX model: %s", model_path);
+    ORT_CALL(g_ort->CreateSession(mdl->env, model_path,
+                                  sess_opts, &mdl->session));
+    g_ort->ReleaseSessionOptions(sess_opts);
+
+    /* Allocator for strings/tensors */
+    ORT_CALL(g_ort->GetAllocatorWithDefaultOptions(&mdl->allocator));
+
+    /* CPU mem info */
+    ORT_CALL(g_ort->CreateCpuMemoryInfo(OrtArenaAllocator, OrtMemTypeDefault,
+                                        &mdl->mem_info));
+
+    if (!load_io_meta(mdl)) goto ort_fail;
+
+    LOGI("Model loaded OK – %zu inputs, %zu outputs",
+         mdl->num_inputs, mdl->num_outputs);
+    return true;
+
+ort_fail:
+    dr_model_release(mdl);
+    return false;
+}
+
+/* IO Metadata ------------------------------------------------------------- */
+
+static char *strdup_from_ort(const OrtApi *api, OrtAllocator *a, OrtValue *v)
+{
+    (void)api; (void)a; (void)v; /* Unused – placeholder for future expansion */
+    return NULL;
+}
+
+static bool fetch_names(const OrtApi *api, OrtSession *sess,
+                        OrtAllocator *alc, bool is_input,
+                        char ***out_names, size_t *out_count)
+{
+    size_t count = 0;
+    api->SessionGetInputCount(sess, &count);
+    if (!is_input) api->SessionGetOutputCount(sess, &count);
+
+    char **names = calloc(count, sizeof(char *));
+    if (!names) { LOGE("OOM"); return false; }
+
+    for (size_t i = 0; i < count; i++) {
+        char *name = NULL;
+        OrtStatus *st = NULL;
+        if (is_input)
+            st = api->SessionGetInputName(sess, i, alc, &name);
+        else
+            st = api->SessionGetOutputName(sess, i, alc, &name);
+
+        if (st) {
+            LOGE("Failed to get %s name #%zu: %s",
+                 is_input ? "input" : "output",
+                 i, api->GetErrorMessage(st));
+            api->ReleaseStatus(st);
+            free_str_array(names, i);
+            return false;
+        }
+        names[i] = strdup(name);            /* Copy to heap */
+        alc->Free(alc, name);               /* Free ORT buffer */
+    }
+    *out_names  = names;
+    *out_count  = count;
+    return true;
+}
+
+static bool load_io_meta(dr_model_t *mdl)
+{
+    if (!fetch_names(mdl->api, mdl->session, mdl->allocator,
+                     true, &mdl->input_names, &mdl->num_inputs))
+        return false;
+    if (!fetch_names(mdl->api, mdl->session, mdl->allocator,
+                     false, &mdl->output_names, &mdl->num_outputs))
+        return false;
+    return true;
+}
+
+/* Image Pre-Processing Helpers ------------------------------------------- */
+
+/*
+ * The model expects an FP32 tensor in NCHW format with shape:
+ *  {1, 3, 512, 512}
+ * Pixel values are normalized to [0,1].
+ */
+
+#define MODEL_IMG_SIZE 512
+#define MODEL_CHANNELS 3
+#define MODEL_INPUT_ELEMS (1 * MODEL_CHANNELS * MODEL_IMG_SIZE * MODEL_IMG_SIZE)
+
+static void convert_rgb8_to_chw_fp32(const uint8_t *rgb,
+                                     float          *dst_chw)
+{
+    /* Iterate HWC input, write into CHW tensor */
+    for (size_t y = 0; y < MODEL_IMG_SIZE; y++) {
+        for (size_t x = 0; x < MODEL_IMG_SIZE; x++) {
+            size_t src_idx = (y * MODEL_IMG_SIZE + x) * 3; /* HWC */
+            size_t dst_base = y * MODEL_IMG_SIZE + x;      /* per-channel offset */
+
+            dst_chw[0 * MODEL_IMG_SIZE * MODEL_IMG_SIZE + dst_base] =
+                rgb[src_idx + 0] / 255.0f;  /* R */
+            dst_chw[1 * MODEL_IMG_SIZE * MODEL_IMG_SIZE + dst_base] =
+                rgb[src_idx + 1] / 255.0f;  /* G */
+            dst_chw[2 * MODEL_IMG_SIZE * MODEL_IMG_SIZE + dst_base] =
+                rgb[src_idx + 2] / 255.0f;  /* B */
+        }
+    }
+}
+
+/* Public inference API ---------------------------------------------------- */
+
+/*
+ * Runs inference on a single pre-resized RGB frame.
+ *
+ *  rgb_512: Pointer to a 512×512×3 (HWC) uint8_t buffer.
+ *  confidence_out: Optional – receives confidence score of DR > mild.
+ *
+ *  Returns:
+ *    true  – inference succeeded
+ *    false – failure (error is logged, observer notified)
+ */
+
+bool dr_model_infer(dr_model_t *mdl,
+                    const uint8_t *rgb_512,
+                    float *confidence_out)
+{
+    if (!mdl || !mdl->session || !rgb_512) {
+        LOGE("Invalid args");
+        return false;
+    }
+
+    dr_event_payload_t payload = {
+        .type       = EVENT_INFERENCE_STARTED,
+        .model_name = "dr_detection_v2",
+        .latency_ms = 0.0,
+        .confidence = 0.0f,
+        .error_code = 0,
+        .error_msg  = NULL
+    };
+    notify_observers(&payload);
+
+    double t0 = time_now_ms();
+
+    /* Convert input pixels ------------------------------------------------ */
+    float *input_buf = malloc(sizeof(float) * MODEL_INPUT_ELEMS);
+    if (!input_buf) { LOGE("OOM"); goto fail; }
+    convert_rgb8_to_chw_fp32(rgb_512, input_buf);
+
+    /* Build input tensor -------------------------------------------------- */
+    const int64_t dims[4] = {1, MODEL_CHANNELS, MODEL_IMG_SIZE, MODEL_IMG_SIZE};
+    OrtValue *input_tensor = NULL;
+    ORT_CALL(mdl->api->CreateTensorWithDataAsOrtValue(
+                 mdl->mem_info, input_buf,
+                 sizeof(float) * MODEL_INPUT_ELEMS,
+                 dims, 4, ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT,
+                 &input_tensor));
+    bool is_tensor;
+    mdl->api->IsTensor(input_tensor, &is_tensor);
+    assert(is_tensor);
+
+    /* Run session --------------------------------------------------------- */
+    OrtValue   *output_tensor = NULL;
+    const char *inp_names[1]  = { mdl->input_names[0] };
+    const char *out_names[1]  = { mdl->output_names[0] };
+
+    ORT_CALL(mdl->api->Run(mdl->session, NULL,
+                           inp_names,  (const OrtValue * const *)&input_tensor, 1,
+                           out_names, 1,
+                           &output_tensor));
+
+    /* Read output --------------------------------------------------------- */
+    float *out_data = NULL;
+    ORT_CALL(mdl->api->GetTensorMutableData(output_tensor, (void **)&out_data));
+
+    float conf = out_data[0];  /* Binary model – probability of DR */
+    if (confidence_out) *confidence_out = conf;
+
+    double lat_ms = time_now_ms() - t0;
+
+    /* Notify success ------------------------------------------------------ */
+    payload.type       = EVENT_INFERENCE_FINISHED;
+    payload.latency_ms = lat_ms;
+    payload.confidence = conf;
+    notify_observers(&payload);
+
+    /* Cleanup ------------------------------------------------------------- */
+    mdl->api->ReleaseValue(output_tensor);
+    mdl->api->ReleaseValue(input_tensor);
+    free(input_buf);
+    return true;
+
+ort_fail:
+fail:
+    payload.type       = EVENT_INFERENCE_FAILED;
+    payload.error_code = -1;
+    payload.error_msg  = "runtime_error";
+    notify_observers(&payload);
+
+    if (input_buf)     free(input_buf);
+    if (input_tensor)  mdl->api->ReleaseValue(input_tensor);
+    if (output_tensor) mdl->api->ReleaseValue(output_tensor);
+    return false;
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Demo & Self-test (can be stripped in production)                          */
+/* -------------------------------------------------------------------------- */
+
+#ifdef DRD_STANDALONE_TEST
+
+#include <stb_image.h>   /* Header-only image loader (MIT license) */
+
+static void event_logger(const dr_event_payload_t *p, void *user)
+{
+    (void)user;
+    switch (p->type) {
+    case EVENT_INFERENCE_STARTED:
+        LOGI("Observer: inference started");
+        break;
+    case EVENT_INFERENCE_FINISHED:
+        LOGI("Observer: inference finished in %.2f ms — confidence=%.3f",
+             p->latency_ms, p->confidence);
+        break;
+    case EVENT_INFERENCE_FAILED:
+        LOGE("Observer: inference failed (%s)", p->error_msg);
+        break;
+    default: break;
+    }
+}
+
+int main(int argc, char **argv)
+{
+    if (argc != 3) {
+        fprintf(stderr, "Usage: %s <model.onnx> <image_512x512.jpg>\n", argv[0]);
+        return EXIT_FAILURE;
+    }
+
+    /* Load image ---------------------------------------------------------- */
+    int w, h, ch;
+    uint8_t *img = stbi_load(argv[2], &w, &h, &ch, 3);
+    if (!img || w != MODEL_IMG_SIZE || h != MODEL_IMG_SIZE) {
+        LOGE("Failed to load/resize image");
+        return EXIT_FAILURE;
+    }
+
+    /* Subscribe to events ------------------------------------------------- */
+    dr_subscribe(event_logger, NULL);
+
+    /* Init model ---------------------------------------------------------- */
+    dr_model_t mdl;
+    if (!dr_model_init(&mdl, argv[1], 2, 2)) {
+        LOGE("Model init failed");
+        stbi_image_free(img);
+        return EXIT_FAILURE;
+    }
+
+    /* Run inference ------------------------------------------------------- */
+    float conf = 0.0f;
+    dr_model_infer(&mdl, img, &conf);
+    printf("DR probability: %.3f\n", conf);
+
+    /* Clean up ------------------------------------------------------------ */
+    stbi_image_free(img);
+    dr_model_release(&mdl);
+    return EXIT_SUCCESS;
+}
+
+#endif /* DRD_STANDALONE_TEST */
+
+/* -------------------------------------------------------------------------- */

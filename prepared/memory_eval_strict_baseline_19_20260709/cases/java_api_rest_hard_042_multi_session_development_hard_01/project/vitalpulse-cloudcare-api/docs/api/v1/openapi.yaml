@@ -1,0 +1,415 @@
+```yaml
+openapi: 3.1.0
+info:
+  title: VitalPulse CloudCare API
+  version: "1.0.0"
+  description: |
+    VitalPulse CloudCare API **v1** provides HIPAA-grade REST endpoints that enable hospitals, ambulatory clinics,
+    and tele-health vendors to exchange real-time vital-sign streams, medication administration events, and
+    clinician orders.
+
+    All data operations adhere to **Command/Query Separation**:
+
+    • Command endpoints (`POST`, `PUT`, `DELETE`) guarantee strong consistency for critical write operations.  
+    • Query endpoints (`GET`) are optimized for read-heavy workflows via response caching and cursor-based pagination.
+
+    The platform is protected with **SMART on FHIR / OAuth 2.0**, audited with **CloudWatch**, and validated against
+    HL7 FHIR schemas. Custom headers expose rate-limiting quotas to clients.
+
+    ---
+    © 2024 VitalPulse, Inc. All rights reserved.
+  termsOfService: https://vitalpulse.io/terms
+  contact:
+    name: VitalPulse Platform Team
+    url: https://vitalpulse.io
+    email: api@vitalpulse.io
+  license:
+    name: Apache 2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0
+
+servers:
+  - url: https://api.vitalpulse.io/v1
+    description: Production
+  - url: https://sandbox.vitalpulse.io/v1
+    description: Sandbox
+
+tags:
+  - name: Vitals
+    description: Real-time patient vital sign ingestion and retrieval
+  - name: Medications
+    description: Medication administration commands
+  - name: Orders
+    description: Clinician order lifecycle
+  - name: System
+    description: Health and metadata endpoints
+
+externalDocs:
+  description: HL7 FHIR® specification
+  url: https://hl7.org/fhir/
+
+paths:
+  /patients/{patientId}/vitals:
+    parameters:
+      - $ref: '#/components/parameters/PatientId'
+    post:
+      tags: [Vitals]
+      summary: Ingest a new vital-sign event
+      operationId: postVitalSignEvent
+      description: |
+        Write a single vital-sign event (FHIR Observation) for a patient.  
+        The request body must conform to _FHIR Observation_ **R4** JSON Schema.
+      requestBody:
+        required: true
+        content:
+          application/fhir+json:
+            schema:
+              $ref: 'https://hl7.org/fhir/observation.schema.json'
+      responses:
+        "201":
+          description: Vital-sign event accepted
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/XRequestID'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommandAccepted'
+        "400":
+          $ref: '#/components/responses/BadRequest'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "429":
+          $ref: '#/components/responses/TooManyRequests'
+      security:
+        - oauth:
+            - patient/Observation.write
+    get:
+      tags: [Vitals]
+      summary: Get paginated vital-sign events
+      operationId: getVitalSigns
+      description: |
+        Retrieve vital-sign events in chronological order.
+        Supports cursor-based pagination for high-volume device streams.
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+        - name: from
+          in: query
+          description: ISO-8601 timestamp filter (inclusive start)
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          description: ISO-8601 timestamp filter (exclusive end)
+          schema:
+            type: string
+            format: date-time
+      responses:
+        "200":
+          description: A paginated list of vital-sign events
+          headers:
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/XRateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/XRateLimitRemaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/XRateLimitReset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VitalSignEventPage'
+        "400":
+          $ref: '#/components/responses/BadRequest'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "429":
+          $ref: '#/components/responses/TooManyRequests'
+      security:
+        - oauth:
+            - patient/Observation.read
+
+  /medications/administrations:
+    post:
+      tags: [Medications]
+      summary: Record a medication administration event
+      operationId: postMedicationAdministration
+      description: |
+        Creates a new **MedicationAdministration** (FHIR R4) event. This endpoint is write-only.
+      requestBody:
+        required: true
+        content:
+          application/fhir+json:
+            schema:
+              $ref: 'https://hl7.org/fhir/medicationadministration.schema.json'
+      responses:
+        "201":
+          description: Medication administration recorded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommandAccepted'
+        "400":
+          $ref: '#/components/responses/BadRequest'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "409":
+          description: Duplicate medication administration
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        "429":
+          $ref: '#/components/responses/TooManyRequests'
+      security:
+        - oauth:
+            - medication/MedicationAdministration.write
+
+  /orders:
+    post:
+      tags: [Orders]
+      summary: Create a clinician order
+      operationId: postClinicianOrder
+      description: |
+        Creates a new **ServiceRequest** (FHIR R4) which represents a clinician order.
+      requestBody:
+        required: true
+        content:
+          application/fhir+json:
+            schema:
+              $ref: 'https://hl7.org/fhir/servicerequest.schema.json'
+      responses:
+        "201":
+          description: Clinician order created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommandAccepted'
+        "400":
+          $ref: '#/components/responses/BadRequest'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "429":
+          $ref: '#/components/responses/TooManyRequests'
+      security:
+        - oauth:
+            - patient/ServiceRequest.write
+
+  /orders/{orderId}:
+    parameters:
+      - name: orderId
+        in: path
+        required: true
+        description: Server-assigned order identifier (UUID)
+        schema:
+          type: string
+          format: uuid
+    get:
+      tags: [Orders]
+      summary: Get order details
+      operationId: getClinicianOrder
+      responses:
+        "200":
+          description: Order details
+          content:
+            application/fhir+json:
+              schema:
+                $ref: 'https://hl7.org/fhir/servicerequest.schema.json'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "404":
+          description: Order not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        "429":
+          $ref: '#/components/responses/TooManyRequests'
+      security:
+        - oauth:
+            - patient/ServiceRequest.read
+
+  /healthz:
+    get:
+      tags: [System]
+      summary: Health probe
+      operationId: getHealthCheck
+      description: Lightweight readiness probe used by load balancers.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+                  timestamp:
+                    type: string
+                    format: date-time
+        "503":
+          description: Service unavailable
+      security: [] # public
+
+components:
+  securitySchemes:
+    oauth:
+      type: oauth2
+      flows:
+        authorizationCode:
+          authorizationUrl: https://auth.vitalpulse.io/oauth2/authorize
+          tokenUrl: https://auth.vitalpulse.io/oauth2/token
+          scopes:
+            patient/Observation.read: Read patient observation data
+            patient/Observation.write: Write patient observation data
+            medication/MedicationAdministration.write: Record medication administrations
+            patient/ServiceRequest.write: Create clinician orders
+            patient/ServiceRequest.read: Read clinician orders
+
+  parameters:
+    PatientId:
+      name: patientId
+      in: path
+      required: true
+      description: FHIR logical patient identifier (UUID)
+      schema:
+        type: string
+        format: uuid
+    Cursor:
+      name: cursor
+      in: query
+      description: Cursor token returned by the previous request
+      schema:
+        type: string
+    Limit:
+      name: limit
+      in: query
+      description: Page size (max 500)
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 500
+
+  headers:
+    XRequestID:
+      description: Echoes back the idempotency-key for traceability
+      schema:
+        type: string
+    XRateLimitLimit:
+      description: Maximum number of requests allowed in the current window
+      schema:
+        type: integer
+    XRateLimitRemaining:
+      description: Remaining requests in the current window
+      schema:
+        type: integer
+    XRateLimitReset:
+      description: Time at which the current rate-limit window resets (epoch seconds)
+      schema:
+        type: integer
+        format: int64
+
+  responses:
+    BadRequest:
+      description: Invalid request parameters or body
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    Unauthorized:
+      description: Authentication failed
+      headers:
+        WWW-Authenticate:
+          schema:
+            type: string
+          example: Bearer
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    TooManyRequests:
+      description: Rate limit exceeded
+      headers:
+        Retry-After:
+          schema:
+            type: integer
+            format: int32
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+
+  schemas:
+    ApiError:
+      type: object
+      description: Standard error envelope
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+          example: "2024-01-30T14:12:45.123Z"
+        status:
+          type: integer
+          example: 400
+        error:
+          type: string
+          example: Bad Request
+        detail:
+          type: string
+          example: Validation failed: body.height is required
+        path:
+          type: string
+          example: /v1/patients/123/vitals
+      required: [timestamp, status, error, detail, path]
+
+    CommandAccepted:
+      type: object
+      description: Acknowledgement for successful command operations
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Server-generated identifier of the newly created resource
+        requestId:
+          type: string
+          description: Idempotency key echoed from `X-Request-ID` header
+        timestamp:
+          type: string
+          format: date-time
+      required: [id, timestamp]
+
+    VitalSignEvent:
+      type: object
+      description: Partial view of FHIR Observation for common vitals
+      properties:
+        id:
+          type: string
+          format: uuid
+        effectiveDateTime:
+          type: string
+          format: date-time
+        code:
+          type: string
+          enum: [heart-rate, spo2, blood-pressure, respiratory-rate, temperature]
+        valueQuantity:
+          type: number
+        unit:
+          type: string
+      required: [id, effectiveDateTime, code, valueQuantity]
+
+    VitalSignEventPage:
+      type: object
+      description: Cursor-based page of vital-sign events
+      properties:
+        nextCursor:
+          type: string
+          nullable: true
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/VitalSignEvent'
+      required: [items]
+
+```

@@ -1,6 +1,0 @@
-You are working in the repository at the current working directory. This is session 1 of a multi-session development task. Complete only the requirements for this session. At the end, save any useful project-specific memory for future sessions.
-
-You will implement the new `order_service` incrementally over three sessions. You must retain context between sessions to build upon your previous work.
-
-**Session 1: Service Scaffolding and Setup**
-Your first task is to set up the basic structure for the new `order_service`. Based on the existing `product_service`, create the necessary directory structure (`src`, `include`, `tests`), a `CMakeLists.txt` file, and a minimal `main.c` that initializes a simple server loop. You should also integrate the shared logging utility (`mm_logger.c`) to announce that the service has started. Do not implement any order-specific logic yet. Your goal is to have a compilable, but non-functional, service skeleton that follows the project's established patterns.

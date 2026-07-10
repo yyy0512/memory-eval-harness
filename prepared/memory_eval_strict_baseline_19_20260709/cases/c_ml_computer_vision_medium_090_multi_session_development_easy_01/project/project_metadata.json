@@ -1,0 +1,180 @@
+{
+  "specification": {
+    "unique_id": "c_ml_computer_vision_medium_090",
+    "name": "RetinaGuard Vision Suite",
+    "description": "RetinaGuard Vision Suite is a medium-scale, monolithic C application designed to detect, grade, and longitudinally track diabetic retinopathy from retinal fundus photographs captured in primary-care clinics. The single executable orchestrates the full computer-vision pipeline\u2014from image ingestion and quality control to model inference, result visualization, and automated feedback to electronic medical-record (EMR) systems\u2014inside a tightly coupled codebase. The healthcare focus is reinforced through domain-specific feature engineering (e.g., micro-aneurysm heat-maps), risk-stratified model evaluation reports aligned with ophthalmology guidelines, and outcomes monitoring that triggers clinician alerts when disease progression is detected.\n\nBuilt around a monolithic architecture, RetinaGuard embeds Observer Pattern hooks to broadcast inference events to an in-process model-registry module and a real-time monitoring dashboard. The Pipeline Pattern stitches together discrete stages\u2014image preprocessing, feature extraction, model serving, evaluation, and visualization\u2014while remaining in one deployable unit that can be certified as a single medical device software component. MLOps functionality (hyperparameter tuning, automated retraining, and model versioning) is performed on-device at scheduled intervals using historic images stored in an internal database, ensuring data never leaves the clinic and simplifying regulatory compliance for protected health information (PHI). This design produces a reliable, self-contained solution that rural and resource-limited clinics can operate without cloud connectivity or complex distributed infrastructure.",
+    "domain": "ml_computer_vision",
+    "complexity": "medium",
+    "language": "c",
+    "architecture": "monolithic",
+    "theme": "healthcare",
+    "target_file_count": 30,
+    "target_token_count": 192800,
+    "features": [
+      "feature_engineering",
+      "model_monitoring",
+      "data_visualization",
+      "model_versioning",
+      "automated_retraining",
+      "hyperparameter_tuning",
+      "model_serving",
+      "model_evaluation"
+    ],
+    "architecture_patterns": [
+      "Observer_Pattern",
+      "Model_Registry",
+      "Pipeline_Pattern",
+      "MLOps_Architecture"
+    ],
+    "dependencies": [
+      "OpenCV 4.x (core image processing and computer vision)",
+      "LibTorch C++ API 2.x (deep-learning inference and training)",
+      "SQLite3 (embedded model registry, data cache, and audit logs)",
+      "cJSON (lightweight configuration and model-metadata serialization)",
+      "libcurl (secure EMR integration via HL7/FHIR REST endpoints)",
+      "Cairo Graphics (in-app heat-map and ROC curve visualization)",
+      "GNU Scientific Library (GSL) (statistical evaluation metrics)",
+      "OpenMP (parallelized preprocessing and hyperparameter tuning)",
+      "CUnit (unit and regression test framework)",
+      "Systemd Service Files / pkg-config (Linux packaging and deployment)"
+    ],
+    "seed": 219435
+  },
+  "generated_timestamp": 1754355584.9997928,
+  "phase_1_complete": true,
+  "uniqueness_factors": {
+    "domain": "ml_computer_vision",
+    "complexity": "medium",
+    "architecture": "monolithic",
+    "theme": "healthcare",
+    "seed": 219435
+  },
+  "files": [
+    {
+      "path": "RetinaGuard_Vision_Suite/README.md",
+      "type": "documentation"
+    },
+    {
+      "path": "RetinaGuard_Vision_Suite/LICENSE",
+      "type": "source"
+    },
+    {
+      "path": "RetinaGuard_Vision_Suite/Makefile",
+      "type": "source"
+    },
+    {
+      "path": "RetinaGuard_Vision_Suite/docs/architecture.md",
+      "type": "documentation"
+    },
+    {
+      "path": "RetinaGuard_Vision_Suite/docs/setup_guide.md",
+      "type": "documentation"
+    },
+    {
+      "path": "RetinaGuard_Vision_Suite/docs/api/Doxyfile",
+      "type": "documentation"
+    },
+    {
+      "path": "RetinaGuard_Vision_Suite/docs/api/html",
+      "type": "documentation"
+    },
+    {
+      "path": "RetinaGuard_Vision_Suite/docs/validation_report_template.md",
+      "type": "documentation"
+    },
+    {
+      "path": "RetinaGuard_Vision_Suite/config/retinaguard.conf",
+      "type": "config"
+    },
+    {
+      "path": "RetinaGuard_Vision_Suite/config/models.conf",
+      "type": "config"
+    },
+    {
+      "path": "RetinaGuard_Vision_Suite/data/db/retinaguard.db",
+      "type": "source"
+    },
+    {
+      "path": "RetinaGuard_Vision_Suite/data/images",
+      "type": "source"
+    },
+    {
+      "path": "RetinaGuard_Vision_Suite/data/reports",
+      "type": "source"
+    },
+    {
+      "path": "RetinaGuard_Vision_Suite/models/dr_detection_v1.onnx",
+      "type": "source"
+    },
+    {
+      "path": "RetinaGuard_Vision_Suite/models/dr_detection_v2.onnx",
+      "type": "source"
+    },
+    {
+      "path": "RetinaGuard_Vision_Suite/src/main.c",
+      "type": "source"
+    },
+    {
+      "path": "RetinaGuard_Vision_Suite/src/common.h",
+      "type": "source"
+    },
+    {
+      "path": "RetinaGuard_Vision_Suite/src/core/pipeline.h",
+      "type": "source"
+    },
+    {
+      "path": "RetinaGuard_Vision_Suite/src/core/pipeline.c",
+      "type": "source"
+    },
+    {
+      "path": "RetinaGuard_Vision_Suite/src/core/image_processing.h",
+      "type": "source"
+    },
+    {
+      "path": "RetinaGuard_Vision_Suite/src/core/image_processing.c",
+      "type": "source"
+    },
+    {
+      "path": "RetinaGuard_Vision_Suite/src/core/feature_engineering.h",
+      "type": "source"
+    },
+    {
+      "path": "RetinaGuard_Vision_Suite/src/core/feature_engineering.c",
+      "type": "source"
+    },
+    {
+      "path": "RetinaGuard_Vision_Suite/src/core/inference.h",
+      "type": "source"
+    },
+    {
+      "path": "RetinaGuard_Vision_Suite/src/core/inference.c",
+      "type": "source"
+    },
+    {
+      "path": "RetinaGuard_Vision_Suite/src/core/observer.h",
+      "type": "source"
+    },
+    {
+      "path": "RetinaGuard_Vision_Suite/src/core/observer.c",
+      "type": "source"
+    },
+    {
+      "path": "RetinaGuard_Vision_Suite/src/core/events.h",
+      "type": "source"
+    },
+    {
+      "path": "RetinaGuard_Vision_Suite/src/mlops/model_registry.h",
+      "type": "source"
+    },
+    {
+      "path": "RetinaGuard_Vision_Suite/src/mlops/model_registry.c",
+      "type": "source"
+    }
+  ],
+  "generated_stats": {
+    "files_count": 30,
+    "lines_count": 10499,
+    "generation_time": 1900.6821208000183,
+    "timestamp": 1754392730.814108
+  }
+}

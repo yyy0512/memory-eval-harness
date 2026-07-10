@@ -1,0 +1,162 @@
+@startuml SystemArchitecture
+
+'-------------------------------------------------------------------
+' StreamPulse Nexus – System Architecture Diagram
+' Author: architecture@streampulse.dev
+' Last Updated: 2024-06-10
+'
+' This PlantUML document renders the high-level component diagram
+' for the StreamPulse Nexus networking platform.  Components are
+' grouped by deployment tier.  Stereotypes map to architectural
+' patterns highlighted in project documentation.
+'-------------------------------------------------------------------
+
+'========================
+'  Global Styling
+'========================
+skinparam componentStyle rectangle
+skinparam shadowing true
+skinparam wrapWidth 200
+skinparam defaultFontName "Segoe UI"
+skinparam defaultFontSize 12
+skinparam backgroundColor #0f0f10
+skinparam component {
+    BackgroundColor #1c1c20
+    BorderColor #5e5e6a
+    FontColor #e6e6e6
+}
+skinparam package {
+    BackgroundColor #131316
+    BorderColor #5e5e6a
+    FontColor #c3c3c3
+}
+skinparam note {
+    BackgroundColor #272730
+    BorderColor #5e5e6a
+    FontColor #bbbbbb
+}
+
+'========================
+'  Legend (Patterns)
+'========================
+legend left
+  <b>Pattern Legend</b>
+  <&star>  Strategy Pattern
+  <&eye>   Observer / Event-Driven
+  <&lightning> Command Pattern
+  <&layers> Chain of Responsibility
+endlegend
+
+'========================
+'  TIER: Edge
+'========================
+package "Edge Tier" {
+    [Ingress Gateway] as IG #ADD1
+    [Edge Cache CDN] as EC #ADD2
+}
+
+'========================
+'  TIER: Core Routing
+'========================
+package "Core Routing Tier" {
+    [Media Router] as MR
+    [Adaptive Load Balancer\n«Strategy»] as LB <<strategy>> <<(S,#f39c12)>>
+    [Event Bus\n«Observer / Event-Driven»] as EB <<observer>> <<(E,#2980b9)>>
+}
+
+'========================
+'  TIER: Processing
+'========================
+package "Processing Tier" {
+    [Transcoder Pool] as TP
+}
+
+'========================
+'  TIER: Analytics & Monitoring
+'========================
+package "Analytics & Monitoring" {
+    [Analytics Engine] as AN
+    [Alerting Service] as AL
+    [Observability Dashboard] as OD
+}
+
+'========================
+'  TIER: Management & Security
+'========================
+package "Management & Security" {
+    [Configuration Manager] as CM
+    [Security Scanner] as SS
+    [Backup & Recovery Service\n«Command / CoR»] as BR <<command>> <<(C,#c0392b)>>
+}
+
+'-------------------------------------------------------------------
+' Component Relationships
+'-------------------------------------------------------------------
+
+' Edge → Core
+IG  --> EC : HTTP/WebSocket\nUDP Media
+EC  --> MR : Routed Media Packets
+
+' Load-balancer Strategy is injected into Media Router
+LB  ..> MR : applyStrategy()
+
+' Routing stage publishes events to Event Bus
+MR  --> EB : publish(state_change)
+EB  --> MR : subscription(callback)  'reverse flow to depict Observer
+
+' Transcoding
+MR  --> TP : RTMP/HLS\nRaw Streams
+TP  --> MR : Adaptive Bitrate Streams
+
+' Analytics pipeline
+EB  --> AN : telemetry\naudience data
+AN  --> OD : metrics feed
+AL  --> OD : push(alerts)
+
+' Health & Alerting
+MR  --> AL : emit(fault)
+TP  --> AL : emit(fault)
+
+' Configuration propagation
+CM  --> IG : push(config)
+CM  --> EC
+CM  --> MR
+CM  --> TP
+CM  --> AN
+CM  --> AL
+
+' Security scanning feedback loop
+SS  --> MR : vulnerability_report
+SS  --> TP
+SS  --> EC
+
+' Backup / Recovery command chain
+AL  --> BR : trigger(backup)
+BR  --> MR : snapshot_state()
+BR  --> TP : snapshot_state()
+BR  --> EC : snapshot_state()
+BR  --> IG : snapshot_state()
+
+'-------------------------------------------------------------------
+' Notes
+'-------------------------------------------------------------------
+note right of LB
+  Strategy Pattern
+  allows pluggable
+  load algorithms
+end note
+
+note bottom of EB
+  Observer / Event-Driven\narchitecture decouples\nproducers from consumers
+end note
+
+note bottom of BR
+  Command & Chain-of-Responsibility\ncoordinate cross-cluster\nbackup and disaster recovery
+end note
+
+note as N0
+  All external communications enforce\nmTLS and adhere to zero-trust policies.
+end note
+N0 .. BR
+
+@enduml

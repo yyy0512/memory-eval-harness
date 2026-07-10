@@ -1,0 +1,211 @@
+```javascript
+#!/usr/bin/env node
+/**
+ * File:        streampulse-nexus/ops/kubernetes/base/namespace.yaml
+ * Purpose:     Executable script that emits a Kubernetes Namespace manifest
+ *              with dynamic metadata for StreamPulse Nexus environments.
+ *
+ * Why “.yaml”? Many deployment pipelines expect a *.yaml file in this location.
+ * By using a hash-bang and Node.js we keep that contract while gaining the
+ * flexibility of code-driven manifests (dry-run, CI stamps, feature flags, …).
+ *
+ * Usage:
+ *     $ ./namespace.yaml --name core --env prod --monitoring --output ./dist/core-ns.yaml
+ *
+ * Dependencies (install locally or via `npx`):
+ *     npm i commander js-yaml @kubernetes/client-node chalk
+ */
+
+import fs                      from 'fs';
+import path                    from 'path';
+import process                 from 'process';
+import { fileURLToPath }       from 'url';
+import { program }             from 'commander';
+import yaml                    from 'js-yaml';
+import chalk                   from 'chalk';
+import crypto                  from 'crypto';
+import { KubeConfig, CoreV1Api } from '@kubernetes/client-node';
+
+const pkg = {
+  name:        'streampulse-namespace-generator',
+  version:     '1.0.0',
+  description: 'CLI to generate StreamPulse Nexus Namespace manifests'
+};
+
+/* -------------------------------------------------------------------------- */
+/*                               CLI DEFINITION                               */
+/* -------------------------------------------------------------------------- */
+
+program
+  .name(pkg.name)
+  .version(pkg.version)
+  .description(pkg.description)
+  .option('-n, --name <string>',       'Namespace name',             'streampulse-nexus')
+  .option('-e, --env <string>',        'Deployment environment',     'dev')
+  .option('--git-sha <string>',        'Git commit SHA',             process.env.GIT_COMMIT)
+  .option('--feature <value...>',      'Enable additional features', collect, [])
+  .option('--monitoring',              'Enable system monitoring',   false)
+  .option('--dry-run',                 'Print manifest without pushing to cluster', false)
+  .option('-o, --output <file>',       'Write manifest to file instead of STDOUT')
+  .parse(process.argv);
+
+const cli = program.opts();
+
+/* -------------------------------------------------------------------------- */
+/*                            UTILITY / HELPERS                               */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Coalesce multiple values, returning the first that is not null/undefined/empty.
+ */
+function coalesce<T>(...vals: (T | null | undefined | '')[]): T | undefined {
+  return vals.find(v => v !== null && v !== undefined && v !== '') as T;
+}
+
+/**
+ * Commander “collect” option helper.
+ */
+function collect(value: string, previous: string[]): string[] {
+  return previous.concat(value);
+}
+
+/**
+ * Guarantee the namespace name conforms to DNS-1123.
+ */
+function sanitizeNamespaceName(input: string): string {
+  return input.toLowerCase().replace(/[^a-z0-9\-]/g, '-').slice(0, 63).replace(/^\-+|\-+$/g, '');
+}
+
+/**
+ * Generate a collision-resistant, 5-character entropy suffix.
+ */
+function randomSuffix(): string {
+  return crypto.randomBytes(3).toString('hex');
+}
+
+/* -------------------------------------------------------------------------- */
+/*                      MANIFEST BUILDING / SERIALIZATION                     */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Build the Kubernetes Namespace manifest as a JS object.
+ */
+function buildManifest(options: typeof cli): Record<string, any> {
+  const nowIso  = new Date().toISOString();
+  const name    = sanitizeNamespaceName(options.name);
+  const gitSha  = coalesce(options.gitSha, process.env.GITHUB_SHA, 'unknown');
+  const env     = sanitizeNamespaceName(options.env);
+  const uid     = randomSuffix();
+
+  /* ------------------------------ Annotations ----------------------------- */
+
+  const annotations: Record<string, string> = {
+    'streampulse.io/generated-at'      : nowIso,
+    'streampulse.io/git-sha'           : gitSha,
+    'streampulse.io/environment'       : env,
+    'streampulse.io/uid'               : uid
+  };
+
+  if (options.monitoring) {
+    annotations['prometheus.io/scrape'] = 'true';
+    annotations['prometheus.io/port']   = '9090';
+  }
+
+  /* -------------------------------- Labels -------------------------------- */
+
+  const labels: Record<string, string> = {
+    'app.kubernetes.io/name'           : 'streampulse-nexus',
+    'app.kubernetes.io/component'      : 'networking',
+    'streampulse.io/env'               : env
+  };
+
+  if (Array.isArray(options.feature)) {
+    options.feature.forEach(flag => {
+      const key                     = `streampulse.io/feature-${flag}`;
+      labels[key]                   = 'enabled';
+    });
+  }
+
+  /* ------------------------------ Final YAML ------------------------------ */
+  return {
+    apiVersion : 'v1',
+    kind       : 'Namespace',
+    metadata   : {
+      name       : name,
+      annotations,
+      labels
+    }
+  };
+}
+
+/**
+ * Serialize manifest and write to the desired destination.
+ */
+function emitManifest(manifest: Record<string, any>): void {
+  const yamlStr = yaml.dump(manifest, { noRefs: true, lineWidth: 120 });
+
+  if (cli.output) {
+    const outPath = path.resolve(cli.output);
+    fs.writeFileSync(outPath, yamlStr, 'utf8');
+    console.log(
+      chalk.green('✔') +
+        ` Namespace manifest written to ${chalk.cyan(outPath)}`
+    );
+  } else {
+    /* eslint-disable-next-line no-console */
+    console.log(yamlStr);
+  }
+}
+
+/* -------------------------------------------------------------------------- */
+/*                     OPTIONAL: PUSH TO CLUSTER (NOT DRY)                    */
+/* -------------------------------------------------------------------------- */
+
+async function pushToCluster(manifest: Record<string, any>): Promise<void> {
+  const kc  = new KubeConfig();
+  kc.loadFromDefault();
+  const api = kc.makeApiClient(CoreV1Api);
+
+  try {
+    await api.createNamespace(manifest as any);
+    console.log(
+      chalk.green('✔') +
+        ` Namespace ${chalk.cyan(manifest.metadata.name)} created in cluster`
+    );
+  } catch (err: any) {
+    if (err?.response?.statusCode === 409) {
+      console.log(
+        chalk.yellow('▲') +
+          ` Namespace ${chalk.cyan(manifest.metadata.name)} already exists—skipping`
+      );
+    } else {
+      console.error(chalk.red('✖ ') + 'Failed to create namespace:', err);
+      process.exit(1);
+    }
+  }
+}
+
+/* -------------------------------------------------------------------------- */
+/*                              MAIN EXECUTION                                */
+/* -------------------------------------------------------------------------- */
+
+(async () => {
+  try {
+    const manifest = buildManifest(cli);
+    emitManifest(manifest);
+
+    if (!cli.dryRun) {
+      await pushToCluster(manifest);
+    } else {
+      console.log(chalk.gray('Dry-run mode: manifest was not pushed to cluster.'));
+    }
+  } catch (err) {
+    console.error(chalk.red('✖ ') + 'Unexpected error:', err);
+    process.exit(1);
+  }
+})();
+
+/* -------------------------------------------------------------------------- */
+/*                                  EOF                                       */
+/* -------------------------------------------------------------------------- */
+```

@@ -1,0 +1,226 @@
+```c
+/*
+ * LambdaUtility Orchestrator — Documentation Asset Generator
+ * ----------------------------------------------------------
+ * File: docs/diagrams/architecture_diagram_gen.c
+ *
+ * This utility is **not** part of the production runtime path.  It exists
+ * solely to (re)generate the PNG architecture diagram that ships with the
+ * documentation set (`docs/diagrams/architecture_diagram.png`).  The diagram
+ * is procedurally produced from an inline Graphviz/DOT graph so that every
+ * build of the repository can guarantee a fresh, up-to-date diagram without
+ * including binary blobs in the source tree.
+ *
+ * Build:
+ *   $ cc -Wall -Wextra -pedantic -std=c11 \
+ *        -o architecture_diagram_gen docs/diagrams/architecture_diagram_gen.c
+ *
+ * Usage:
+ *   $ ./architecture_diagram_gen               # writes diagram to default path
+ *   $ ./architecture_diagram_gen /tmp/diag.png # custom output path
+ *
+ * Dependencies:
+ *   • Graphviz (`dot`) 2.38+ must be installed and present in $PATH.
+ *
+ * Exit Codes:
+ *   0  success
+ *   1  I/O error  (unable to write/read files)
+ *   2  spawn error (unable to locate or execute `dot`)
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
+#define _POSIX_C_SOURCE 200809L  /* for mkstemp, strdup */
+
+#include <errno.h>
+#include <stdbool.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/stat.h>
+#include <unistd.h>
+
+/* ------------------------------------------------------------------------- */
+/* Constants                                                                 */
+/* ------------------------------------------------------------------------- */
+
+static const char *kDefaultOutPath =
+    "docs/diagrams/architecture_diagram.png";
+
+/*
+ * Inline DOT source.
+ * Feel free to enhance node styling or layout—this is a living document!
+ */
+static const char *kDotSource =
+    "digraph LambdaUtility_Architecture {\n"
+    "    rankdir=LR;\n"
+    "    node [shape=box style=rounded fontname=\"Helvetica\"];\n"
+    "\n"
+    "    subgraph cluster_client {\n"
+    "        label=\"Trigger Sources\";\n"
+    "        style=dashed;\n"
+    "        schedule [label=\"Cron Schedules\"];\n"
+    "        http [label=\"REST Hooks\"];\n"
+    "        kafka [label=\"Message Topics\"];\n"
+    "    }\n"
+    "\n"
+    "    dispatcher [shape=ellipse label=\"Event Dispatcher\"];\n"
+    "    cmd_router [label=\"Command Router\\n(Command Pattern)\"];\n"
+    "\n"
+    "    subgraph cluster_lambdas {\n"
+    "        label=\"Stateless Utility Lambdas\";\n"
+    "        style=rounded;\n"
+    "        alert [label=\"Alerting\"];\n"
+    "        cfg [label=\"Configuration\\nManagement\"];\n"
+    "        deploy [label=\"Deployment\\nAutomation\"];\n"
+    "        backup [label=\"Backup & Recovery\"];\n"
+    "        metrics [label=\"Performance\\nMetrics\"];\n"
+    "    }\n"
+    "\n"
+    "    notifier [shape=ellipse label=\"Notification Fan-Out\\n(Observer Pattern)\"];\n"
+    "    sink_slack [shape=note label=\"Slack\"];\n"
+    "    sink_email [shape=note label=\"Email\"];\n"
+    "    sink_sms [shape=note label=\"SMS\"];\n"
+    "\n"
+    "    /* Edges */\n"
+    "    schedule -> dispatcher;\n"
+    "    http     -> dispatcher;\n"
+    "    kafka    -> dispatcher;\n"
+    "\n"
+    "    dispatcher -> cmd_router;\n"
+    "    cmd_router -> alert;\n"
+    "    cmd_router -> cfg;\n"
+    "    cmd_router -> deploy;\n"
+    "    cmd_router -> backup;\n"
+    "    cmd_router -> metrics;\n"
+    "\n"
+    "    alert   -> notifier;\n"
+    "    backup  -> notifier;\n"
+    "    deploy  -> notifier;\n"
+    "\n"
+    "    notifier -> sink_slack;\n"
+    "    notifier -> sink_email;\n"
+    "    notifier -> sink_sms;\n"
+    "}\n";
+
+/* ------------------------------------------------------------------------- */
+/* Utility Helpers                                                           */
+/* ------------------------------------------------------------------------- */
+
+/* Returns true if `dot` executable is available in PATH. */
+static bool
+dot_available(void)
+{
+    return (access("/usr/bin/dot", X_OK) == 0) ||
+           (access("/usr/local/bin/dot", X_OK) == 0) ||
+           (system("command -v dot >/dev/null 2>&1") == 0);
+}
+
+/* Safely write a buffer to file. Returns 0 on success, -1 on failure. */
+static int
+write_buf_to_file(const char *path, const char *buf, size_t len)
+{
+    FILE *fp = fopen(path, "w");
+    if (!fp) {
+        perror("fopen");
+        return -1;
+    }
+    size_t wrote = fwrite(buf, 1, len, fp);
+    if (wrote != len) {
+        perror("fwrite");
+        fclose(fp);
+        return -1;
+    }
+    if (fclose(fp) != 0) {
+        perror("fclose");
+        return -1;
+    }
+    return 0;
+}
+
+/* Render DOT->PNG using Graphviz. Returns 0 on success, -1 on failure. */
+static int
+render_dot_to_png(const char *dot_path, const char *png_path)
+{
+    /* Construct: dot -Tpng dot_path -o png_path */
+    char *cmd = NULL;
+    if (asprintf(&cmd, "dot -Tpng %s -o %s", dot_path, png_path) == -1) {
+        fputs("Error: memory allocation failure.\n", stderr);
+        return -1;
+    }
+    int rc = system(cmd);
+    free(cmd);
+
+    if (rc != 0) {
+        fprintf(stderr, "Graphviz 'dot' command failed (exit=%d)\n", rc);
+        return -1;
+    }
+    return 0;
+}
+
+/* Ensure output directory exists (mkdir -p behavior). */
+static int
+ensure_parent_dir(const char *path)
+{
+    char *dup = strdup(path);
+    if (!dup) {
+        perror("strdup");
+        return -1;
+    }
+
+    char *slash = strrchr(dup, '/');
+    if (slash) {
+        *slash = '\0';
+        if (mkdir(dup, 0755) == -1 && errno != EEXIST) {
+            perror("mkdir");
+            free(dup);
+            return -1;
+        }
+    }
+    free(dup);
+    return 0;
+}
+
+/* ------------------------------------------------------------------------- */
+/* Entry Point                                                               */
+/* ------------------------------------------------------------------------- */
+int
+main(int argc, char *argv[])
+{
+    const char *out_png = (argc > 1) ? argv[1] : kDefaultOutPath;
+
+    if (!dot_available()) {
+        fputs("Error: Graphviz 'dot' utility not found in PATH.\n", stderr);
+        return 2;
+    }
+
+    /* Create temp file for DOT contents */
+    char tmp_template[] = "/tmp/archXXXXXX.dot";
+    int fd = mkstemps(tmp_template, 4); /* ".dot" suffix length=4 */
+    if (fd == -1) {
+        perror("mkstemps");
+        return 1;
+    }
+    close(fd); /* will reopen via stdio for simplicity */
+
+    if (write_buf_to_file(tmp_template, kDotSource, strlen(kDotSource)) != 0) {
+        unlink(tmp_template);
+        return 1;
+    }
+
+    if (ensure_parent_dir(out_png) != 0) {
+        unlink(tmp_template);
+        return 1;
+    }
+
+    /* Finally, render PNG */
+    if (render_dot_to_png(tmp_template, out_png) != 0) {
+        unlink(tmp_template);
+        return 1;
+    }
+
+    printf("✅  Architecture diagram generated at: %s\n", out_png);
+    unlink(tmp_template);
+    return 0;
+}
+```

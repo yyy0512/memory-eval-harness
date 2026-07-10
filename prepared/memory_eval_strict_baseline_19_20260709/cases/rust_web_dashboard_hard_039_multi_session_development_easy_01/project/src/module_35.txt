@@ -1,0 +1,424 @@
+```rust
+//! src/module_35.rs
+//!
+//! Session management middleware & helper utilities for ChromaticCanvas
+//! Control Center’s web dashboard. The module exposes:
+//!   1. JWT-backed session issuing & validation
+//!   2. Actix-Web middleware that injects a typed `Session` into every request
+//!   3. Route helpers for login/logout flows
+//!
+//! The design keeps the surface small while remaining ready for extension
+//! (e.g. Redis-backed session blacklist, OAuth hand-off, Web-Socket token
+//! upgrades, etc.).
+//!
+//! NOTE: When compiled with `--features ssl`, secure cookies are enforced.
+//!
+//! ---------------------------------------------------------------------------
+//! External Crates (add to Cargo.toml)
+//! ---------------------------------------------------------------------------
+//! actix-web          = { version = "4", features = ["cookies"] }
+//! actix-service      = "2"
+//! anyhow             = "1"
+//! serde              = { version = "1.0", features = ["derive"] }
+//! serde_json         = "1"
+//! jsonwebtoken       = "9"
+//! time               = { version = "0.3", features = ["serde", "macros"] }
+//! uuid               = { version = "1", features = ["serde", "v4"] }
+//! tracing            = "0.1"
+//! config             = "0.13"
+//! dotenvy            = "0.15"
+//!
+//! ---------------------------------------------------------------------------
+
+use std::{
+    pin::Pin,
+    task::{Context, Poll},
+    time::Duration,
+};
+
+use actix_service::{Service, Transform};
+use actix_web::{
+    cookie::{Cookie, SameSite},
+    dev::{ServiceRequest, ServiceResponse},
+    error::{ErrorUnauthorized, InternalError},
+    get, post,
+    http::{header, StatusCode},
+    web, App, Error, HttpMessage, HttpRequest, HttpResponse, HttpServer,
+};
+use anyhow::{anyhow, Context as _};
+use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
+use serde::{Deserialize, Serialize};
+use time::{Duration as TimeDuration, OffsetDateTime};
+use tracing::{debug, error, instrument};
+use uuid::Uuid;
+
+/// ----------------------------------------------------------------------------
+/// Configuration
+/// ----------------------------------------------------------------------------
+#[derive(Debug, Clone, Deserialize)]
+struct SessionConfig {
+    jwt_secret: String,
+    /// How long a session should be valid (seconds)
+    ttl_seconds: u64,
+    /// Should cookies be marked `Secure`?  Enabled if the `ssl-security`
+    /// feature flag is passed at compile time OR `FORCE_SSL` env variable.
+    secure_cookie: bool,
+}
+
+impl Default for SessionConfig {
+    fn default() -> Self {
+        SessionConfig {
+            jwt_secret: "CHANGEME_DEV_ONLY".into(),
+            ttl_seconds: 60 * 60 * 4, // 4 hours
+            secure_cookie: cfg!(feature = "ssl_security")
+                || std::env::var("FORCE_SSL").unwrap_or_default() == "1",
+        }
+    }
+}
+
+impl SessionConfig {
+    fn from_env() -> Self {
+        dotenvy::dotenv().ok();
+        let mut cfg = config::Config::builder()
+            .add_source(config::Environment::with_prefix("CC").separator("__"))
+            .build()
+            .unwrap_or_default();
+        cfg.set_default("jwt_secret", &Self::default().jwt_secret)
+            .unwrap();
+        cfg.set_default("ttl_seconds", Self::default().ttl_seconds)
+            .unwrap();
+        cfg.set_default("secure_cookie", Self::default().secure_cookie)
+            .unwrap();
+
+        cfg.try_deserialize().unwrap_or_else(|err| {
+            error!("Failed to parse configuration: {err}");
+            Self::default()
+        })
+    }
+}
+
+/// ----------------------------------------------------------------------------
+/// Session Claims
+/// ----------------------------------------------------------------------------
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct Session {
+    /// Database id of the user
+    pub sub: Uuid,
+
+    /// Client-side display name (cacheable)
+    pub display_name: String,
+
+    /// POSIX timestamp in seconds
+    pub exp: i64,
+
+    /// Optional arbitrary permissions/roles
+    pub roles: Vec<String>,
+}
+
+impl Session {
+    /// Returns a new `Session` instance and its accompanying JWT string
+    pub fn issue(user_id: Uuid, display_name: impl Into<String>, cfg: &SessionConfig) -> anyhow::Result<(Self, String)> {
+        let ttl = cfg.ttl_seconds as i64;
+        let now = OffsetDateTime::now_utc();
+        let exp = now.unix_timestamp() + ttl;
+
+        let claims = Session {
+            sub: user_id,
+            display_name: display_name.into(),
+            exp,
+            roles: vec!["user".into()],
+        };
+
+        let token = encode(
+            &Header::default(),
+            &claims,
+            &EncodingKey::from_secret(cfg.jwt_secret.as_bytes()),
+        )?;
+
+        Ok((claims, token))
+    }
+
+    /// Verify a JWT & deserialize it
+    pub fn verify(token: &str, cfg: &SessionConfig) -> anyhow::Result<Self> {
+        let data = decode::<Session>(
+            token,
+            &DecodingKey::from_secret(cfg.jwt_secret.as_bytes()),
+            &Validation::default(),
+        )?;
+        let now = OffsetDateTime::now_utc().unix_timestamp();
+        if data.claims.exp < now {
+            return Err(anyhow!("Token expired"));
+        }
+        Ok(data.claims)
+    }
+}
+
+/// ----------------------------------------------------------------------------
+/// Middleware: Inject verified session into request extensions
+/// ----------------------------------------------------------------------------
+pub struct SessionMiddleware {
+    cfg: SessionConfig,
+}
+
+impl SessionMiddleware {
+    pub fn new(cfg: SessionConfig) -> Self {
+        Self { cfg }
+    }
+}
+
+impl<S, B> Transform<S, ServiceRequest> for SessionMiddleware
+where
+    S: Service<ServiceRequest, Response = ServiceResponse<B>, Error = Error> + 'static,
+    B: 'static,
+{
+    type Response = ServiceResponse<B>;
+    type Error = Error;
+    type Transform = SessionMiddlewareImpl<S>;
+    type InitError = ();
+    type Future = Pin<Box<dyn futures::Future<Output = Result<Self::Transform, Self::InitError>>>>;
+
+    fn new_transform(&self, service: S) -> Self::Future {
+        let cfg = self.cfg.clone();
+        Box::pin(async move { Ok(SessionMiddlewareImpl { service, cfg }) })
+    }
+}
+
+pub struct SessionMiddlewareImpl<S> {
+    service: S,
+    cfg: SessionConfig,
+}
+
+impl<S, B> Service<ServiceRequest> for SessionMiddlewareImpl<S>
+where
+    S: Service<ServiceRequest, Response = ServiceResponse<B>, Error = Error> + 'static,
+    B: 'static,
+{
+    type Response = ServiceResponse<B>;
+    type Error = Error;
+    type Future = Pin<Box<dyn futures::Future<Output = Result<Self::Response, Self::Error>>>>;
+
+    #[instrument(skip_all, fields(path = %req.path()))]
+    fn poll_ready(&self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.service.poll_ready(cx)
+    }
+
+    #[instrument(skip_all, fields(path = %req.path()))]
+    fn call(&self, mut req: ServiceRequest) -> Self::Future {
+        let cfg = self.cfg.clone();
+
+        // We need the service for fallback if unauthenticated
+        let fut = self.service.call(req);
+
+        // Extract token from cookie or Authorization header
+        let token = req
+            .cookie("cc_session")
+            .map(|c| c.value().to_owned())
+            .or_else(|| {
+                req.headers()
+                    .get(header::AUTHORIZATION)
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|s| s.strip_prefix("Bearer ").map(str::to_owned))
+            });
+
+        if let Some(jwt) = token {
+            match Session::verify(&jwt, &cfg) {
+                Ok(session) => {
+                    // Attach session to request extensions
+                    req.extensions_mut().insert(session);
+                }
+                Err(err) => {
+                    debug!("Invalid JWT: {err}");
+                    // treat as unauthenticated: we do not short-circuit here because
+                    // not every route requires auth. Handlers can decide.
+                }
+            }
+        }
+
+        Box::pin(async move { fut.await })
+    }
+}
+
+/// Helper trait to fetch session from request
+pub trait RequestSessionExt {
+    fn session(&self) -> Option<&Session>;
+}
+
+impl RequestSessionExt for HttpRequest {
+    fn session(&self) -> Option<&Session> {
+        self.extensions().get::<Session>()
+    }
+}
+
+/// ----------------------------------------------------------------------------
+/// Sample handlers (login/logout) — road-tested with middleware
+/// ----------------------------------------------------------------------------
+#[derive(Deserialize)]
+struct LoginRequest {
+    email: String,
+    password: String,
+}
+
+// NOTE: Fake DB verification; replace with ORM backed user store.
+fn verify_credentials(email: &str, password: &str) -> anyhow::Result<(Uuid, String)> {
+    if email.ends_with("@example.com") && password == "password123" {
+        Ok((Uuid::new_v4(), "Captain Example".into()))
+    } else {
+        Err(anyhow!("Invalid credentials"))
+    }
+}
+
+#[post("/api/login")]
+async fn login(
+    form: web::Json<LoginRequest>,
+    req: HttpRequest,
+    cfg: web::Data<SessionConfig>,
+) -> Result<HttpResponse, Error> {
+    let (user_id, display_name) =
+        verify_credentials(&form.email, &form.password).map_err(|e| ErrorUnauthorized(e))?;
+
+    let (session, token) = Session::issue(user_id, display_name, &cfg).map_err(|e| {
+        error!("Failed to issue session: {e}");
+        InternalError::new(e, StatusCode::INTERNAL_SERVER_ERROR)
+    })?;
+
+    let mut cookie = Cookie::build("cc_session", token)
+        .path("/")
+        .http_only(true)
+        .same_site(SameSite::Lax)
+        .max_age(TimeDuration::seconds(cfg.ttl_seconds as i64));
+
+    if cfg.secure_cookie {
+        cookie = cookie.secure(true);
+    }
+
+    Ok(HttpResponse::Ok()
+        .cookie(cookie.finish())
+        .json(&session))
+}
+
+#[get("/api/logout")]
+async fn logout(req: HttpRequest) -> Result<HttpResponse, Error> {
+    // Invalidate cookie; JWT remains valid until expiry; consider blacklist storage.
+    let mut invalidate = Cookie::build("cc_session", "")
+        .path("/")
+        .http_only(true)
+        .max_age(TimeDuration::seconds(0))
+        .finish();
+
+    if let Some(orig) = req.cookie("cc_session") {
+        invalidate.set_secure(orig.secure());
+        invalidate.set_same_site(orig.same_site().unwrap_or(SameSite::Lax));
+    }
+
+    Ok(HttpResponse::Ok().cookie(invalidate).json(serde_json::json!({
+        "status": "logged_out"
+    })))
+}
+
+/// Example protected endpoint: requires session
+#[get("/api/me")]
+async fn me(req: HttpRequest) -> Result<HttpResponse, Error> {
+    if let Some(session) = req.session() {
+        Ok(HttpResponse::Ok().json(session))
+    } else {
+        Err(ErrorUnauthorized("Not authenticated"))
+    }
+}
+
+/// ----------------------------------------------------------------------------
+/// Server bootstrap (dev only). Production may use different binary crate.
+/// ----------------------------------------------------------------------------
+#[actix_web::main]
+async fn main() -> anyhow::Result<()> {
+    tracing_subscriber::fmt::init();
+    let cfg = SessionConfig::from_env();
+
+    // Force TLS check in dev if secure cookies are enabled
+    if cfg.secure_cookie {
+        debug!("Secure cookie flag is ON");
+    }
+
+    HttpServer::new(move || {
+        App::new()
+            .app_data(web::Data::new(cfg.clone()))
+            .wrap(SessionMiddleware::new(cfg.clone()))
+            .service(login)
+            .service(logout)
+            .service(me)
+    })
+    .bind(("127.0.0.1", 8080))
+    .context("Could not bind HTTP server")?
+    .run()
+    .await
+    .context("Server crashed")
+}
+
+/// ----------------------------------------------------------------------------
+/// Tests
+/// ----------------------------------------------------------------------------
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use actix_web::{body::to_bytes, http::header::CONTENT_TYPE, test};
+
+    #[actix_web::test]
+    async fn test_login_logout_cycle() {
+        let cfg = SessionConfig::default();
+        let app = test::init_service(
+            App::new()
+                .app_data(web::Data::new(cfg.clone()))
+                .wrap(SessionMiddleware::new(cfg.clone()))
+                .service(login)
+                .service(logout)
+                .service(me),
+        )
+        .await;
+
+        // Login
+        let payload = serde_json::json!({
+            "email": "user@example.com",
+            "password": "password123"
+        });
+
+        let req = test::TestRequest::post()
+            .uri("/api/login")
+            .insert_header((CONTENT_TYPE, "application/json"))
+            .set_payload(payload.to_string())
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        // Extract cookie
+        let cookie = resp
+            .cookies()
+            .into_iter()
+            .find(|c| c.name() == "cc_session")
+            .expect("session cookie");
+        assert!(!cookie.value().is_empty());
+
+        // Access protected route
+        let req = test::TestRequest::get()
+            .uri("/api/me")
+            .cookie(cookie.clone())
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        // Logout
+        let req = test::TestRequest::get()
+            .uri("/api/logout")
+            .cookie(cookie.clone())
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        // Attempt again after logout (cookie invalidated)
+        let req = test::TestRequest::get()
+            .uri("/api/me")
+            .cookie(cookie)
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    }
+}
+```

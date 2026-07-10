@@ -1,0 +1,158 @@
+{
+  "name": "@paypalsphere/event-schemas",
+  "version": "1.0.0",
+  "description": "Immutable JSON Schemas and corresponding TypeScript types for all PayPalsphere domain events (CQRS / Event-Sourcing).",
+  "license": "MIT",
+  "keywords": [
+    "paypalsphere",
+    "fintech",
+    "event-sourcing",
+    "cqrs",
+    "schema",
+    "json-schema",
+    "typescript"
+  ],
+  "homepage": "https://github.com/paypalsphere/fintech_payment/tree/main/packages/event-schemas",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/paypalsphere/fintech_payment.git",
+    "directory": "packages/event-schemas"
+  },
+  "author": "PayPalsphere Engineering <engineering@paypalsphere.io>",
+  "funding": {
+    "type": "github",
+    "url": "https://github.com/sponsors/paypalsphere"
+  },
+  "engines": {
+    "node": ">=18.16",
+    "npm": ">=9.6"
+  },
+  "sideEffects": false,
+  "files": [
+    "dist",
+    "!**/*.test.*"
+  ],
+  "main": "dist/index.cjs",
+  "module": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "require": "./dist/index.cjs",
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./schema/*": {
+      "import": "./dist/schema/*.json",
+      "default": "./dist/schema/*.json"
+    }
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org"
+  },
+  "scripts": {
+    "clean": "rimraf dist",
+    "build": "npm run clean && tsc -p tsconfig.build.json && npm run build:schemas",
+    "build:schemas": "node ./scripts/generateSchemas.js",
+    "validate:schema": "ajv -c ajv.config.js \"dist/schema/**/*.json\"",
+    "lint": "eslint \"src/**/*.{ts,tsx,js}\" --max-warnings=0",
+    "format": "prettier --write \"**/*.{ts,tsx,js,json,md,yml}\"",
+    "test": "jest --coverage",
+    "validate": "npm run lint && npm run test && npm run validate:schema",
+    "release": "semantic-release"
+  },
+  "dependencies": {
+    "ajv": "^8.12.0",
+    "ajv-formats": "^2.1.1",
+    "fast-json-stringify": "^4.0.0"
+  },
+  "peerDependencies": {
+    "json-schema-to-ts": "^2.12.2"
+  },
+  "devDependencies": {
+    "@semantic-release/changelog": "^6.0.3",
+    "@semantic-release/commit-analyzer": "^11.0.0",
+    "@semantic-release/git": "^10.0.1",
+    "@semantic-release/github": "^9.2.5",
+    "@semantic-release/npm": "^11.0.0",
+    "@semantic-release/release-notes-generator": "^12.0.0",
+    "@types/jest": "^29.5.2",
+    "@types/node": "^20.3.1",
+    "eslint": "^8.42.0",
+    "eslint-config-prettier": "^9.0.0",
+    "eslint-plugin-import": "^2.28.1",
+    "eslint-plugin-jest": "^27.2.3",
+    "eslint-plugin-prettier": "^5.0.0",
+    "jest": "^29.6.1",
+    "prettier": "^3.0.0",
+    "rimraf": "^5.0.1",
+    "semantic-release": "^21.0.7",
+    "ts-jest": "^29.1.1",
+    "typescript": "^5.1.6"
+  },
+  "eslintConfig": {
+    "root": true,
+    "extends": [
+      "eslint:recommended",
+      "plugin:import/errors",
+      "plugin:import/warnings",
+      "plugin:jest/recommended",
+      "plugin:prettier/recommended"
+    ],
+    "parserOptions": {
+      "ecmaVersion": "latest",
+      "sourceType": "module"
+    },
+    "env": {
+      "node": true,
+      "jest": true,
+      "es2022": true
+    },
+    "settings": {
+      "import/resolver": {
+        "typescript": {
+          "project": "tsconfig.json"
+        }
+      }
+    }
+  },
+  "jest": {
+    "preset": "ts-jest",
+    "testEnvironment": "node",
+    "roots": [
+      "<rootDir>/src"
+    ],
+    "coverageDirectory": "<rootDir>/coverage",
+    "collectCoverageFrom": [
+      "src/**/*.{ts,tsx}",
+      "!src/**/*.test.{ts,tsx}"
+    ]
+  },
+  "semantic-release": {
+    "branches": [
+      "main",
+      {
+        "name": "next",
+        "prerelease": true
+      }
+    ],
+    "plugins": [
+      "@semantic-release/commit-analyzer",
+      "@semantic-release/release-notes-generator",
+      "@semantic-release/changelog",
+      [
+        "@semantic-release/git",
+        {
+          "assets": [
+            "CHANGELOG.md",
+            "package.json",
+            "dist/**/*"
+          ],
+          "message": "chore(release): ${nextRelease.version} [skip ci]nn${nextRelease.notes}"
+        }
+      ],
+      "@semantic-release/npm",
+      "@semantic-release/github"
+    ]
+  }
+}

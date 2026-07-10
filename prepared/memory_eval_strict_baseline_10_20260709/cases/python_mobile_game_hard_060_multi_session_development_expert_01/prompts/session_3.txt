@@ -1,0 +1,13 @@
+You are working in the repository at the current working directory. This is session 3 of a 4-session development task. The previous session has ended and conversation context is unavailable. Use the repository state to continue the task. Do not ask for previous conversation context. Complete only the requirements for this session.
+
+You will implement the 'Weekly Guild Challenges' feature over four sessions. Follow the instructions for each session precisely.
+
+**Session 3: Business Logic and Notification Integration**
+*Goal: Implement the challenge progression logic and notify users of progress.*
+1. In your `src/guilds.py` module, create a `GuildService` class. This service will contain the main business logic.
+2. Implement a method in `GuildService` called `update_challenge_progress(user_id, contribution)`. This method should:
+    - Find the user's guild.
+    - Add the `contribution` to the guild's current challenge progress.
+    - Check if the challenge is now complete.
+3. The notification system is located in `src/module_27.py`. It currently supports broadcasting to all users. Extend it by adding a new function, `send_targeted_notification(user_id, message)`, that sends a message to a specific user.
+4. Integrate your `GuildService` with the notification system. When progress is made, send a notification to the contributing user (e.g., "Thanks for your contribution!"). If the challenge is completed, send a notification to all members of the guild (e.g., "Your guild has completed the challenge!").

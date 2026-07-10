@@ -1,0 +1,179 @@
+####################################################################################################
+# ChronoFlow Nexus - Configuration Example (TOML)
+#
+# This file documents all user-tunable parameters for a typical ChronoFlow Nexus deployment.
+# Copy or symlink this file to `config.toml` and adjust values for your environment.
+#
+# NOTE:
+#  • All durations follow the ISO-8601 duration spec unless stated otherwise.
+#  • Memory sizes accept the IEC suffixes: KiB, MiB, GiB, TiB.
+#  • Items marked with `(env:FOO)` can be overridden via environment variable FOO.
+####################################################################################################
+
+####################################################################################################
+# 1. Service Declaration
+####################################################################################################
+[service]
+# Unique identifier for this instance, used in distributed tracing.
+id             = "cf-nexus-prod-01"
+
+# Logical version reported via the `/health` endpoint and Prometheus metrics.
+# Bumped automatically by CI/CD; can be overridden for manual rollbacks.
+version        = "1.12.3+build.409"
+
+# ISO-8601 timestamp at which the service should begin refusing new traffic for maintenance rolling.
+# Leave empty to disable.
+maintenance_at = ""
+
+####################################################################################################
+# 2. Networking & Endpoints
+####################################################################################################
+[http]
+# Public-facing address. The empty host binds on all interfaces. (env:NEXUS_HTTP_ADDR)
+addr         = "0.0.0.0:8080"
+
+# Connection backlog before TCP starts dropping SYN packets.
+backlog      = 256
+
+# Maximum size for an incoming HTTP request body (incl. REST & GraphQL). Reject anything larger.
+# Unit: bytes
+max_body     = "8 MiB"
+
+# Whether to automatically redirect all HTTP traffic to HTTPS.
+force_https  = false
+
+# TLS configuration
+[http.tls]
+# When `cert_path`/`key_path` are non-empty, ChronoFlow Nexus boots in HTTPS mode.
+cert_path    = "/etc/ssl/certs/nexus.crt"
+key_path     = "/etc/ssl/private/nexus.key"
+# Specify allowed TLS versions. If empty, the server enables 1.2 and 1.3.
+versions     = ["TLS1.2", "TLS1.3"]
+
+####################################################################################################
+# 3. Rate Limiting
+####################################################################################################
+[rate_limit]
+# Use token-bucket algorithm. Fill rate & capacity per client IP address.
+capacity           = 120           # Max tokens (burst)
+fill_rate_per_sec  = 60            # Tokens regenerated per second
+# Optional Redis backend to share counters across replicas.
+use_distributed    = true
+redis_dsn          = "redis://redis.internal:6379/2"
+
+####################################################################################################
+# 4. Caching
+####################################################################################################
+[cache]
+# LRU cache for read-heavy REST resources.
+enabled       = true
+max_size      = "256 MiB"
+# TTL for positive cache hits.
+ttl           = "PT15M"            # 15 minutes
+
+# Adaptive caching rules (override defaults per endpoint)
+[[cache.rules]]
+path_regex    = "^/v1/projects/.*/analytics$"
+ttl           = "PT2M"
+[[cache.rules]]
+path_regex    = "^/v1/users/.+/tasks$"
+ttl           = "PT30S"
+
+####################################################################################################
+# 5. Persistence Layer
+####################################################################################################
+[database]
+# PostgreSQL connection string in libpq format. (env:NEXUS_DB_DSN)
+dsn             = "postgresql://nexus:secret@db.internal:5432/chronoflow"
+max_connections = 64
+idle_timeout    = "PT10M"
+ssl_mode        = "prefer"         # disable | allow | prefer | require
+
+####################################################################################################
+# 6. Messaging & Event Streaming
+####################################################################################################
+[nats]
+# Optional NATS cluster for domain events (CQRS read model sync, metrics fan-out, etc.)
+enabled  = true
+url      = "nats://nats.internal:4222"
+# Subject prefixes
+events_subject = "cf.events"
+commands_subject = "cf.commands"
+
+####################################################################################################
+# 7. GraphQL
+####################################################################################################
+[graphql]
+# Enable GraphQL endpoint served at /graphql.
+enabled                 = true
+# Complexity limit to guard against maliciously deep queries.
+max_query_complexity    = 2000
+# Persisted queries
+persisted_queries_dir   = "/var/lib/nexus/persisted_queries"
+
+####################################################################################################
+# 8. Observability
+####################################################################################################
+[metrics]
+# Prometheus exposition address
+addr               = "0.0.0.0:9100"
+# Prefix all metrics with this namespace.
+namespace          = "chronoflow_nexus"
+
+[logging]
+# Log level: trace | debug | info | warn | error | critical | off
+level              = "info"
+# Structured log sink: stdout | file | syslog
+sink               = "stdout"
+# Path is only used when `sink == "file"`.
+file_path          = "/var/log/nexus/nexus.log"
+# Rotating file options
+max_size           = "128 MiB"
+max_files          = 10
+
+[tracing]
+# OpenTelemetry exporter
+enabled            = true
+provider           = "otlp"
+endpoint           = "http://otel-collector:4318"
+service_name       = "chronoflow-nexus"
+
+####################################################################################################
+# 9. Security
+####################################################################################################
+[security]
+# JSON Web Token (JWT) validation
+[jwt]
+issuer             = "https://auth.corp.example.com/"
+audience           = "chronoflow-nexus"
+# PEM-encoded public key used to verify signatures.
+public_key_path    = "/etc/nexus/keys/jwt_pub.pem"
+
+# Content Security Policy headers
+[csp]
+default_src        = "'none'"
+connect_src        = "'self'"
+frame_ancestors    = "'none'"
+
+####################################################################################################
+# 10. Feature Flags
+####################################################################################################
+[features]
+# Gradually roll out real-time focus analytics
+focus_analytics       = true
+# Enable experimental time-series compression codec in persistence layer
+ts_compression        = false
+
+####################################################################################################
+# 11. Advanced
+####################################################################################################
+[advanced]
+# Enable graceful shutdown logic with specified timeout.
+graceful_shutdown_timeout = "PT45S"
+
+# Glob pattern for additional plugin shared libraries.
+plugin_paths             = ["/usr/lib/chronoflow/plugins/*.so"]
+
+####################################################################################################
+# End of config.toml.example
+####################################################################################################

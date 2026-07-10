@@ -1,0 +1,158 @@
+{
+  "$schema": "https://campusguard.edu/schemas/agents-config-v1.json",
+  "generated_at": "2024-04-07T12:34:56Z",
+  "config_version": "1.3.0",
+  "defaults": {
+    "user": "cg-agent",
+    "group": "cg-agent",
+    "log_level": "info",
+    "socket_dir": "/run/campusguard",
+    "data_dir": "/var/lib/campusguard",
+    "restart_policy": {
+      "type": "on-failure",
+      "max_retries": 5,
+      "retry_window_sec": 300
+    },
+    "resource_limits": {
+      "cpu": "250m",
+      "memory": "256Mi",
+      "disk": "50Mi"
+    },
+    "security_context": {
+      "run_as_user": 992,
+      "run_as_group": 992,
+      "caps": [ "net_bind_service" ],
+      "seccomp_profile": "default"
+    }
+  },
+  "agents": [
+    {
+      "id": "log-collector",
+      "name": "Log Aggregation Agent",
+      "description": "Streams system and application logs to the central aggregator using TLS.",
+      "enabled": true,
+      "role": "log_aggregation",
+      "version": "2.1.4",
+      "exec_path": "/opt/campusguard/bin/cg-log-agent",
+      "arguments": [
+        "--config",
+        "/etc/campusguard/log-agent.toml"
+      ],
+      "env": {
+        "CG_LOG_LVL": "INFO",
+        "CG_ENDPOINT": "tls://monitor.campusguard.local:5044"
+      },
+      "health": {
+        "cmd": [ "cg-log-agent", "--ping" ],
+        "interval_sec": 30,
+        "timeout_sec": 3
+      }
+    },
+    {
+      "id": "scan-engine",
+      "name": "Security Scanning Engine",
+      "description": "Performs scheduled vulnerability and compliance scans using the OpenSCAP profile.",
+      "enabled": true,
+      "role": "security_scanning",
+      "version": "1.8.0",
+      "exec_path": "/opt/campusguard/bin/cg-scan-engine",
+      "arguments": [
+        "--schedule",
+        "0 */6 * * *"
+      ],
+      "resource_limits": {
+        "cpu": "500m",
+        "memory": "512Mi",
+        "disk": "250Mi"
+      },
+      "env": {
+        "CG_SCAN_PROFILE": "/etc/campusguard/policies/edu_profile.xml",
+        "CG_SCAN_OUTPUT": "/var/lib/campusguard/scans"
+      },
+      "health": {
+        "cmd": [ "cg-scan-engine", "--self-check" ],
+        "interval_sec": 60,
+        "timeout_sec": 5
+      }
+    },
+    {
+      "id": "backup-daemon",
+      "name": "Incremental Backup Daemon",
+      "description": "Creates encrypted snapshots of lab VMs and uploads them to the object store.",
+      "enabled": true,
+      "role": "backup_recovery",
+      "version": "3.0.2",
+      "exec_path": "/opt/campusguard/bin/cg-backupd",
+      "arguments": [
+        "--target",
+        "s3://campusguard-backups/",
+        "--encryption-key",
+        "/etc/campusguard/keys/backup_key.pem"
+      ],
+      "resource_limits": {
+        "cpu": "300m",
+        "memory": "1Gi",
+        "disk": "2Gi"
+      },
+      "env": {
+        "AWS_ACCESS_KEY_ID": "REPLACE_ME",
+        "AWS_SECRET_ACCESS_KEY": "REPLACE_ME",
+        "CG_BACKUP_RETENTION_DAYS": "30"
+      },
+      "health": {
+        "cmd": [ "cg-backupd", "--check" ],
+        "interval_sec": 300,
+        "timeout_sec": 10
+      }
+    },
+    {
+      "id": "metric-exporter",
+      "name": "System Metric Exporter",
+      "description": "Collects CPU, memory, I/O, and network statistics and exposes them over HTTPS for Prometheus scraping.",
+      "enabled": true,
+      "role": "system_monitoring",
+      "version": "1.5.9",
+      "exec_path": "/opt/campusguard/bin/cg-metric-exporter",
+      "arguments": [
+        "--listen",
+        "0.0.0.0:9100"
+      ],
+      "env": {
+        "CG_EXPORTER_TLS_CERT": "/etc/campusguard/certs/metric.crt",
+        "CG_EXPORTER_TLS_KEY": "/etc/campusguard/certs/metric.key"
+      },
+      "health": {
+        "http": {
+          "url": "https://localhost:9100/healthz",
+          "method": "GET",
+          "tls_skip_verify": false
+        },
+        "interval_sec": 15,
+        "timeout_sec": 2
+      }
+    },
+    {
+      "id": "alert-router",
+      "name": "Alert Routing Service",
+      "description": "Receives alerts from agents, applies routing rules, and forwards notifications to configured channels.",
+      "enabled": true,
+      "role": "alerting",
+      "version": "2.2.1",
+      "exec_path": "/opt/campusguard/bin/cg-alert-router",
+      "arguments": [
+        "--rules",
+        "/etc/campusguard/alert-rules.yaml"
+      ],
+      "env": {
+        "CG_ALERT_SMTP_SERVER": "smtp.university.edu:587",
+        "CG_ALERT_EMAIL_FROM": "noreply@campusguard.edu",
+        "CG_ALERT_SLACK_WEBHOOK": "https://hooks.slack.com/services/REPLACE_ME"
+      },
+      "health": {
+        "cmd": [ "cg-alert-router", "--health" ],
+        "interval_sec": 20,
+        "timeout_sec": 4
+      }
+    }
+  ]
+}

@@ -1,0 +1,13 @@
+You are working in the repository at the current working directory. This is session 3 of a 3-session development task. The previous session has ended and conversation context is unavailable. Use the repository state to continue the task. Do not ask for previous conversation context. Complete only the requirements for this session.
+
+This is a multi-session task. You will be prompted to continue your work in subsequent sessions.
+
+**Session 3: Integration and Testing**
+Now, integrate the completed rate-limiting module into the gateway and verify its functionality.
+
+1.  **Integrate the Module:** Modify the request-handling module you identified in Session 1. Import and instantiate your `RateLimiter` class. Before processing a request, call the rate limiter. If the request is denied, the gateway should immediately return a `429 Too Many Requests` HTTP status code and an appropriate error message.
+2.  **Write Tests:** Open `tests/test_main.ts` and add new integration tests for the rate-limiting feature. Your tests must cover:
+    *   Requests from a new user are allowed.
+    *   A burst of requests exceeding the bucket size is correctly throttled (the last request gets a 429).
+    *   After a pause, the user can make requests again, demonstrating token replenishment.
+3.  **Final Verification:** Ensure all existing tests in `tests/test_main.ts` still pass after your changes.

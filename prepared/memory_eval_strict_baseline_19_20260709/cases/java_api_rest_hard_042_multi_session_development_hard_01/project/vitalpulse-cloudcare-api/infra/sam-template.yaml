@@ -1,0 +1,369 @@
+```yaml
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  VitalPulse CloudCare API – Serverless infrastructure stack.
+  Provides REST (v1, v2-beta) and GraphQL endpoints for real-time
+  vital-sign ingestion, medication orders, and clinician queries.
+  Built with Java 17 AWS Lambda handlers.
+
+################################################################################
+# Global configuration shared across all Lambda functions
+################################################################################
+Globals:
+  Function:
+    Runtime: java17
+    MemorySize: 1024          # Optimized for low-latency JSON (de)serialization
+    Timeout: 30               # Reasonable default, overridden per function if needed
+    Tracing: Active
+    Environment:
+      Variables:
+        LOG_LEVEL: INFO
+        POWERTOOLS_SERVICE_NAME: cloudcare-api   # For AWS Lambda Powertools
+    Layers:
+      - !Ref PowertoolsJavaLayer                 # Common observability/util layer
+
+  Api:
+    Cors:
+      AllowMethods: "'GET,POST,PUT,DELETE,OPTIONS'"
+      AllowHeaders: "'Content-Type,Authorization,X-Amz-Date,X-Request-ID'"
+      AllowOrigin: "'*'"
+    Auth:
+      AddDefaultAuthorizerToCorsPreflight: false
+
+################################################################################
+# Parameters
+################################################################################
+Parameters:
+  StageName:
+    Type: String
+    Default: prod
+    AllowedPattern: '^[-a-z0-9]+$'
+    Description: Deployment stage (e.g., dev, test, prod)
+
+################################################################################
+# Resources
+################################################################################
+Resources:
+
+  #---------------------------------------------------------------------------
+  # DynamoDB – Patient vital signs (time-series) & Medication orders
+  #---------------------------------------------------------------------------
+  PatientVitalsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "cloudcare-${StageName}-patient-vitals"
+      BillingMode: PAY_PER_REQUEST
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      AttributeDefinitions:
+        - AttributeName: patientId
+          AttributeType: S
+        - AttributeName: recordedAt
+          AttributeType: S
+      KeySchema:
+        - AttributeName: patientId
+          KeyType: HASH
+        - AttributeName: recordedAt
+          KeyType: RANGE
+      StreamSpecification:
+        StreamViewType: NEW_AND_OLD_IMAGES
+      Tags:
+        - Key: Project
+          Value: VitalPulse
+
+  MedicationOrdersTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "cloudcare-${StageName}-medication-orders"
+      BillingMode: PAY_PER_REQUEST
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      AttributeDefinitions:
+        - AttributeName: orderId
+          AttributeType: S
+        - AttributeName: patientId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: orderId
+          KeyType: HASH
+        - AttributeName: patientId
+          KeyType: RANGE
+      Tags:
+        - Key: Project
+          Value: VitalPulse
+
+  #---------------------------------------------------------------------------
+  # API Gateway – REST (v1, v2 beta) & GraphQL
+  #---------------------------------------------------------------------------
+  RestApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name: !Sub "cloudcare-${StageName}-rest-api"
+      StageName: !Ref StageName
+      OpenApiVersion: '3.0.2'
+      EndpointConfiguration: REGIONAL
+      AccessLogSetting:
+        DestinationArn: !GetAtt RestApiAccessLogGroup.Arn
+        Format: |
+          {"requestId":"$context.requestId","ip":"$context.identity.sourceIp",
+           "caller":"$context.identity.caller","user":"$context.identity.user",
+           "requestTime":"$context.requestTime",
+           "httpMethod":"$context.httpMethod","resourcePath":"$context.resourcePath",
+           "status":"$context.status","protocol":"$context.protocol",
+           "responseLength":"$context.responseLength"}
+      Auth:
+        Authorizers:
+          CognitoAuthorizer:
+            UserPoolArn: !ImportValue cloudcare-cognito-userpool-arn
+            Identity:
+              ReauthorizeEvery: 0
+      Models:
+        FhirObservation:
+          ContentType: application/json
+          Model:
+            $schema: http://json-schema.org/draft-07/schema#
+            title: FHIRObservation
+            type: object
+            # trimmed – full FHIR schema delivered separately
+
+  RestApiAccessLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/apigateway/cloudcare-${StageName}-rest"
+      RetentionInDays: 30
+
+  GraphQLApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      Name: !Sub "cloudcare-${StageName}-graphql"
+      StageName: !Ref StageName
+      Auth:
+        Authorizers:
+          CognitoAuthorizer:
+            UserPoolArn: !ImportValue cloudcare-cognito-userpool-arn
+      CorsConfiguration:
+        AllowMethods:
+          - POST
+          - OPTIONS
+        AllowOrigins:
+          - "*"
+        AllowHeaders:
+          - Content-Type
+          - Authorization
+
+  #---------------------------------------------------------------------------
+  # Lambda Layers
+  #---------------------------------------------------------------------------
+  PowertoolsJavaLayer:
+    Type: AWS::Serverless::LayerVersion
+    Properties:
+      LayerName: cloudcare-powertools-java
+      Description: AWS Lambda Powertools utilities for logging, metrics, tracing
+      ContentUri: layers/powertools-java/
+      CompatibleRuntimes:
+        - java17
+      RetentionPolicy: Retain
+
+  #---------------------------------------------------------------------------
+  # Lambda Functions – Command & Query separation
+  #---------------------------------------------------------------------------
+  # Write vital signs ---------------------------------------------------------
+  CommandPatientVitalsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "cloudcare-${StageName}-cmd-patient-vitals"
+      CodeUri: ../functions/command-vitals/target/command-vitals.jar
+      Handler: com.vitalpulse.cloudcare.command.vitals.CommandHandler::handleRequest
+      Description: Writes patient vital-sign telemetry to DynamoDB
+      MemorySize: 1536
+      Timeout: 15
+      Policies:
+        - DynamoDBWritePolicy:
+            TableName: !Ref PatientVitalsTable
+      Events:
+        CommandVitalsApi:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /v1/patients/{patientId}/vitals
+            Method: POST
+            RequestModel:
+              Model: FhirObservation
+              Required: true
+            Auth:
+              Authorizer: CognitoAuthorizer
+            TimeoutInMillis: 29000
+
+  # Read vital signs ----------------------------------------------------------
+  QueryPatientVitalsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "cloudcare-${StageName}-qry-patient-vitals"
+      CodeUri: ../functions/query-vitals/target/query-vitals.jar
+      Handler: com.vitalpulse.cloudcare.query.vitals.QueryHandler::handleRequest
+      Description: Retrieves paginated vital-sign telemetry
+      MemorySize: 1024
+      Timeout: 10
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref PatientVitalsTable
+      Events:
+        QueryVitalsApi:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /v1/patients/{patientId}/vitals
+            Method: GET
+            Auth:
+              Authorizer: CognitoAuthorizer
+            RequestParameters:
+              - method.request.querystring.cursor
+              - method.request.querystring.limit
+
+  # Write medication orders ---------------------------------------------------
+  CommandMedicationOrdersFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "cloudcare-${StageName}-cmd-med-orders"
+      CodeUri: ../functions/command-orders/target/command-orders.jar
+      Handler: com.vitalpulse.cloudcare.command.orders.CommandHandler::handleRequest
+      Description: Persists medication orders
+      MemorySize: 1536
+      Timeout: 20
+      Policies:
+        - DynamoDBWritePolicy:
+            TableName: !Ref MedicationOrdersTable
+      Events:
+        CommandOrdersApi:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /v1/patients/{patientId}/orders
+            Method: POST
+            Auth:
+              Authorizer: CognitoAuthorizer
+
+  # Read medication orders ----------------------------------------------------
+  QueryMedicationOrdersFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "cloudcare-${StageName}-qry-med-orders"
+      CodeUri: ../functions/query-orders/target/query-orders.jar
+      Handler: com.vitalpulse.cloudcare.query.orders.QueryHandler::handleRequest
+      Description: Fetches clinician medication orders
+      MemorySize: 1024
+      Timeout: 10
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref MedicationOrdersTable
+      Events:
+        QueryOrdersApi:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RestApi
+            Path: /v1/patients/{patientId}/orders
+            Method: GET
+            Auth:
+              Authorizer: CognitoAuthorizer
+            RequestParameters:
+              - method.request.querystring.cursor
+              - method.request.querystring.limit
+
+  # GraphQL Dispatcher --------------------------------------------------------
+  GraphQLDispatcherFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "cloudcare-${StageName}-graphql-dispatcher"
+      CodeUri: ../functions/graphql-dispatcher/target/graphql-dispatcher.jar
+      Handler: com.vitalpulse.cloudcare.graphql.DispatcherHandler::handleRequest
+      Description: Unified GraphQL endpoint overlaying REST resources
+      MemorySize: 2048
+      Timeout: 30
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref PatientVitalsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref MedicationOrdersTable
+      Environment:
+        Variables:
+          REST_API_URL: !Sub "https://${RestApi}.execute-api.${AWS::Region}.amazonaws.com/${StageName}"
+      Events:
+        GraphQLHttp:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref GraphQLApi
+            Method: POST
+            Path: /graphql
+
+  # Token Validation / Custom Authorizer for fine-grained scopes -------------
+  AuthTokenAuthorizerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "cloudcare-${StageName}-authorizer"
+      CodeUri: ../functions/authorizer/target/authorizer.jar
+      Handler: com.vitalpulse.cloudcare.auth.AuthorizerHandler::handleRequest
+      Description: SMART on FHIR OAuth 2.0 JWT validation for scope-based access
+      MemorySize: 512
+      Timeout: 5
+      Policies:
+        - AWSLambdaBasicExecutionRole
+      Events:
+        # Attached via Lambda Authorizer v2 for HttpApi only
+        HttpApiAuthorizer:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref GraphQLApi
+            PayloadFormatVersion: 2.0
+            RouteSettings:
+              AuthorizationType: CUSTOM
+              AuthorizerFunctionArn: !GetAtt AuthTokenAuthorizerFunction.Arn
+
+  #---------------------------------------------------------------------------
+  # CloudWatch Dashboard & Alarms
+  #---------------------------------------------------------------------------
+  CloudCareDashboard:
+    Type: AWS::CloudWatch::Dashboard
+    Properties:
+      DashboardName: !Sub "CloudCare-${StageName}-Dashboard"
+      DashboardBody: !Sub |
+        {
+          "widgets": [
+            { "type": "metric", "x": 0, "y": 0, "width": 24, "height": 6,
+              "properties": {
+                "metrics": [
+                  [ "AWS/Lambda", "Duration", "FunctionName", "${CommandPatientVitalsFunction}" ],
+                  [ ".", "Errors", ".", "." ]
+                ],
+                "title": "Vitals Command – Duration & Errors",
+                "stat": "Avg",
+                "period": 60
+              }
+            }
+          ]
+        }
+
+################################################################################
+# Outputs
+################################################################################
+Outputs:
+  RestApiUrl:
+    Description: Root URL for the REST API
+    Value: !Sub "https://${RestApi}.execute-api.${AWS::Region}.amazonaws.com/${StageName}"
+    Export:
+      Name: cloudcare-rest-api-url
+
+  GraphQLUrl:
+    Description: URL for the GraphQL endpoint
+    Value: !Sub "${GraphQLApi}.execute-api.${AWS::Region}.amazonaws.com/${StageName}/graphql"
+    Export:
+      Name: cloudcare-graphql-url
+
+  PatientVitalsTableName:
+    Description: DynamoDB table name for patient vitals
+    Value: !Ref PatientVitalsTable
+
+  MedicationOrdersTableName:
+    Description: DynamoDB table name for medication orders
+    Value: !Ref MedicationOrdersTable
+```

@@ -1,1 +1,0 @@
-- [EduGateway-C health endpoint task](project_health_endpoint.md) — Multi-session /health endpoint work; plan complete, implementation pending.

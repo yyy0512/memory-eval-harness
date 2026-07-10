@@ -1,0 +1,406 @@
+```python
+"""
+name.py
+========
+Core domain primitives and infrastructure glue for the PrismPocket mobile
+utility.  This module purposefully concentrates a slice of the Clean
+Architecture rings—a pure `PrismCard` entity, a repository façade, and a
+pub-sub event bus—so that higher-level presentation layers (MVVM view-models,
+UI controllers, etc.) can react to state changes without violating boundaries.
+
+The code is designed to be embedded inside a Kivy / BeeWare / PyObjC hybrid
+app, but remains completely platform-agnostic and unit-testable.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import sqlite3
+import threading
+import uuid
+from contextlib import contextmanager
+from dataclasses import asdict, dataclass, field
+from datetime import datetime
+from enum import Enum
+from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
+
+# --------------------------------------------------------------------------- #
+# Logging
+# --------------------------------------------------------------------------- #
+logger = logging.getLogger("prism_pocket.core")
+logger.setLevel(logging.INFO)
+_handler = logging.StreamHandler()
+_handler.setFormatter(
+    logging.Formatter("[%(levelname)s] %(asctime)s %(name)s: %(message)s")
+)
+logger.addHandler(_handler)
+
+# --------------------------------------------------------------------------- #
+# Exceptions
+# --------------------------------------------------------------------------- #
+
+
+class PrismError(Exception):
+    """Base class for all custom PrismPocket exceptions."""
+
+
+class CardNotFoundError(PrismError):
+    """Raised when a `PrismCard` is requested but not found."""
+
+
+class StorageError(PrismError):
+    """Raised when a low-level storage operation fails."""
+
+
+class EventBusError(PrismError):
+    """Raised for pub-sub related issues."""
+
+
+# --------------------------------------------------------------------------- #
+# Domain Model
+# --------------------------------------------------------------------------- #
+
+
+class ContentType(str, Enum):
+    TEXT = "text"
+    PHOTO = "photo"
+    VOICE = "voice"
+    GEO = "geo"
+
+
+@dataclass(frozen=True)
+class PrismCard:
+    """
+    Pure domain entity representing a “prism card”.
+
+    Note the absence of any persistence, UI, or network concerns—this struct
+    lives in the innermost Clean Architecture circle.
+    """
+
+    id: str
+    content_type: ContentType
+    content_data: Dict[str, Any]
+    palette: List[str] = field(default_factory=list)
+    created_at: datetime = field(default_factory=datetime.utcnow)
+    mood_score: Optional[float] = None
+
+    # Convenience factory --------------------------------------------------- #
+
+    @staticmethod
+    def new(
+        content_type: ContentType,
+        content_data: Dict[str, Any],
+        palette: Optional[List[str]] = None,
+        mood_score: Optional[float] = None,
+    ) -> "PrismCard":
+        """
+        Factory for creating a new `PrismCard` with a generated UUID.
+
+        Using a static factory keeps entity construction concerns nicely
+        encapsulated.
+        """
+        return PrismCard(
+            id=str(uuid.uuid4()),
+            content_type=content_type,
+            content_data=content_data,
+            palette=palette or [],
+            created_at=datetime.utcnow(),
+            mood_score=mood_score,
+        )
+
+
+# --------------------------------------------------------------------------- #
+# Event Bus — Observer Pattern (thread-safe, singleton)
+# --------------------------------------------------------------------------- #
+
+
+class _SingletonMeta(type):
+    """Thread-safe implementation of Singleton metaclass."""
+
+    _instances: Dict[type, Any] = {}
+    _lock: threading.Lock = threading.Lock()
+
+    def __call__(cls, *args: Any, **kwargs: Any) -> Any:  # noqa: D401
+        with cls._lock:
+            if cls not in cls._instances:
+                cls._instances[cls] = super().__call__(*args, **kwargs)
+        return cls._instances[cls]
+
+
+class EventBus(metaclass=_SingletonMeta):
+    """
+    A lightweight Observer bus for intra-process communication.
+
+    Subscribers register callbacks keyed by event topic strings, and all
+    callbacks run on the publishing thread.  Thread-safety is assured via a
+    re-entrant lock to avoid deadlocks during nested publishes.
+    """
+
+    def __init__(self) -> None:
+        self._subscriptions: Dict[str, Set[Callable[[Any], None]]] = {}
+        self._lock = threading.RLock()
+
+    # Subscription ---------------------------------------------------------- #
+
+    def subscribe(self, topic: str, callback: Callable[[Any], None]) -> None:
+        if not callable(callback):
+            raise EventBusError("Callback must be callable.")
+        with self._lock:
+            self._subscriptions.setdefault(topic, set()).add(callback)
+        logger.debug("Subscribed %s to topic '%s'", callback, topic)
+
+    def unsubscribe(self, topic: str, callback: Callable[[Any], None]) -> None:
+        with self._lock:
+            try:
+                self._subscriptions[topic].remove(callback)
+                logger.debug("Unsubscribed %s from topic '%s'", callback, topic)
+            except (KeyError, ValueError):
+                raise EventBusError("Subscription not found.")
+
+    # Publish ---------------------------------------------------------------- #
+
+    def publish(self, topic: str, payload: Any = None) -> None:
+        logger.debug("Publishing topic '%s' with payload: %r", topic, payload)
+        with self._lock:
+            callbacks = list(self._subscriptions.get(topic, []))
+        for cb in callbacks:
+            try:
+                cb(payload)
+            except Exception:  # pragma: no cover
+                logger.exception("Error in event subscriber for '%s'", topic)
+
+
+# --------------------------------------------------------------------------- #
+# Storage Adapter (local SQLite) — Adapter + Repository Patterns
+# --------------------------------------------------------------------------- #
+
+
+class _SQLiteAdapter:
+    """
+    Very thin wrapper around SQLite to decouple raw SQL from repository
+    business logic.  Handles (de)serialization and schema migrations.
+    """
+
+    SCHEMA_VERSION = 1
+
+    def __init__(self, db_path: Path) -> None:
+        self._db_path = db_path
+        self._lock = threading.RLock()
+        self._ensure_schema()
+
+    # Connection ------------------------------------------------------------ #
+
+    @contextmanager
+    def _conn(self) -> sqlite3.Connection:
+        try:
+            conn = sqlite3.connect(
+                str(self._db_path), detect_types=sqlite3.PARSE_DECLTYPES
+            )
+            conn.row_factory = sqlite3.Row
+            yield conn
+            conn.commit()
+        except sqlite3.DatabaseError as exc:
+            conn.rollback()
+            raise StorageError(str(exc)) from exc
+        finally:
+            conn.close()
+
+    # Schema ---------------------------------------------------------------- #
+
+    def _ensure_schema(self) -> None:
+        with self._conn() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS prism_cards (
+                    id TEXT PRIMARY KEY,
+                    content_type TEXT NOT NULL,
+                    content_data TEXT NOT NULL,
+                    palette TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    mood_score REAL
+                )
+                """
+            )
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS meta (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL
+                )
+                """
+            )
+            cur.execute(
+                "INSERT OR IGNORE INTO meta(key, value) VALUES ('schema_version', ?)",
+                (self.SCHEMA_VERSION,),
+            )
+            conn.commit()
+
+    # CRUD ------------------------------------------------------------------ #
+
+    def insert(self, card: PrismCard) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                """
+                INSERT INTO prism_cards (
+                    id, content_type, content_data, palette, created_at, mood_score
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    card.id,
+                    card.content_type.value,
+                    json.dumps(card.content_data),
+                    json.dumps(card.palette),
+                    card.created_at.isoformat(),
+                    card.mood_score,
+                ),
+            )
+
+    def select_one(self, card_id: str) -> PrismCard:
+        with self._conn() as conn:
+            cur = conn.execute(
+                "SELECT * FROM prism_cards WHERE id = ?", (card_id,)
+            )
+            row = cur.fetchone()
+            if not row:
+                raise CardNotFoundError(card_id)
+            return self._row_to_card(row)
+
+    def select_all(self, limit: int = 100) -> List[PrismCard]:
+        with self._conn() as conn:
+            cur = conn.execute(
+                "SELECT * FROM prism_cards ORDER BY created_at DESC LIMIT ?", (limit,)
+            )
+            return [self._row_to_card(r) for r in cur.fetchall()]
+
+    def update(self, card: PrismCard) -> None:
+        with self._conn() as conn:
+            res = conn.execute(
+                """
+                UPDATE prism_cards
+                SET content_type = ?, content_data = ?, palette = ?, created_at = ?, 
+                    mood_score = ?
+                WHERE id = ?
+                """,
+                (
+                    card.content_type.value,
+                    json.dumps(card.content_data),
+                    json.dumps(card.palette),
+                    card.created_at.isoformat(),
+                    card.mood_score,
+                    card.id,
+                ),
+            )
+            if res.rowcount == 0:
+                raise CardNotFoundError(card.id)
+
+    def delete(self, card_id: str) -> None:
+        with self._conn() as conn:
+            res = conn.execute(
+                "DELETE FROM prism_cards WHERE id = ?", (card_id,)
+            )
+            if res.rowcount == 0:
+                raise CardNotFoundError(card_id)
+
+    # Helpers ---------------------------------------------------------------- #
+
+    @staticmethod
+    def _row_to_card(row: sqlite3.Row) -> PrismCard:
+        return PrismCard(
+            id=row["id"],
+            content_type=ContentType(row["content_type"]),
+            content_data=json.loads(row["content_data"]),
+            palette=json.loads(row["palette"]),
+            created_at=datetime.fromisoformat(row["created_at"]),
+            mood_score=row["mood_score"],
+        )
+
+
+# --------------------------------------------------------------------------- #
+# Repository Facade
+# --------------------------------------------------------------------------- #
+
+
+class PrismCardRepository:
+    """
+    Higher-level gateway that orchestrates persistence and event emission.
+
+    Unlike the low-level `_SQLiteAdapter`, this repo speaks domain language
+    (e.g., `PrismCard` objects) and is the primary integration point for
+    view-models, sync services, etc.
+    """
+
+    CARD_CREATED = "prism_card.created"
+    CARD_UPDATED = "prism_card.updated"
+    CARD_DELETED = "prism_card.deleted"
+
+    def __init__(self, storage_path: Path = Path.home() / ".prism_pocket.db") -> None:
+        self._adapter = _SQLiteAdapter(storage_path)
+        self._bus = EventBus()
+
+    # Public API ------------------------------------------------------------ #
+
+    def add(self, card: PrismCard) -> None:
+        logger.info("Adding PrismCard: %s", card.id)
+        self._adapter.insert(card)
+        self._bus.publish(self.CARD_CREATED, card)
+
+    def get(self, card_id: str) -> PrismCard:
+        logger.debug("Fetching PrismCard: %s", card_id)
+        return self._adapter.select_one(card_id)
+
+    def list(self, limit: int = 100) -> List[PrismCard]:
+        logger.debug("Listing PrismCards (limit=%s)", limit)
+        return self._adapter.select_all(limit=limit)
+
+    def update(self, card: PrismCard) -> None:
+        logger.info("Updating PrismCard: %s", card.id)
+        self._adapter.update(card)
+        self._bus.publish(self.CARD_UPDATED, card)
+
+    def delete(self, card_id: str) -> None:
+        logger.info("Deleting PrismCard: %s", card_id)
+        self._adapter.delete(card_id)
+        self._bus.publish(self.CARD_DELETED, card_id)
+
+
+# --------------------------------------------------------------------------- #
+# Example Usage (would live in unit tests or a playground script)
+# --------------------------------------------------------------------------- #
+
+if __name__ == "__main__":  # pragma: no cover
+    repo = PrismCardRepository()
+
+    # Subscribe to repository events
+    repo._bus.subscribe(
+        PrismCardRepository.CARD_CREATED,
+        lambda c: logger.info("🚀 New card created! %s", c.id),
+    )
+
+    # Create & persist a card
+    card = PrismCard.new(
+        content_type=ContentType.TEXT,
+        content_data={"text": "Hello, PrismPocket!"},
+        palette=["#FF5733", "#33FFCE"],
+        mood_score=0.87,
+    )
+    repo.add(card)
+
+    # Retrieve and mutate
+    fetched = repo.get(card.id)
+    updated_palette = fetched.palette + ["#FFFFFF"]
+    repo.update(
+        PrismCard(
+            **{
+                **asdict(fetched),
+                "palette": updated_palette,
+                "mood_score": 0.91,
+            }
+        )
+    )
+
+    # Delete
+    repo.delete(card.id)
+```

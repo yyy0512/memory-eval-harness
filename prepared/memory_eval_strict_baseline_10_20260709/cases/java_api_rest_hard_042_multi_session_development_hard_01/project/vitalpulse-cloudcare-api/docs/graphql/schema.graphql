@@ -1,0 +1,391 @@
+"""
+===============================================================================
+ VitalPulse CloudCare API – GraphQL Schema Definition Language (SDL)
+===============================================================================
+ This schema overlays the REST endpoints exposed by the VitalPulse CloudCare
+ platform.  It offers clinicians and integration partners a consolidated view
+ of near-real-time telemetry, medication events, and clinician orders without
+ requiring multiple REST round-trips.
+
+ Design notes
+ ------------
+ • Strictly typed: Scalars mirror HL7 FHIR where possible.
+ • Relay-compatible pagination using the Connection spec.
+ • Command / Query separation is preserved: mutations are side-effecting
+   commands; queries are read-only.
+ • Field-level authorization is handled through the custom @auth directive
+   which delegates to the OAuth 2.0 / SMART-on-FHIR scope engine.
+ • Fine-grained error propagation uses problem-details-style objects rather
+   than generic strings, enabling UI clients to differentiate error states.
+===============================================================================
+"""
+
+# -----------------------------------------------------------------------------#
+# Custom scalars
+# -----------------------------------------------------------------------------#
+scalar UUID        # RFC-4122
+scalar DateTime    # ISO-8601 with millisecond precision
+scalar JSON        # Arbitrary JSON, validated at runtime against FHIR schema
+
+# -----------------------------------------------------------------------------#
+# Directives
+# -----------------------------------------------------------------------------#
+"""
+Enforces OAuth 2.0 / SMART-on-FHIR scopes.  
+Examples:
+  @auth(role: CLINICIAN)
+  @auth(role: SYSTEM, scope: "patient/*.read")
+"""
+directive @auth(
+  role: Role!
+  scope: String
+) on FIELD_DEFINITION | OBJECT
+
+"""
+Simple Leaky-Bucket rate limiter attached at the field or object level.
+"""
+directive @rateLimit(
+  max: Int!,             # allowed calls
+  window: Int!           # per window (seconds)
+) on FIELD_DEFINITION | OBJECT
+
+# -----------------------------------------------------------------------------#
+# Enums
+# -----------------------------------------------------------------------------#
+enum Role {
+  CLINICIAN
+  DEVICE
+  SYSTEM
+  ADMIN
+}
+
+enum VitalSignType {
+  HEART_RATE
+  SPO2
+  RESPIRATORY_RATE
+  BLOOD_PRESSURE_SYSTOLIC
+  BLOOD_PRESSURE_DIASTOLIC
+  TEMPERATURE
+}
+
+enum MedicationRoute {
+  ORAL
+  IV
+  IM
+  SUBCUTANEOUS
+  INHALATION
+  TOPICAL
+}
+
+enum OrderStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+  ERROR
+}
+
+# -----------------------------------------------------------------------------#
+# Shared objects
+# -----------------------------------------------------------------------------#
+type ProblemDetails {
+  title:        String!
+  status:       Int!       # HTTP-style status code
+  detail:       String
+  timestamp:    DateTime!
+  instance:     String      # URI to logs / troubleshooting resources
+}
+
+# -----------------------------------------------------------------------------#
+# Patient Domain
+# -----------------------------------------------------------------------------#
+type Patient @auth(role: CLINICIAN) {
+  id:              UUID!
+  mrn:             String!          # Medical Record Number
+  firstName:       String!
+  lastName:        String!
+  dateOfBirth:     DateTime!
+  gender:          String
+  admittedAt:      DateTime
+  dischargedAt:    DateTime
+  tags:            [String!]!
+}
+
+# -----------------------------------------------------------------------------#
+# Vital Signs Domain
+# -----------------------------------------------------------------------------#
+type VitalSignSample {
+  id:          UUID!
+  patientId:   UUID!
+  type:        VitalSignType!
+  value:       Float!
+  unit:        String!
+  capturedAt:  DateTime!
+  deviceId:    UUID!
+  meta:        JSON
+}
+
+"""
+Relay-style edge wrapper for VitalSignSample
+"""
+type VitalSignEdge {
+  cursor: String!
+  node:   VitalSignSample!
+}
+
+type PageInfo {
+  hasNextPage:     Boolean!
+  hasPreviousPage: Boolean!
+  startCursor:     String
+  endCursor:       String
+}
+
+type VitalSignConnection {
+  edges:    [VitalSignEdge!]!
+  pageInfo: PageInfo!
+  totalCount: Int!
+}
+
+# -----------------------------------------------------------------------------#
+# Medication Domain
+# -----------------------------------------------------------------------------#
+type MedicationEvent {
+  id:              UUID!
+  patientId:       UUID!
+  fhirOrderId:     UUID!
+  drugCode:        String!
+  displayName:     String!
+  dose:            Float!
+  unit:            String!
+  route:           MedicationRoute!
+  administeredAt:  DateTime!
+  recordedBy:      String!
+  meta:            JSON
+}
+
+type MedicationEdge {
+  cursor: String!
+  node:   MedicationEvent!
+}
+
+type MedicationConnection {
+  edges:      [MedicationEdge!]!
+  pageInfo:   PageInfo!
+  totalCount: Int!
+}
+
+# -----------------------------------------------------------------------------#
+# Clinician Orders
+# -----------------------------------------------------------------------------#
+type ClinicianOrder {
+  id:          UUID!
+  patientId:   UUID!
+  status:      OrderStatus!
+  description: String!
+  createdAt:   DateTime!
+  updatedAt:   DateTime!
+  meta:        JSON
+}
+
+type OrderEdge {
+  cursor: String!
+  node:   ClinicianOrder!
+}
+
+type OrderConnection {
+  edges:      [OrderEdge!]!
+  pageInfo:   PageInfo!
+  totalCount: Int!
+}
+
+# -----------------------------------------------------------------------------#
+# Query Root
+# -----------------------------------------------------------------------------#
+type Query {
+
+  # --------------------------- Patient --------------------------------------#
+  """
+  Fetch a single patient by ID.
+  """
+  patient(id: UUID!): Patient
+    @auth(role: CLINICIAN)
+
+  """
+  Search patients with optional MRN filter and cursor-based pagination.
+  """
+  patients(
+    mrn:            String,
+    firstName:      String,
+    lastName:       String,
+    after:          String,
+    first:          Int = 25
+  ): PatientConnection
+    @auth(role: CLINICIAN)
+
+  # --------------------------- Vital Signs ----------------------------------#
+  """
+  Retrieve a paginated stream of vital-sign samples for a given patient.
+  """
+  vitalSigns(
+    patientId:  UUID!,
+    type:       VitalSignType,
+    since:      DateTime,
+    until:      DateTime,
+    after:      String,
+    first:      Int = 250
+  ): VitalSignConnection
+    @auth(role: CLINICIAN)
+    @rateLimit(max: 600, window: 60)
+
+  # --------------------------- Medication -----------------------------------#
+  medicationEvents(
+    patientId:  UUID!,
+    since:      DateTime,
+    until:      DateTime,
+    after:      String,
+    first:      Int = 100
+  ): MedicationConnection
+    @auth(role: CLINICIAN)
+
+  # --------------------------- Orders ---------------------------------------#
+  clinicianOrders(
+    patientId:  UUID!,
+    status:     OrderStatus,
+    after:      String,
+    first:      Int = 50
+  ): OrderConnection
+    @auth(role: CLINICIAN)
+}
+
+# -----------------------------------------------------------------------------#
+# Mutation Root
+# -----------------------------------------------------------------------------#
+type Mutation {
+
+  # --------------------------- Vital Signs ----------------------------------#
+  """
+  Submit a vital-sign sample from an approved medical device.  
+  NOTE: Only DEVICE or SYSTEM roles may invoke this operation.
+  """
+  ingestVitalSign(
+    input: VitalSignInput!
+  ): IngestVitalSignPayload!
+    @auth(role: DEVICE)
+    @rateLimit(max: 1200, window: 60)
+
+  # --------------------------- Medication -----------------------------------#
+  """
+  Record a medication administration event.
+  """
+  recordMedicationEvent(
+    input: MedicationEventInput!
+  ): RecordMedicationPayload!
+    @auth(role: CLINICIAN)
+
+  # --------------------------- Orders ---------------------------------------#
+  """
+  Create or update a clinician order.
+  """
+  upsertClinicianOrder(
+    input: ClinicianOrderInput!
+  ): UpsertClinicianOrderPayload!
+    @auth(role: CLINICIAN)
+}
+
+# -----------------------------------------------------------------------------#
+# Input Objects
+# -----------------------------------------------------------------------------#
+input VitalSignInput {
+  patientId:   UUID!
+  type:        VitalSignType!
+  value:       Float!
+  unit:        String!
+  capturedAt:  DateTime!
+  deviceId:    UUID!
+  meta:        JSON
+}
+
+input MedicationEventInput {
+  patientId:       UUID!
+  fhirOrderId:     UUID!
+  drugCode:        String!
+  displayName:     String!
+  dose:            Float!
+  unit:            String!
+  route:           MedicationRoute!
+  administeredAt:  DateTime!
+  recordedBy:      String!
+  meta:            JSON
+}
+
+input ClinicianOrderInput {
+  id:          UUID              # null → create, non-null → update
+  patientId:   UUID!
+  status:      OrderStatus!
+  description: String!
+  meta:        JSON
+}
+
+# -----------------------------------------------------------------------------#
+# Payload Objects
+# -----------------------------------------------------------------------------#
+type IngestVitalSignPayload {
+  success: Boolean!
+  sample:  VitalSignSample
+  error:   ProblemDetails
+}
+
+type RecordMedicationPayload {
+  success: Boolean!
+  event:   MedicationEvent
+  error:   ProblemDetails
+}
+
+type UpsertClinicianOrderPayload {
+  success: Boolean!
+  order:   ClinicianOrder
+  error:   ProblemDetails
+}
+
+# -----------------------------------------------------------------------------#
+# Relay Patient Connection (for search)
+# -----------------------------------------------------------------------------#
+type PatientEdge {
+  cursor: String!
+  node:   Patient!
+}
+
+type PatientConnection {
+  edges:      [PatientEdge!]!
+  pageInfo:   PageInfo!
+  totalCount: Int!
+}
+
+# -----------------------------------------------------------------------------#
+# Subscriptions (optional – real-time streaming)
+# -----------------------------------------------------------------------------#
+type Subscription {
+
+  """
+  Real-time vital-sign sample stream.  
+  The stream will complete automatically when `until` is reached
+  or the client unsubscribes.
+  """
+  vitalSignStream(
+    patientId:  UUID!,
+    type:       VitalSignType,
+    since:      DateTime,
+    until:      DateTime
+  ): VitalSignSample!
+    @auth(role: CLINICIAN)
+    @rateLimit(max: 10, window: 1)
+}
+
+# -----------------------------------------------------------------------------#
+# Schema Entry Point
+# -----------------------------------------------------------------------------#
+schema {
+  query:        Query
+  mutation:     Mutation
+  subscription: Subscription
+}

@@ -1,0 +1,60 @@
+{
+  "scenario_id": "typescript_ml_inference_expert_016_multi_session_development_medium_01",
+  "case_id": "typescript_ml_inference_expert_016",
+  "title": "Implement Multi-Channel Data Drift Alerting for Model Monitoring",
+  "description": "The InsightHexaAI suite currently provides robust model monitoring, but lacks a proactive alerting mechanism for data drift. This task involves implementing a new feature to detect significant shifts in the statistical distribution of incoming inference data compared to a model's training data baseline. This feature must be configurable, integrate with the existing notification system, and be covered by a new integration test. The work will be performed over three distinct development sessions.",
+  "difficulty": "medium",
+  "project_spec": {
+    "unique_id": "typescript_ml_inference_expert_016",
+    "name": "InsightHexaAI: Strategic ML Inference Suite for Enterprise KPIs",
+    "description": "InsightHexaAI is an expert-level TypeScript platform that empowers large enterprises to turn predictive models into continuously-improving, revenue-impacting services. Centered on a strict hexagonal (ports-and-adapters) architecture, the project isolates core business logic—profit-driven metrics, customer-lifetime-value forecasts, churn-risk scores—from volatile outside concerns such as data lakes, BI tools, model registries, and visualization dashboards. \n\nEvery feature—experiment_tracking, feature_store, model_versioning, automated_retraining, and real-time model_serving—is expressed as a set of domain services inside the hexagon. External technologies (Kafka, S3, TensorFlow, Snowflake, PowerBI, etc.) are merely adapters, allowing the core to uphold business rules like SLA-aware inference pricing or regulatory audit trails. Strategy_Pattern and Factory_Pattern implementations let product managers swap revenue strategies (e.g., usage-based billing vs. subscription) or model-selection strategies (A/B vs. multi-armed bandit) without touching IO code. Observer_Pattern feeds dashboards and alerts whenever KPIs drift, while Pipeline_Pattern orchestrates preprocessing → feature_engineering → training → evaluation → deployment pipelines in code, not YAML, giving finance teams traceable cost attribution.\n\nWith 98 cohesive files planned (≈741 k tokens), InsightHexaAI becomes the authoritative backbone for enterprise ML operations, tightly aligning technical excellence with measurable business outcomes.",
+    "domain": "ml_inference",
+    "complexity": "expert",
+    "language": "typescript",
+    "architecture": "hexagonal",
+    "theme": "business",
+    "target_file_count": 98,
+    "target_token_count": 741168,
+    "features": [
+      "experiment_tracking",
+      "model_training",
+      "feature_store",
+      "model_monitoring",
+      "model_versioning",
+      "data_preprocessing",
+      "feature_engineering",
+      "model_evaluation",
+      "model_serving",
+      "data_visualization",
+      "automated_retraining",
+      "hyperparameter_tuning"
+    ],
+    "architecture_patterns": [
+      "Strategy_Pattern",
+      "MLOps_Architecture",
+      "Factory_Pattern",
+      "Model_Registry",
+      "Observer_Pattern",
+      "Pipeline_Pattern"
+    ],
+    "dependencies": [
+      "typescript (>=5.0)",
+      "ts-node / esbuild (dev)",
+      "inversify or tsyringe (dependency injection for ports/adapters)",
+      "fp-ts (functional domain modeling)",
+      "tensorflow/tfjs-node & onnxruntime-node (multi-runtime inference)",
+      "@aws-sdk/client-s3, @azure/storage-blob, google-cloud/storage (storage adapters)",
+      "kafkajs & amqplib (event streaming adapters)",
+      "bullmq or agenda (job orchestration for pipelines)",
+      "typeorm or prisma (feature store / metadata DB)",
+      "mlflow-rest-client or custom Model Registry SDK",
+      "yup/zod (schema validation)",
+      "prom-client & opentelemetry/api (metrics/observability)",
+      "chart.js + next.js (data visualization dashboard)",
+      "fastify or nestjs (HTTP/gRPC ports for model_serving)",
+      "jest + ts-mockito (testing)",
+      "eslint, prettier, husky (quality gates)"
+    ],
+    "seed": 136511
+  }
+}

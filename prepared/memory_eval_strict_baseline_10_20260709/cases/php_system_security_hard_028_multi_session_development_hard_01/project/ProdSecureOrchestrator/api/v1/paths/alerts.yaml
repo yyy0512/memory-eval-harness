@@ -1,0 +1,298 @@
+```php
+<?php
+declare(strict_types=1);
+
+/*
+ * File: ProdSecureOrchestrator/api/v1/paths/alerts.yaml
+ * Type:  Source (PHP)
+ *
+ * Purpose:
+ *   Programmatically generates the OpenAPI v3 path-specification for the
+ *   “Alerts” resource.  The spec is produced as YAML so it can be merged
+ *   into the master API document during CI and consumed by downstream
+ *   tooling (SDK generator, contract-tests, documentation portal, etc.).
+ *
+ * Usage (CLI):
+ *   $ php alerts.yaml            # Generates spec and prints to STDOUT
+ *   $ php alerts.yaml generate   # Same as above (default)
+ *   $ php alerts.yaml clean      # Removes previously generated file
+ */
+
+namespace ProdSecureOrchestrator\Api\V1\Paths;
+
+use Symfony\Component\Yaml\Exception\DumpException;
+use Symfony\Component\Yaml\Yaml;
+
+/**
+ * Generates the OpenAPI path specification for Alert-related endpoints.
+ */
+final class AlertsPathSpecGenerator
+{
+    /** Where the generated YAML will be persisted (relative to this file). */
+    private const OUTPUT_FILENAME = __DIR__ . '/alerts.generated.yaml';
+
+    /**
+     * Generate the YAML for the alerts path definition.
+     *
+     * @param bool $writeToFile If true, persists YAML to disk.
+     *
+     * @return string The generated YAML string.
+     *
+     * @throws \RuntimeException On YAML generation or IO failure.
+     */
+    public function generate(bool $writeToFile = true): string
+    {
+        $specArray = $this->buildSpecArray();
+
+        try {
+            $yaml = Yaml::dump(
+                $specArray,
+                10,
+                2,
+                Yaml::DUMP_OBJECT_AS_MAP
+                | Yaml::DUMP_MULTI_LINE_LITERAL_BLOCK
+                | Yaml::DUMP_EMPTY_ARRAY_AS_SEQUENCE
+            );
+        } catch (DumpException $e) {
+            throw new \RuntimeException(
+                'Failed to dump YAML for Alerts path: ' . $e->getMessage(),
+                (int) $e->getCode(),
+                $e
+            );
+        }
+
+        if ($writeToFile) {
+            $this->persistToFile($yaml);
+        }
+
+        return $yaml;
+    }
+
+    /**
+     * Delete the previously generated spec file, if it exists.
+     */
+    public function clean(): void
+    {
+        if (file_exists(self::OUTPUT_FILENAME) && !unlink(self::OUTPUT_FILENAME)) {
+            throw new \RuntimeException(
+                sprintf('Unable to delete %s', self::OUTPUT_FILENAME)
+            );
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    // Internal helpers
+    // ---------------------------------------------------------------------
+
+    private function buildSpecArray(): array
+    {
+        return [
+            '/alerts' => [
+                'get'  => $this->buildGetCollection(),
+                'post' => $this->buildPostCollection(),
+            ],
+            '/alerts/{alertId}' => [
+                'parameters' => [$this->buildAlertIdPathParam()],
+                'get'        => $this->buildGetSingle(),
+                'patch'      => $this->buildPatchSingle(),
+                'delete'     => $this->buildDeleteSingle(),
+            ],
+        ];
+    }
+
+    private function buildAlertIdPathParam(): array
+    {
+        return [
+            'name'        => 'alertId',
+            'in'          => 'path',
+            'required'    => true,
+            'description' => 'UUID of the alert.',
+            'schema'      => [
+                'type'   => 'string',
+                'format' => 'uuid',
+            ],
+        ];
+    }
+
+    private function buildGetCollection(): array
+    {
+        return [
+            'summary'     => 'List alerts',
+            'description' => 'Returns a paginated collection of alerts.',
+            'operationId' => 'listAlerts',
+            'tags'        => ['Alerts'],
+            'parameters'  => $this->commonQueryParams(),
+            'responses'   => [
+                '200' => $this->response('OK', '#/components/schemas/AlertCollection'),
+                '401' => $this->response('Unauthorized', '#/components/schemas/Error'),
+                '500' => $this->response('Server Error', '#/components/schemas/Error'),
+            ],
+        ];
+    }
+
+    private function buildPostCollection(): array
+    {
+        return [
+            'summary'     => 'Create alert',
+            'description' => 'Creates a new alert and enqueues it in the alert pipeline.',
+            'operationId' => 'createAlert',
+            'tags'        => ['Alerts'],
+            'requestBody' => [
+                'required' => true,
+                'content'  => [
+                    'application/json' => [
+                        'schema' => [
+                            '$ref' => '#/components/schemas/AlertCreateRequest',
+                        ],
+                    ],
+                ],
+            ],
+            'responses'   => [
+                '201' => $this->response('Created', '#/components/schemas/Alert'),
+                '400' => $this->response('Bad Request', '#/components/schemas/Error'),
+                '401' => $this->response('Unauthorized', '#/components/schemas/Error'),
+                '409' => $this->response('Conflict', '#/components/schemas/Error'),
+                '500' => $this->response('Server Error', '#/components/schemas/Error'),
+            ],
+        ];
+    }
+
+    private function buildGetSingle(): array
+    {
+        return [
+            'summary'     => 'Get alert',
+            'description' => 'Retrieves an alert by its UUID.',
+            'operationId' => 'getAlert',
+            'tags'        => ['Alerts'],
+            'responses'   => [
+                '200' => $this->response('OK', '#/components/schemas/Alert'),
+                '401' => $this->response('Unauthorized', '#/components/schemas/Error'),
+                '404' => $this->response('Not Found', '#/components/schemas/Error'),
+                '500' => $this->response('Server Error', '#/components/schemas/Error'),
+            ],
+        ];
+    }
+
+    private function buildPatchSingle(): array
+    {
+        return [
+            'summary'     => 'Update alert',
+            'description' => 'Partially update an alert. Supports JSON Merge Patch.',
+            'operationId' => 'updateAlert',
+            'tags'        => ['Alerts'],
+            'requestBody' => [
+                'required' => true,
+                'content'  => [
+                    'application/merge-patch+json' => [
+                        'schema' => [
+                            '$ref' => '#/components/schemas/AlertUpdateRequest',
+                        ],
+                    ],
+                ],
+            ],
+            'responses'   => [
+                '204' => ['description' => 'No Content'],
+                '400' => $this->response('Bad Request', '#/components/schemas/Error'),
+                '401' => $this->response('Unauthorized', '#/components/schemas/Error'),
+                '404' => $this->response('Not Found', '#/components/schemas/Error'),
+                '409' => $this->response('Conflict', '#/components/schemas/Error'),
+                '500' => $this->response('Server Error', '#/components/schemas/Error'),
+            ],
+        ];
+    }
+
+    private function buildDeleteSingle(): array
+    {
+        return [
+            'summary'     => 'Delete alert',
+            'description' => 'Removes an alert from the system.',
+            'operationId' => 'deleteAlert',
+            'tags'        => ['Alerts'],
+            'responses'   => [
+                '204' => ['description' => 'No Content'],
+                '401' => $this->response('Unauthorized', '#/components/schemas/Error'),
+                '404' => $this->response('Not Found', '#/components/schemas/Error'),
+                '500' => $this->response('Server Error', '#/components/schemas/Error'),
+            ],
+        ];
+    }
+
+    private function commonQueryParams(): array
+    {
+        return [
+            ['$ref' => '#/components/parameters/PageLimit'],
+            ['$ref' => '#/components/parameters/PageOffset'],
+            [
+                'name'        => 'severity',
+                'in'          => 'query',
+                'required'    => false,
+                'description' => 'Filter by severity (INFO, LOW, MEDIUM, HIGH, CRITICAL).',
+                'schema'      => [
+                    'type' => 'string',
+                    'enum' => ['INFO', 'LOW', 'MEDIUM', 'HIGH', 'CRITICAL'],
+                ],
+            ],
+            [
+                'name'        => 'status',
+                'in'          => 'query',
+                'required'    => false,
+                'description' => 'Filter by status (OPEN, ACKNOWLEDGED, RESOLVED, SUPPRESSED).',
+                'schema'      => [
+                    'type' => 'string',
+                    'enum' => ['OPEN', 'ACKNOWLEDGED', 'RESOLVED', 'SUPPRESSED'],
+                ],
+            ],
+        ];
+    }
+
+    private function response(string $description, string $schemaRef): array
+    {
+        return [
+            'description' => $description,
+            'content'     => [
+                'application/json' => [
+                    'schema' => [
+                        '$ref' => $schemaRef,
+                    ],
+                ],
+            ],
+        ];
+    }
+
+    private function persistToFile(string $yaml): void
+    {
+        $dir = dirname(self::OUTPUT_FILENAME);
+
+        if (!is_dir($dir) && !mkdir($dir, 0775, true) && !is_dir($dir)) {
+            throw new \RuntimeException(sprintf('Failed to create directory: %s', $dir));
+        }
+
+        if (false === file_put_contents(self::OUTPUT_FILENAME, $yaml)) {
+            throw new \RuntimeException(sprintf('Unable to write spec to %s', self::OUTPUT_FILENAME));
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Optional CLI runner so the file can be executed directly.
+// ---------------------------------------------------------------------------
+if (PHP_SAPI === 'cli' && basename(__FILE__) === basename($_SERVER['argv'][0] ?? '')) {
+    (function (): void {
+        $generator = new AlertsPathSpecGenerator();
+        $cmd       = $_SERVER['argv'][1] ?? 'generate';
+
+        try {
+            match ($cmd) {
+                'clean'    => $generator->clean(),
+                'generate' => $generator->generate(),
+                default    => throw new \InvalidArgumentException('Unknown command: ' . $cmd),
+            };
+
+            fwrite(STDERR, sprintf("✔︎ %s command completed successfully.\n", $cmd));
+        } catch (\Throwable $e) {
+            fwrite(STDERR, sprintf("✘ %s\n", $e->getMessage()));
+            exit(1);
+        }
+    })();
+}
+```

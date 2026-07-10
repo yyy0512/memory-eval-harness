@@ -1,0 +1,339 @@
+{
+  "specification": {
+    "unique_id": "php_system_security_hard_028",
+    "name": "ProdSecure Orchestrator",
+    "description": "ProdSecure Orchestrator is an enterprise-grade, PHP-based system-security productivity suite designed around the MVVM pattern to streamline DevSecOps workflows. The application unifies alerting, performance metrics, backup & recovery, deployment automation, load balancing, system monitoring, security scanning, and log aggregation into a single, operator-friendly command center. While typical security dashboards concentrate solely on threat visibility, ProdSecure Orchestrator boosts productivity by embedding drag-and-drop run-books, smart scheduling, and context-aware remediation wizards directly into the view layer so that SecOps teams can transform insights into actions in seconds rather than hours.\n\nBuilt for large, distributed environments, the solution leverages Service Mesh principles to treat every security or monitoring micro-service as a first-class, discoverable resource. The ViewModel surfaces real-time data streams (Observer Pattern) that drive adaptive UI widgets: interactive topology maps, backlog kanban boards, and SLA heatmaps. Meanwhile, behind the scenes, a Chain of Responsibility routes every event\u2014whether an intrusion detection alert, a failed backup, or a sudden CPU spike\u2014through a customizable pipeline of Strategy Pattern handlers that decide, throttle, and escalate. Command Pattern objects encapsulate remediation steps, enabling safe rollback, audit trails, and one-click automation directly from the productivity-focused dashboard.",
+    "domain": "system_security",
+    "complexity": "hard",
+    "language": "php",
+    "architecture": "mvvm",
+    "theme": "productivity",
+    "target_file_count": 68,
+    "target_token_count": 320309,
+    "features": [
+      "alerting",
+      "performance_metrics",
+      "backup_recovery",
+      "deployment_automation",
+      "load_balancing",
+      "system_monitoring",
+      "security_scanning",
+      "log_aggregation"
+    ],
+    "architecture_patterns": [
+      "Chain_of_Responsibility",
+      "Command_Pattern",
+      "Observer_Pattern",
+      "Service_Mesh",
+      "Strategy_Pattern"
+    ],
+    "dependencies": [
+      "PHP 8.2+",
+      "Symfony 6 (HTTP-Kernel, Console, Messenger)",
+      "Laminas-MVVM (community package providing formal MVVM helpers)",
+      "ReactPHP (non-blocking event loop for real-time streams)",
+      "RoadRunner or Swoole (high-performance PHP application server, load balancing)",
+      "OpenTelemetry-PHP (distributed tracing & metrics collection)",
+      "Prometheus-PHP client (performance_metrics)",
+      "Monolog 3 (log aggregation)",
+      "Elasticsearch PHP Client (centralized logs & search)",
+      "Flysystem v3 (backup_recovery storage abstraction)",
+      "Ansible Runner SDK (deployment_automation via Command Pattern wrappers)",
+      "OWASP Dependency-Check CLI via PHP wrappers (security_scanning)",
+      "Kubernetes PHP client (service mesh interactions & rollout orchestration)",
+      "Redis (Observer pub/sub channels for live UI updates)",
+      "JWT-auth (secure API gateway)",
+      "Composer (autoload & package management)"
+    ],
+    "seed": 968330
+  },
+  "generated_timestamp": 1754355805.717141,
+  "phase_1_complete": true,
+  "uniqueness_factors": {
+    "domain": "system_security",
+    "complexity": "hard",
+    "architecture": "mvvm",
+    "theme": "productivity",
+    "seed": 968330
+  },
+  "files": [
+    {
+      "path": "ProdSecureOrchestrator/api/v1/openapi.yaml",
+      "type": "source"
+    },
+    {
+      "path": "ProdSecureOrchestrator/api/v1/paths/alerts.yaml",
+      "type": "source"
+    },
+    {
+      "path": "ProdSecureOrchestrator/api/v1/schemas/Alert.yaml",
+      "type": "source"
+    },
+    {
+      "path": "ProdSecureOrchestrator/bin/console",
+      "type": "source"
+    },
+    {
+      "path": "ProdSecureOrchestrator/bin/run-worker.php",
+      "type": "source"
+    },
+    {
+      "path": "ProdSecureOrchestrator/config/services.php",
+      "type": "config"
+    },
+    {
+      "path": "ProdSecureOrchestrator/config/routes.php",
+      "type": "config"
+    },
+    {
+      "path": "ProdSecureOrchestrator/config/event_pipeline.php",
+      "type": "config"
+    },
+    {
+      "path": "ProdSecureOrchestrator/config/database.php",
+      "type": "config"
+    },
+    {
+      "path": "ProdSecureOrchestrator/docs/01_introduction.md",
+      "type": "documentation"
+    },
+    {
+      "path": "ProdSecureOrchestrator/docs/02_installation.md",
+      "type": "documentation"
+    },
+    {
+      "path": "ProdSecureOrchestrator/docs/03_architecture.md",
+      "type": "documentation"
+    },
+    {
+      "path": "ProdSecureOrchestrator/docs/04_runbook_guide.md",
+      "type": "documentation"
+    },
+    {
+      "path": "ProdSecureOrchestrator/docs/05_agent_setup.md",
+      "type": "documentation"
+    },
+    {
+      "path": "ProdSecureOrchestrator/public/index.php",
+      "type": "source"
+    },
+    {
+      "path": "ProdSecureOrchestrator/public/.htaccess",
+      "type": "source"
+    },
+    {
+      "path": "ProdSecureOrchestrator/src/Application/Command/Remediation/BlockIpCommand.php",
+      "type": "source"
+    },
+    {
+      "path": "ProdSecureOrchestrator/src/Application/Command/Remediation/RollbackDeploymentCommand.php",
+      "type": "source"
+    },
+    {
+      "path": "ProdSecureOrchestrator/src/Application/Command/Remediation/RestartServiceCommand.php",
+      "type": "source"
+    },
+    {
+      "path": "ProdSecureOrchestrator/src/Application/Command/CommandInterface.php",
+      "type": "source"
+    },
+    {
+      "path": "ProdSecureOrchestrator/src/Application/Command/CommandHandlerInterface.php",
+      "type": "source"
+    },
+    {
+      "path": "ProdSecureOrchestrator/src/Application/CommandHandler/BlockIpHandler.php",
+      "type": "source"
+    },
+    {
+      "path": "ProdSecureOrchestrator/src/Application/CommandHandler/RollbackDeploymentHandler.php",
+      "type": "source"
+    },
+    {
+      "path": "ProdSecureOrchestrator/src/Application/CommandBus.php",
+      "type": "source"
+    },
+    {
+      "path": "ProdSecureOrchestrator/src/Domain/Event/System/CpuSpikeDetectedEvent.php",
+      "type": "source"
+    },
+    {
+      "path": "ProdSecureOrchestrator/src/Domain/Event/Security/IntrusionDetectedEvent.php",
+      "type": "source"
+    },
+    {
+      "path": "ProdSecureOrchestrator/src/Domain/Event/Backup/BackupFailedEvent.php",
+      "type": "source"
+    },
+    {
+      "path": "ProdSecureOrchestrator/src/Domain/Event/DomainEventInterface.php",
+      "type": "source"
+    },
+    {
+      "path": "ProdSecureOrchestrator/src/Domain/EventProcessing/Handlers/Strategy/HandlerStrategyInterface.php",
+      "type": "source"
+    },
+    {
+      "path": "ProdSecureOrchestrator/src/Domain/EventProcessing/Handlers/Strategy/LogOnlyStrategy.php",
+      "type": "source"
+    },
+    {
+      "path": "ProdSecureOrchestrator/src/Domain/EventProcessing/Handlers/Strategy/AlertAndLogStrategy.php",
+      "type": "source"
+    },
+    {
+      "path": "ProdSecureOrchestrator/src/Domain/EventProcessing/Handlers/Strategy/AutoRemediateStrategy.php",
+      "type": "test"
+    },
+    {
+      "path": "ProdSecureOrchestrator/src/Domain/EventProcessing/Handlers/DeduplicationHandler.php",
+      "type": "source"
+    },
+    {
+      "path": "ProdSecureOrchestrator/src/Domain/EventProcessing/Handlers/ThrottlingHandler.php",
+      "type": "source"
+    },
+    {
+      "path": "ProdSecureOrchestrator/src/Domain/EventProcessing/Handlers/RoutingHandler.php",
+      "type": "source"
+    },
+    {
+      "path": "ProdSecureOrchestrator/src/Domain/EventProcessing/Handlers/NotificationHandler.php",
+      "type": "source"
+    },
+    {
+      "path": "ProdSecureOrchestrator/src/Domain/EventProcessing/EventPipeline.php",
+      "type": "source"
+    },
+    {
+      "path": "ProdSecureOrchestrator/src/Domain/EventProcessing/HandlerInterface.php",
+      "type": "source"
+    },
+    {
+      "path": "ProdSecureOrchestrator/src/Domain/Model/Alert.php",
+      "type": "source"
+    },
+    {
+      "path": "ProdSecureOrchestrator/src/Domain/Model/AuditLog.php",
+      "type": "source"
+    },
+    {
+      "path": "ProdSecureOrchestrator/src/Domain/Model/MonitoredResource.php",
+      "type": "source"
+    },
+    {
+      "path": "ProdSecureOrchestrator/src/Domain/Model/Runbook.php",
+      "type": "source"
+    },
+    {
+      "path": "ProdSecureOrchestrator/src/Domain/ServiceMesh/ServiceDiscoveryInterface.php",
+      "type": "source"
+    },
+    {
+      "path": "ProdSecureOrchestrator/src/Domain/ServiceMesh/ServiceNode.php",
+      "type": "source"
+    },
+    {
+      "path": "ProdSecureOrchestrator/src/Domain/ServiceMesh/ServiceRegistry.php",
+      "type": "source"
+    },
+    {
+      "path": "ProdSecureOrchestrator/src/Infrastructure/Persistence/Doctrine/MonitoredResourceRepository.php",
+      "type": "documentation"
+    },
+    {
+      "path": "ProdSecureOrchestrator/src/Infrastructure/ServiceMesh/ConsulServiceDiscovery.php",
+      "type": "source"
+    },
+    {
+      "path": "ProdSecureOrchestrator/src/Infrastructure/Notifier/SlackNotifier.php",
+      "type": "source"
+    },
+    {
+      "path": "ProdSecureOrchestrator/src/Presentation/Controller/DashboardController.php",
+      "type": "source"
+    },
+    {
+      "path": "ProdSecureOrchestrator/src/Presentation/Controller/AlertsController.php",
+      "type": "source"
+    },
+    {
+      "path": "ProdSecureOrchestrator/src/Presentation/Controller/RunbookController.php",
+      "type": "source"
+    },
+    {
+      "path": "ProdSecureOrchestrator/src/Presentation/ViewModel/DashboardViewModel.php",
+      "type": "source"
+    },
+    {
+      "path": "ProdSecureOrchestrator/src/Presentation/ViewModel/TopologyMapViewModel.php",
+      "type": "source"
+    },
+    {
+      "path": "ProdSecureOrchestrator/src/Presentation/WebSocket/UpdateObserver.php",
+      "type": "source"
+    },
+    {
+      "path": "ProdSecureOrchestrator/src/Kernel.php",
+      "type": "source"
+    },
+    {
+      "path": "ProdSecureOrchestrator/tests/Unit/Domain/EventProcessing/EventPipelineTest.php",
+      "type": "test"
+    },
+    {
+      "path": "ProdSecureOrchestrator/tests/Unit/Domain/EventProcessing/Handlers/ThrottlingHandlerTest.php",
+      "type": "test"
+    },
+    {
+      "path": "ProdSecureOrchestrator/tests/Unit/Application/Command/BlockIpCommandTest.php",
+      "type": "test"
+    },
+    {
+      "path": "ProdSecureOrchestrator/tests/Integration/Presentation/Controller/AlertsControllerTest.php",
+      "type": "test"
+    },
+    {
+      "path": "ProdSecureOrchestrator/tests/Integration/ServiceMesh/ServiceRegistryTest.php",
+      "type": "test"
+    },
+    {
+      "path": "ProdSecureOrchestrator/tests/Fixtures/EventFixtures.php",
+      "type": "test"
+    },
+    {
+      "path": "ProdSecureOrchestrator/tests/Fixtures/ServiceNodeFixtures.php",
+      "type": "test"
+    },
+    {
+      "path": "ProdSecureOrchestrator/tests/bootstrap.php",
+      "type": "test"
+    },
+    {
+      "path": "ProdSecureOrchestrator/.env.example",
+      "type": "config"
+    },
+    {
+      "path": "ProdSecureOrchestrator/.gitignore",
+      "type": "source"
+    },
+    {
+      "path": "ProdSecureOrchestrator/composer.json",
+      "type": "source"
+    },
+    {
+      "path": "ProdSecureOrchestrator/LICENSE",
+      "type": "source"
+    },
+    {
+      "path": "ProdSecureOrchestrator/phpunit.xml",
+      "type": "source"
+    }
+  ],
+  "generated_stats": {
+    "files_count": 68,
+    "lines_count": 14743,
+    "generation_time": 2397.796082019806,
+    "timestamp": 1754375391.4253252
+  }
+}

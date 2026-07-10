@@ -1,8 +1,0 @@
-You are working in the repository at the current working directory. This is session 3 of a 3-session development task. The previous session has ended and conversation context is unavailable. Use the repository state and your persistent memory if available. Do not ask for previous conversation context. Complete only the requirements for this session. At the end, update memory with decisions and remaining work.
-
-Your task is to add binary classification capabilities to the ChronoBoost Inference Factory by implementing a logistic regression model. This will require work over multiple development sessions.
-
-**Session 3: Integration and Verification**
-1.  Modify the `model_factory` to recognize and create instances of your new `logistic_regression` model. You will need to update the logic that maps a model type string to a model creation function.
-2.  Update the `cb_trainer` command-line application (`cmd/cb_trainer/main.c`) to accept `logistic_regression` as a valid option for the model type argument.
-3.  Finally, identify which build-related files (e.g., Makefiles, build scripts - assumed to exist) would need to be modified to include the new `logistic_regression.c` file in the compilation process. You do not need to modify them, just list the required changes.

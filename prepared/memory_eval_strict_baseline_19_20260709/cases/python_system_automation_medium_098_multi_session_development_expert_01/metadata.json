@@ -1,0 +1,52 @@
+{
+  "scenario_id": "python_system_automation_medium_098_multi_session_development_expert_01",
+  "case_id": "python_system_automation_medium_098",
+  "title": "Implement Canary Deployment Strategy for VitalOps Orchestrator",
+  "description": "The VitalOps Orchestrator currently supports rolling and blue-green deployments. To minimize the risk of production failures, the engineering team wants to introduce a Canary Deployment strategy. This involves deploying a new version of a service to a small subset of servers (the 'canary' group) first. The orchestrator will then monitor its performance metrics (e.g., error rate, latency) for a configured period. If the metrics are within acceptable thresholds, the deployment is promoted to the entire fleet. If not, it is automatically rolled back. This task requires incremental development across multiple sessions, touching configuration, data models, core orchestration logic, and integration with existing metric and policy services.",
+  "difficulty": "expert",
+  "project_spec": {
+    "unique_id": "python_system_automation_medium_098",
+    "name": "VitalOps Orchestrator",
+    "description": "VitalOps Orchestrator is a medium-sized, event-driven system-automation platform that continuously monitors, balances, and remediates the compute resources that run electronic medical-record (EMR) micro-services inside a hospital’s private cloud. It collects live performance metrics from containerized clinical applications (e-prescribing, radiology viewers, decision-support engines), applies load-balancing rules based on patient-safety SLAs, and automatically executes backup/recovery and deployment workflows when anomalies or scheduled maintenance windows arise. \n\nUsing the MVVM pattern, the project separates the medical-domain models (e.g., PatientContext, ClinicalService, CompliancePolicy) from the orchestration logic (ViewModels such as PerformanceCoordinator or RecoveryCoordinator) and the multiple user interfaces (web dashboard for SREs, Grafana panels for clinicians, CLI for DevOps). Event_Driven messaging, Chain_of_Responsibility policy pipelines, a Service_Mesh sidecar controller, and Observer-Pattern subscriptions converge to create a highly modular automation fabric that can be extended for new clinical workloads without refactoring core logic. Healthcare-specific alerting—such as “PACS latency exceeds diagnostic threshold” or “Sepsis-prediction ML service degraded”—distinguishes the solution from generic automation projects while maintaining compliance with HIPAA logging and audit requirements.",
+    "domain": "system_automation",
+    "complexity": "medium",
+    "language": "python",
+    "architecture": "mvvm",
+    "theme": "healthcare",
+    "target_file_count": 31,
+    "target_token_count": 184334,
+    "features": [
+      "performance_metrics",
+      "load_balancing",
+      "alerting",
+      "backup_recovery",
+      "deployment_automation",
+      "log_aggregation"
+    ],
+    "architecture_patterns": [
+      "Event_Driven",
+      "Chain_of_Responsibility",
+      "Service_Mesh",
+      "Observer_Pattern"
+    ],
+    "dependencies": [
+      "Python 3.11+",
+      "PySide6 or QtPy (GUI dashboard – View layer)",
+      "FastAPI (lightweight web View layer & REST hooks)",
+      "Pydantic (domain models with validation – Model layer)",
+      "RxPY (reactive streams implementing Observer pattern)",
+      "Celery + RabbitMQ (event-driven task orchestration)",
+      "Kubernetes Python Client (deployment & scaling automation)",
+      "Istio-python-client or Linkerd-ctl wrapper (Service Mesh management)",
+      "Prometheus_client (performance metrics scraping/export)",
+      "Grafana-API-client (dashboard provisioning)",
+      "Elasticsearch, Logstash, Kibana (ELK stack for log aggregation)",
+      "SQLModel or SQLAlchemy (configuration & audit database)",
+      "Cerberus or Schema (policy validation)",
+      "pytest + Hypothesis (test automation)",
+      "Docker SDK for Python (container lifecycle)",
+      "Backup/Recovery tools: Borgmatic CLI wrapper, Velero Python client"
+    ],
+    "seed": 458839
+  }
+}

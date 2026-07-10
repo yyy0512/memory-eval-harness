@@ -1,0 +1,292 @@
+{
+  "specification": {
+    "unique_id": "java_api_rest_hard_042",
+    "name": "VitalPulse CloudCare API",
+    "description": "VitalPulse CloudCare API is a serverless, micro-orchestrated REST/GraphQL platform that enables hospitals, ambulatory clinics, and tele-health vendors to exchange real-time vital-sign streams, medication events, and clinician orders. Built around AWS Lambda, DynamoDB, and API Gateway, the solution exposes HIPAA-grade endpoints for patient triage, continuous monitoring, and decision-support integrations. All data operations are split into command (write) and query (read) functions, allowing isolated scaling and reduced latency for high-frequency telemetry ingestions while maintaining strong consistency for critical medication orders.\n\nThe project addresses complex healthcare requirements such as audit-grade error handling, fine-grained access controls (SMART on FHIR / OAuth 2.0), request validation against FHIR JSON schema, and versioned APIs (v1, v2 beta) so EHR vendors can migrate safely. Rate limiting protects the platform from abusive or faulty device traffic, while response caching and cursor-based pagination ensure sub-second retrieval of longitudinal patient data. Integrated CloudWatch dashboards, distributed tracing, and custom health metrics enable proactive monitoring; a GraphQL schema overlays REST resources for clinicians who prefer consolidated data graphs over multiple REST calls.",
+    "domain": "api_rest",
+    "complexity": "hard",
+    "language": "java",
+    "architecture": "serverless",
+    "theme": "healthcare",
+    "target_file_count": 56,
+    "target_token_count": 476501,
+    "features": [
+      "error_handling",
+      "rate_limiting",
+      "api_documentation",
+      "pagination",
+      "request_validation",
+      "versioning",
+      "authentication",
+      "graphql_schema",
+      "monitoring",
+      "response_caching"
+    ],
+    "architecture_patterns": [
+      "Microservices",
+      "Repository_Pattern",
+      "API_Gateway",
+      "Command_Query_Separation",
+      "Service_Layer",
+      "REST_Architecture"
+    ],
+    "dependencies": [
+      "aws-lambda-java-core",
+      "aws-lambda-java-events",
+      "aws-serverless-java-container-springboot3",
+      "spring-boot-starter-webflux",
+      "spring-boot-starter-validation",
+      "spring-boot-starter-security",
+      "springdoc-openapi-ui",
+      "dynamodb-enhanced-client",
+      "graphql-java",
+      "resilience4j-spring-boot3",
+      "bucket4j-spring-boot-starter",
+      "micrometer-registry-cloudwatch2",
+      "jackson-databind",
+      "jjwt-api"
+    ],
+    "seed": 440284
+  },
+  "generated_timestamp": 1754355528.9597929,
+  "phase_1_complete": true,
+  "uniqueness_factors": {
+    "domain": "api_rest",
+    "complexity": "hard",
+    "architecture": "serverless",
+    "theme": "healthcare",
+    "seed": 440284
+  },
+  "files": [
+    {
+      "path": "vitalpulse-cloudcare-api/pom.xml",
+      "type": "source"
+    },
+    {
+      "path": "vitalpulse-cloudcare-api/README.md",
+      "type": "documentation"
+    },
+    {
+      "path": "vitalpulse-cloudcare-api/.gitignore",
+      "type": "source"
+    },
+    {
+      "path": "vitalpulse-cloudcare-api/docs/api/v1/openapi.yaml",
+      "type": "documentation"
+    },
+    {
+      "path": "vitalpulse-cloudcare-api/docs/api/v2.beta/openapi.yaml",
+      "type": "documentation"
+    },
+    {
+      "path": "vitalpulse-cloudcare-api/docs/graphql/schema.graphql",
+      "type": "documentation"
+    },
+    {
+      "path": "vitalpulse-cloudcare-api/docs/architecture.md",
+      "type": "documentation"
+    },
+    {
+      "path": "vitalpulse-cloudcare-api/docs/setup-guide.md",
+      "type": "documentation"
+    },
+    {
+      "path": "vitalpulse-cloudcare-api/docs/security-compliance.md",
+      "type": "documentation"
+    },
+    {
+      "path": "vitalpulse-cloudcare-api/infra/sam-template.yaml",
+      "type": "source"
+    },
+    {
+      "path": "vitalpulse-cloudcare-api/infra/scripts/deploy.sh",
+      "type": "source"
+    },
+    {
+      "path": "vitalpulse-cloudcare-api/common-lib/pom.xml",
+      "type": "source"
+    },
+    {
+      "path": "vitalpulse-cloudcare-api/common-lib/src/main/java/com/vitalpulse/cloudcare/common/model/Patient.java",
+      "type": "source"
+    },
+    {
+      "path": "vitalpulse-cloudcare-api/common-lib/src/main/java/com/vitalpulse/cloudcare/common/model/VitalSign.java",
+      "type": "source"
+    },
+    {
+      "path": "vitalpulse-cloudcare-api/common-lib/src/main/java/com/vitalpulse/cloudcare/common/model/MedicationOrder.java",
+      "type": "source"
+    },
+    {
+      "path": "vitalpulse-cloudcare-api/common-lib/src/main/java/com/vitalpulse/cloudcare/common/repository/DynamoDbRepository.java",
+      "type": "source"
+    },
+    {
+      "path": "vitalpulse-cloudcare-api/common-lib/src/main/java/com/vitalpulse/cloudcare/common/validation/FhirSchemaValidator.java",
+      "type": "source"
+    },
+    {
+      "path": "vitalpulse-cloudcare-api/common-lib/src/main/java/com/vitalpulse/cloudcare/common/exception/ResourceNotFoundException.java",
+      "type": "source"
+    },
+    {
+      "path": "vitalpulse-cloudcare-api/common-lib/src/main/java/com/vitalpulse/cloudcare/common/exception/ValidationException.java",
+      "type": "source"
+    },
+    {
+      "path": "vitalpulse-cloudcare-api/services/auth-authorizer/pom.xml",
+      "type": "source"
+    },
+    {
+      "path": "vitalpulse-cloudcare-api/services/auth-authorizer/src/main/java/com/vitalpulse/cloudcare/authorizer/TokenAuthorizerHandler.java",
+      "type": "source"
+    },
+    {
+      "path": "vitalpulse-cloudcare-api/services/auth-authorizer/src/main/java/com/vitalpulse/cloudcare/authorizer/JwtService.java",
+      "type": "source"
+    },
+    {
+      "path": "vitalpulse-cloudcare-api/services/auth-authorizer/src/test/java/com/vitalpulse/cloudcare/authorizer/TokenAuthorizerHandlerTest.java",
+      "type": "test"
+    },
+    {
+      "path": "vitalpulse-cloudcare-api/services/vital-ingestion-command/pom.xml",
+      "type": "source"
+    },
+    {
+      "path": "vitalpulse-cloudcare-api/services/vital-ingestion-command/src/main/java/com/vitalpulse/cloudcare/ingestion/handler/VitalStreamHandler.java",
+      "type": "source"
+    },
+    {
+      "path": "vitalpulse-cloudcare-api/services/vital-ingestion-command/src/main/java/com/vitalpulse/cloudcare/ingestion/service/VitalIngestionService.java",
+      "type": "source"
+    },
+    {
+      "path": "vitalpulse-cloudcare-api/services/vital-ingestion-command/src/main/java/com/vitalpulse/cloudcare/ingestion/repository/VitalSignRepository.java",
+      "type": "source"
+    },
+    {
+      "path": "vitalpulse-cloudcare-api/services/vital-ingestion-command/src/test/java/com/vitalpulse/cloudcare/ingestion/VitalStreamHandlerTest.java",
+      "type": "test"
+    },
+    {
+      "path": "vitalpulse-cloudcare-api/services/order-management-command/pom.xml",
+      "type": "source"
+    },
+    {
+      "path": "vitalpulse-cloudcare-api/services/order-management-command/src/main/java/com/vitalpulse/cloudcare/orders/handler/CreateOrderHandler.java",
+      "type": "source"
+    },
+    {
+      "path": "vitalpulse-cloudcare-api/services/order-management-command/src/main/java/com/vitalpulse/cloudcare/orders/service/OrderService.java",
+      "type": "source"
+    },
+    {
+      "path": "vitalpulse-cloudcare-api/services/order-management-command/src/main/java/com/vitalpulse/cloudcare/orders/repository/OrderRepository.java",
+      "type": "source"
+    },
+    {
+      "path": "vitalpulse-cloudcare-api/services/order-management-command/src/test/java/com/vitalpulse/cloudcare/orders/CreateOrderHandlerTest.java",
+      "type": "test"
+    },
+    {
+      "path": "vitalpulse-cloudcare-api/services/patient-data-query/pom.xml",
+      "type": "source"
+    },
+    {
+      "path": "vitalpulse-cloudcare-api/services/patient-data-query/src/main/java/com/vitalpulse/cloudcare/query/handler/GetPatientDataHandler.java",
+      "type": "source"
+    },
+    {
+      "path": "vitalpulse-cloudcare-api/services/patient-data-query/src/main/java/com/vitalpulse/cloudcare/query/handler/GetPatientVitalsHandler.java",
+      "type": "source"
+    },
+    {
+      "path": "vitalpulse-cloudcare-api/services/patient-data-query/src/main/java/com/vitalpulse/cloudcare/query/service/PatientQueryService.java",
+      "type": "source"
+    },
+    {
+      "path": "vitalpulse-cloudcare-api/services/patient-data-query/src/main/java/com/vitalpulse/cloudcare/query/repository/PatientDataRepository.java",
+      "type": "source"
+    },
+    {
+      "path": "vitalpulse-cloudcare-api/services/patient-data-query/src/main/java/com/vitalpulse/cloudcare/query/model/PaginatedResponse.java",
+      "type": "source"
+    },
+    {
+      "path": "vitalpulse-cloudcare-api/services/patient-data-query/src/test/java/com/vitalpulse/cloudcare/query/GetPatientDataHandlerTest.java",
+      "type": "test"
+    },
+    {
+      "path": "vitalpulse-cloudcare-api/services/graphql-api/pom.xml",
+      "type": "source"
+    },
+    {
+      "path": "vitalpulse-cloudcare-api/services/graphql-api/src/main/java/com/vitalpulse/cloudcare/graphql/handler/GraphQLHandler.java",
+      "type": "source"
+    },
+    {
+      "path": "vitalpulse-cloudcare-api/services/graphql-api/src/main/java/com/vitalpulse/cloudcare/graphql/provider/GraphQLProvider.java",
+      "type": "source"
+    },
+    {
+      "path": "vitalpulse-cloudcare-api/services/graphql-api/src/main/java/com/vitalpulse/cloudcare/graphql/resolver/QueryResolver.java",
+      "type": "source"
+    },
+    {
+      "path": "vitalpulse-cloudcare-api/services/graphql-api/src/test/java/com/vitalpulse/cloudcare/graphql/GraphQLHandlerTest.java",
+      "type": "test"
+    },
+    {
+      "path": "vitalpulse-cloudcare-api/services/graphql-api/src/resources/schema.graphqls",
+      "type": "source"
+    },
+    {
+      "path": "src/utils.java",
+      "type": "source"
+    },
+    {
+      "path": "src/config.java",
+      "type": "config"
+    },
+    {
+      "path": "src/constants.java",
+      "type": "source"
+    },
+    {
+      "path": "tests/test_main.java",
+      "type": "test"
+    },
+    {
+      "path": "tests/test_utils.java",
+      "type": "test"
+    },
+    {
+      "path": "README.md",
+      "type": "documentation"
+    },
+    {
+      "path": "package.json",
+      "type": "config"
+    },
+    {
+      "path": ".gitignore",
+      "type": "source"
+    },
+    {
+      "path": "Dockerfile",
+      "type": "documentation"
+    },
+    {
+      "path": "docs/api.md",
+      "type": "documentation"
+    }
+  ],
+  "generated_stats": {
+    "files_count": 56,
+    "lines_count": 14899,
+    "generation_time": 1954.75736784935,
+    "timestamp": 1754369423.144458
+  }
+}

@@ -1,0 +1,363 @@
+```rust
+//! src/module_20.rs
+//! -----------------------------------------------------------------------------
+//! ChromaticCanvas Control Center – Session & Authentication Core Module
+//! -----------------------------------------------------------------------------
+//! This module provides a stateless, HMAC-signed session token mechanism and an
+//! Axum request extractor (`AuthSession`) that validates incoming requests. All
+//! tokens are signed with a server-side secret and transmitted to clients in a
+//! secure, HTTP-only cookie.
+//!
+//! Highlights
+//! ----------
+//! 1. HMAC-SHA-256 signature, Base64URL payload → JWT-like, but lighter weight.
+//! 2. `SessionManager` encapsulates issue/validate logic, configurable TTL.
+//! 3. `AuthSession` extractor gates protected routes with ergonomic error flows.
+//! 4. Fully async, integrates with Actix or Axum (we default to Axum).
+//!
+//! # Security considerations
+//! * Tokens are time-limited and signed; no plaintext secrets leave the server.
+//! * Cookie flagging: `Secure`, `HttpOnly`, `SameSite=Strict`.
+//! * All fallible paths return opaque errors, avoiding info leaks.
+//!
+//! -----------------------------------------------------------------------------
+//! Dependencies (add to Cargo.toml)
+//! --------------------------------
+//! axum            = { version = "0.7", features = ["macros"] }
+//! tower-cookies   = "0.10"
+//! chrono          = { version = "0.4", default-features = false, features = ["clock"] }
+//! rand            = "0.8"
+//! base64          = "0.21"
+//! hmac            = "0.12"
+//! sha2            = "0.10"
+//! uuid            = { version = "1", features = ["v4", "serde"] }
+//! secrecy         = "0.8"
+//! serde           = { version = "1.0", features = ["derive"] }
+//! serde_json      = "1.0"
+//! thiserror       = "1.0"
+//! async-trait     = "0.1"
+//!
+//! -----------------------------------------------------------------------------
+
+use async_trait::async_trait;
+use axum::{
+    extract::{FromRequestParts, TypedHeader},
+    headers::{Cookie as CookieHeader, HeaderMapExt},
+    http::{header::SET_COOKIE, request::Parts, HeaderMap, StatusCode},
+};
+use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
+use chrono::{DateTime, Duration, Utc};
+use hmac::{Hmac, Mac};
+use rand::{distributions::Alphanumeric, Rng};
+use secrecy::{ExposeSecret, SecretVec};
+use serde::{Deserialize, Serialize};
+use sha2::Sha256;
+use thiserror::Error;
+use tower_cookies::{Cookie, CookieManagerLayer, Cookies};
+use uuid::Uuid;
+
+// -----------------------------------------------------------------------------
+// Types
+// -----------------------------------------------------------------------------
+type HmacSha256 = Hmac<Sha256>;
+
+/// Raw claims stored inside a session token.
+#[derive(Debug, Serialize, Deserialize)]
+struct Claims {
+    /// Unique user identifier (matches database primary key).
+    user_id: Uuid,
+
+    /// Token creation timestamp (`UTC`).
+    issued_at: DateTime<Utc>,
+
+    /// Token absolute expiration timestamp (`UTC`).
+    expires_at: DateTime<Utc>,
+
+    /// A cryptographically-random nonce that prevents replay across keys.
+    nonce: String,
+}
+
+/// A verified, decoded session token returned by [`SessionManager::validate`].
+#[derive(Debug, Clone)]
+pub struct SessionToken {
+    claims: Claims,
+}
+
+impl SessionToken {
+    pub fn user_id(&self) -> Uuid {
+        self.claims.user_id
+    }
+}
+
+/// Public façade that issues and validates session tokens.
+///
+/// In production, instances are generally created during bootstrap and stored
+/// inside application state (e.g. `axum::Router::with_state`).
+#[derive(Clone)]
+pub struct SessionManager {
+    secret: SecretVec<u8>,
+    ttl: Duration,
+    cookie_name: String,
+}
+
+impl SessionManager {
+    /// Build a new manager from a secret byte sequence and TTL (`Duration`).
+    pub fn new<S: Into<Vec<u8>>>(secret: S, ttl: Duration) -> Self {
+        Self {
+            secret: SecretVec::new(secret.into()),
+            ttl,
+            cookie_name: "cc_session".into(),
+        }
+    }
+
+    /// Returns the *default* cookie name used to transport the token.
+    pub fn cookie_name(&self) -> &str {
+        &self.cookie_name
+    }
+
+    /// Issue a new signed session token for the given `user_id`.
+    ///
+    /// The resulting string is ready for injection into a Set-Cookie header.
+    pub fn issue_token(&self, user_id: Uuid) -> String {
+        let now = Utc::now();
+        let claims = Claims {
+            user_id,
+            issued_at: now,
+            expires_at: now + self.ttl,
+            nonce: Self::generate_nonce(),
+        };
+
+        let payload =
+            serde_json::to_vec(&claims).expect("serialization of claims must succeed");
+        let payload_b64 = URL_SAFE_NO_PAD.encode(payload);
+
+        let signature = self.sign(&payload_b64);
+        format!("{payload_b64}.{signature}")
+    }
+
+    /// Validate an incoming token string, returning the decoded [`SessionToken`]
+    /// on success or an error on any policy violation.
+    pub fn validate_token(&self, token: &str) -> Result<SessionToken, SessionError> {
+        let (payload_b64, signature) =
+            token.split_once('.').ok_or(SessionError::Malformed)?;
+
+        // Constant-time verification of the signature
+        self.verify_signature(payload_b64, signature)?;
+
+        let payload_raw = URL_SAFE_NO_PAD
+            .decode(payload_b64)
+            .map_err(|_| SessionError::Malformed)?;
+
+        let claims: Claims =
+            serde_json::from_slice(&payload_raw).map_err(|_| SessionError::Malformed)?;
+
+        // Expiry check
+        if Utc::now() > claims.expires_at {
+            return Err(SessionError::Expired);
+        }
+
+        Ok(SessionToken { claims })
+    }
+
+    /// Create a `Set-Cookie` header for the supplied `token`.
+    pub fn build_set_cookie_header(&self, token: &str) -> HeaderMap {
+        let mut headers = HeaderMap::new();
+
+        let mut cookie = Cookie::new(self.cookie_name.clone(), token.to_string());
+        cookie.set_http_only(true);
+        cookie.set_secure(true); // Force HTTPS
+        cookie.set_same_site(tower_cookies::SameSite::Strict);
+        cookie.set_path("/");
+
+        headers.insert(
+            SET_COOKIE,
+            HeaderMap::from_iter([(
+                SET_COOKIE,
+                HeaderValue::from_str(&cookie.to_string()).expect("valid header"),
+            )])
+            .get(SET_COOKIE)
+            .unwrap()
+            .clone(),
+        );
+        headers
+    }
+
+    // -------------------------------------------------------------------------
+    // Internal helpers
+    // -------------------------------------------------------------------------
+    fn sign(&self, payload_b64: &str) -> String {
+        let mut mac = HmacSha256::new_from_slice(self.secret.expose_secret())
+            .expect("HMAC can take key of any size");
+        mac.update(payload_b64.as_bytes());
+        let result = mac.finalize().into_bytes();
+        URL_SAFE_NO_PAD.encode(result)
+    }
+
+    fn verify_signature(
+        &self,
+        payload_b64: &str,
+        signature_b64: &str,
+    ) -> Result<(), SessionError> {
+        let sig = URL_SAFE_NO_PAD
+            .decode(signature_b64.as_bytes())
+            .map_err(|_| SessionError::Malformed)?;
+
+        let mut mac = HmacSha256::new_from_slice(self.secret.expose_secret())
+            .expect("HMAC can take key of any size");
+        mac.update(payload_b64.as_bytes());
+
+        mac.verify_slice(&sig)
+            .map_err(|_| SessionError::InvalidSignature)
+    }
+
+    fn generate_nonce() -> String {
+        rand::thread_rng()
+            .sample_iter(&Alphanumeric)
+            .take(24)
+            .map(char::from)
+            .collect()
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Axum extractor
+// -----------------------------------------------------------------------------
+
+/// Request extractor that validates the incoming `cc_session` cookie and yields
+/// a strongly-typed [`SessionToken`]. Routes that include this extractor will
+/// automatically reject unauthenticated requests with `401 UNAUTHORIZED`.
+///
+/// Usage:
+/// ```ignore
+/// async fn protected_route(AuthSession(token): AuthSession) -> impl IntoResponse {
+///     format!("hello, user {}", token.user_id())
+/// }
+/// ```
+#[derive(Debug)]
+pub struct AuthSession(pub SessionToken);
+
+#[async_trait]
+impl<S> FromRequestParts<S> for AuthSession
+where
+    S: Send + Sync,
+{
+    type Rejection = (StatusCode, String);
+
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &S,
+    ) -> Result<Self, Self::Rejection> {
+        // SessionManager is expected to live in the Axum shared state.
+        let manager = parts
+            .extensions
+            .get::<SessionManager>()
+            .cloned()
+            .ok_or_else(|| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Session manager missing".into(),
+                )
+            })?;
+
+        // Parse cookies from the request headers
+        let cookies = if let Ok(TypedHeader(cookie_header)) =
+            CookieHeader::from_headers(&parts.headers)
+        {
+            cookie_header
+        } else {
+            return Err((
+                StatusCode::UNAUTHORIZED,
+                "Missing authentication cookie".into(),
+            ));
+        };
+
+        let token_str = cookies
+            .get(manager.cookie_name())
+            .ok_or_else(|| {
+                (
+                    StatusCode::UNAUTHORIZED,
+                    "Missing authentication cookie".into(),
+                )
+            })?
+            .to_string();
+
+        let token = manager
+            .validate_token(&token_str)
+            .map_err(|e| (StatusCode::UNAUTHORIZED, e.to_string()))?;
+
+        Ok(AuthSession(token))
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Error types
+// -----------------------------------------------------------------------------
+
+/// Errors returned by the [`SessionManager`].
+#[derive(Debug, Error)]
+pub enum SessionError {
+    /// Token string does not follow the expected `<payload>.<sig>` format.
+    #[error("malformed token")]
+    Malformed,
+
+    /// The HMAC signature is invalid (tampered or wrong secret).
+    #[error("invalid signature")]
+    InvalidSignature,
+
+    /// Token has expired.
+    #[error("token expired")]
+    Expired,
+}
+
+// -----------------------------------------------------------------------------
+// Tests
+// -----------------------------------------------------------------------------
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use uuid::Uuid;
+
+    fn test_manager() -> SessionManager {
+        SessionManager::new("super-secret-key".repeat(2), Duration::minutes(10))
+    }
+
+    #[test]
+    fn issue_and_validate_roundtrip() {
+        let mgr = test_manager();
+        let user_id = Uuid::new_v4();
+        let token_str = mgr.issue_token(user_id);
+
+        let token = mgr.validate_token(&token_str).expect("should validate");
+        assert_eq!(token.user_id(), user_id);
+    }
+
+    #[test]
+    fn detects_tampering() {
+        let mgr = test_manager();
+        let token_str = mgr.issue_token(Uuid::new_v4());
+
+        // Flip a bit in the payload (tamper)
+        let mut bytes = token_str.into_bytes();
+        let idx = bytes
+            .iter()
+            .position(|b| *b == b'.')
+            .expect("token format") - 1;
+        bytes[idx] ^= 0b0000_0001;
+
+        let tampered = String::from_utf8(bytes).unwrap();
+        let err = mgr.validate_token(&tampered).unwrap_err();
+
+        matches!(err, SessionError::InvalidSignature | SessionError::Malformed);
+    }
+
+    #[test]
+    fn expired_token_rejected() {
+        let mut mgr = test_manager();
+        mgr.ttl = Duration::seconds(-1); // force expiry
+        let token_str = mgr.issue_token(Uuid::new_v4());
+
+        let err = mgr.validate_token(&token_str).unwrap_err();
+        assert!(matches!(err, SessionError::Expired));
+    }
+}
+```

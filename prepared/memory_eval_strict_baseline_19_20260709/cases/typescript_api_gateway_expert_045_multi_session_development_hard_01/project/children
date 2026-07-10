@@ -1,0 +1,258 @@
+```typescript
+// File: children
+// NOTE: In a real code-base this file would probably live at
+//       src/application/use-cases/fetch-children.ts
+//       The single-file output here contains *all* relevant types
+//       and collaborators to remain self-contained.
+
+/* eslint-disable max-classes-per-file */
+
+import axios, { AxiosInstance, AxiosResponse } from 'axios';
+import { createHash } from 'crypto';
+import { Logger } from 'pino';
+import * as yup from 'yup';
+import { Redis } from 'ioredis';
+
+// ---------------------------------------------------------------------------
+// Data-transfer Objects
+// ---------------------------------------------------------------------------
+
+/**
+ * DTO representing a single child item (e.g., reply or nested comment)
+ */
+export interface ChildDTO {
+  id: string;
+  parentId: string;
+  authorId: string;
+  authorHandle: string;
+  body: string;
+  createdAt: string; // ISO-8601
+  updatedAt?: string; // ISO-8601
+  likesCount: number;
+  repliesCount: number;
+  viewerHasLiked: boolean;
+}
+
+/**
+ * Paginated response with cursor based pagination
+ */
+export interface Paginated<T> {
+  data: T[];
+  nextCursor?: string;
+}
+
+/**
+ * Request parameters for fetching children
+ */
+export interface FetchChildrenRequest {
+  parentId: string;
+  cursor?: string;
+  limit?: number;
+  viewerId?: string; // used for policy checks (e.g., blocks)
+}
+
+// ---------------------------------------------------------------------------
+// Validation schema
+// ---------------------------------------------------------------------------
+
+const fetchChildrenSchema: yup.ObjectSchema<FetchChildrenRequest> = yup
+  .object({
+    parentId: yup.string().required().min(10),
+    cursor: yup.string().optional(),
+    limit: yup.number().optional().min(1).max(100).default(20),
+    viewerId: yup.string().optional()
+  })
+  .required();
+
+// ---------------------------------------------------------------------------
+// Repository and Cache abstractions
+// ---------------------------------------------------------------------------
+
+/**
+ * Data source abstraction. Concrete implementation may call another
+ * micro-service (timeline, comments, etc.) or fetch from a DB.
+ */
+export interface ChildrenRepository {
+  fetchChildren(
+    params: Required<Pick<FetchChildrenRequest, 'parentId'>> &
+      Omit<FetchChildrenRequest, 'parentId'>
+  ): Promise<Paginated<ChildDTO>>;
+}
+
+/**
+ * Cache provider abstraction – wrapper around Redis, Memcached, etc.
+ */
+export interface CacheProvider {
+  get<T>(key: string): Promise<T | null>;
+  set<T>(key: string, value: T, ttlSeconds: number): Promise<void>;
+  del(key: string): Promise<void>;
+}
+
+// ---------------------------------------------------------------------------
+// Infrastructure implementations – would typically live elsewhere
+// ---------------------------------------------------------------------------
+
+/**
+ * Remote repository that delegates to the comments microservice
+ * via HTTP REST.
+ */
+export class HttpChildrenRepository implements ChildrenRepository {
+  private readonly http: AxiosInstance;
+
+  constructor(baseURL: string, private readonly logger: Logger) {
+    this.http = axios.create({
+      baseURL,
+      timeout: 3_000
+    });
+  }
+
+  async fetchChildren(
+    params: FetchChildrenRequest
+  ): Promise<Paginated<ChildDTO>> {
+    try {
+      const response: AxiosResponse<Paginated<ChildDTO>> =
+        await this.http.get('/children', {
+          params
+        });
+
+      return response.data;
+    } catch (err) {
+      this.logger.error(
+        { err, params },
+        'Failed to fetch children from comments-service'
+      );
+      throw new Error('UNAVAILABLE_CHILDREN_SERVICE');
+    }
+  }
+}
+
+/**
+ * Simple Redis cache provider implementation
+ */
+export class RedisCacheProvider implements CacheProvider {
+  private readonly redis: Redis;
+
+  constructor(redis: Redis, private readonly logger: Logger) {
+    this.redis = redis;
+  }
+
+  async get<T>(key: string): Promise<T | null> {
+    try {
+      const cached = await this.redis.get(key);
+      return cached ? (JSON.parse(cached) as T) : null;
+    } catch (err) {
+      this.logger.warn({ err, key }, 'Redis GET failed');
+      return null;
+    }
+  }
+
+  async set<T>(key: string, value: T, ttlSeconds: number): Promise<void> {
+    try {
+      await this.redis.set(key, JSON.stringify(value), 'EX', ttlSeconds);
+    } catch (err) {
+      this.logger.warn({ err, key }, 'Redis SET failed');
+    }
+  }
+
+  async del(key: string): Promise<void> {
+    try {
+      await this.redis.del(key);
+    } catch (err) {
+      this.logger.warn({ err, key }, 'Redis DEL failed');
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Use-case
+// ---------------------------------------------------------------------------
+
+/**
+ * Use case for fetching direct children of a parent entity (e.g., replies
+ * of a post). Responsible for validation, caching and orchestration.
+ */
+export class FetchChildrenUseCase {
+  private static readonly CACHE_TTL_SECONDS = 30; // short-lived, volatile
+
+  constructor(
+    private readonly repo: ChildrenRepository,
+    private readonly cache: CacheProvider,
+    private readonly logger: Logger
+  ) {}
+
+  /**
+   * Execute the use-case: validate, look in cache, fetch from repo if miss,
+   * then cache the response.
+   */
+  async execute(
+    rawInput: FetchChildrenRequest
+  ): Promise<Paginated<ChildDTO>> {
+    // 1. Validate
+    const input = await fetchChildrenSchema.validate(rawInput, {
+      abortEarly: false,
+      stripUnknown: true
+    });
+
+    // 2. Generate deterministic cache key
+    const cacheKey = FetchChildrenUseCase.buildCacheKey(input);
+
+    // 3. Attempt cache hit
+    const cached = await this.cache.get<Paginated<ChildDTO>>(cacheKey);
+    if (cached) {
+      this.logger.debug({ cacheKey }, 'Cache hit for children');
+      return cached;
+    }
+
+    // 4. Fetch from repository
+    const result = await this.repo.fetchChildren(input);
+
+    // 5. Cache the result (fire-and-forget)
+    void this.cache
+      .set(cacheKey, result, FetchChildrenUseCase.CACHE_TTL_SECONDS)
+      .catch(() => {
+        /* handled internally in cache provider */
+      });
+
+    return result;
+  }
+
+  /**
+   * Helper to build a stable cache key based on request params.
+   * Excludes viewer-specific fields to avoid cache poisoning.
+   */
+  private static buildCacheKey(input: FetchChildrenRequest): string {
+    const { parentId, cursor = '', limit = 20 } = input;
+    const raw = JSON.stringify({ parentId, cursor, limit });
+
+    // A short hash keeps the Redis key friendly and small
+    const hash = createHash('md5').update(raw).digest('hex');
+    return `children:${hash}`;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Composition root helper (simplified)
+// ---------------------------------------------------------------------------
+
+/**
+ * Factory function wiring together the concrete dependencies.
+ * In a real application this wiring would live in an IoC container
+ * or a module-level provider (e.g., NestJS module).
+ */
+export function buildFetchChildrenUseCase(
+  {
+    commentsServiceUrl,
+    redis,
+    logger
+  }: {
+    commentsServiceUrl: string;
+    redis: Redis;
+    logger: Logger;
+  }
+): FetchChildrenUseCase {
+  const repository = new HttpChildrenRepository(commentsServiceUrl, logger);
+  const cache = new RedisCacheProvider(redis, logger);
+
+  return new FetchChildrenUseCase(repository, cache, logger);
+}
+```

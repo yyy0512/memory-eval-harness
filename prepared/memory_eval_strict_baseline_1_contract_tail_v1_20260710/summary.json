@@ -1,0 +1,154 @@
+{
+  "schema_version": "memory_eval_prepared_v2_immutable",
+  "prepared_dataset_sha256": "ace018e70bc58dd25b8978e93142b86167470ad1dec7e45cbb8b9898de77e449",
+  "case_count": 1,
+  "category": "extended_development_projects",
+  "cases": [
+    "c_data_streaming_hard_013_multi_session_development_easy_01"
+  ],
+  "contract_overlay": "/home/yyy/projects/LoCoBench-Agent/.claude/worktrees/memory-eval-harness/configs/memory_contracts_v4.json",
+  "memory_contract_count": 5,
+  "dataset_stats": {
+    "difficulty_distribution": {
+      "easy": 1
+    },
+    "task_type_distribution": {
+      "multi_session_development": 1
+    },
+    "programming_language_distribution": {
+      "c": 1
+    },
+    "contract_stats": {
+      "contracts_per_case_distribution": {
+        "5": 1
+      },
+      "contract_id_distribution": {
+        "experience_tomato_safe_path_lesson": 1,
+        "feedback_tomato_review_note": 1,
+        "project_tomato_bridge_token": 1,
+        "reference_tomato_canon_pointer": 1,
+        "user_tomato_preference_marker": 1
+      },
+      "contract_category_distribution": {
+        "synthetic_memory_experience_lesson": 1,
+        "synthetic_memory_feedback_continuity": 1,
+        "synthetic_memory_project_convention": 1,
+        "synthetic_memory_reference_pointer": 1,
+        "synthetic_memory_user_preference": 1
+      },
+      "contract_memory_type_distribution": {
+        "experience": 1,
+        "feedback": 1,
+        "project": 1,
+        "reference": 1,
+        "user": 1
+      },
+      "workspace_checkable_contracts_per_case_distribution": {
+        "5": 1
+      },
+      "memory_fact_contracts_per_case_distribution": {
+        "5": 1
+      },
+      "case_contracts": [
+        {
+          "scenario_id": "c_data_streaming_hard_013_multi_session_development_easy_01",
+          "case_id": "c_data_streaming_hard_013",
+          "contract_count": 5,
+          "memory_fact_contract_count": 5,
+          "workspace_checkable_contract_count": 5,
+          "contract_ids": [
+            "user_tomato_preference_marker",
+            "feedback_tomato_review_note",
+            "project_tomato_bridge_token",
+            "reference_tomato_canon_pointer",
+            "experience_tomato_safe_path_lesson"
+          ],
+          "memory_fact_contract_ids": [
+            "user_tomato_preference_marker",
+            "feedback_tomato_review_note",
+            "project_tomato_bridge_token",
+            "reference_tomato_canon_pointer",
+            "experience_tomato_safe_path_lesson"
+          ],
+          "workspace_checkable_contract_ids": [
+            "user_tomato_preference_marker",
+            "feedback_tomato_review_note",
+            "project_tomato_bridge_token",
+            "reference_tomato_canon_pointer",
+            "experience_tomato_safe_path_lesson"
+          ],
+          "contract_categories": [
+            "synthetic_memory_experience_lesson",
+            "synthetic_memory_feedback_continuity",
+            "synthetic_memory_project_convention",
+            "synthetic_memory_reference_pointer",
+            "synthetic_memory_user_preference"
+          ],
+          "memory_types": [
+            "experience",
+            "feedback",
+            "project",
+            "reference",
+            "user"
+          ]
+        }
+      ]
+    },
+    "test_availability_stats": {
+      "with_test_like_files": 1
+    },
+    "test_plan_stats": {
+      "configured": 1
+    },
+    "requirement_check_stats": {
+      "checks_per_case_distribution": {
+        "4": 1
+      },
+      "status_distribution": {
+        "configured": 1
+      },
+      "configured_cases": 1,
+      "not_configured_cases": 0,
+      "source_distribution": {
+        "overlay": 4
+      },
+      "strength_distribution": {
+        "explicit": 4
+      },
+      "signal_kind_distribution": {
+        "config_parser": 1,
+        "config_schema": 1,
+        "config_value": 1,
+        "runtime_integration": 1
+      },
+      "rejection_reason_distribution": {},
+      "configured_by_overlay_cases": 1,
+      "configured_by_auto_cases": 0,
+      "case_requirement_checks": [
+        {
+          "scenario_id": "c_data_streaming_hard_013_multi_session_development_easy_01",
+          "case_id": "c_data_streaming_hard_013",
+          "check_count": 4,
+          "status": "configured",
+          "source": "overlay",
+          "reason": null,
+          "check_ids": [
+            "has_heartbeat_interval_config_value",
+            "runtime_config_has_heartbeat_field",
+            "config_parser_reads_heartbeat_interval",
+            "ingestion_service_uses_heartbeat_interval"
+          ],
+          "signal_kinds": [
+            "config_parser",
+            "config_schema",
+            "config_value",
+            "runtime_integration"
+          ],
+          "strengths": [
+            "explicit"
+          ]
+        }
+      ]
+    }
+  }
+}

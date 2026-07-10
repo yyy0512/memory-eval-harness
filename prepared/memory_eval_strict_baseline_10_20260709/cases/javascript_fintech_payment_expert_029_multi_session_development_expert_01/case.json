@@ -1,0 +1,65 @@
+{
+  "scenario_id": "javascript_fintech_payment_expert_029_multi_session_development_expert_01",
+  "case_id": "javascript_fintech_payment_expert_029",
+  "category": "extended_development_projects",
+  "original_task_category": "multi_session_development",
+  "project_source": "cases/javascript_fintech_payment_expert_029_multi_session_development_expert_01/project",
+  "project_name": "PayPalsphere",
+  "language": "javascript",
+  "complexity": "expert",
+  "session_count": 5,
+  "turns": [
+    {
+      "session": 1,
+      "file": "turns/session_1.jsonl",
+      "turn_count": 2
+    },
+    {
+      "session": 2,
+      "file": "turns/session_2.jsonl",
+      "turn_count": 1
+    },
+    {
+      "session": 3,
+      "file": "turns/session_3.jsonl",
+      "turn_count": 1
+    },
+    {
+      "session": 4,
+      "file": "turns/session_4.jsonl",
+      "turn_count": 1
+    },
+    {
+      "session": 5,
+      "file": "turns/session_5.jsonl",
+      "turn_count": 1
+    }
+  ],
+  "prompts_for_review": [
+    {
+      "session": 1,
+      "file": "prompts/session_1.txt"
+    },
+    {
+      "session": 2,
+      "file": "prompts/session_2.txt"
+    },
+    {
+      "session": 3,
+      "file": "prompts/session_3.txt"
+    },
+    {
+      "session": 4,
+      "file": "prompts/session_4.txt"
+    },
+    {
+      "session": 5,
+      "file": "prompts/session_5.txt"
+    }
+  ],
+  "hashes": {
+    "scenario_json_sha256": "f0ff361b32d76d016f5b8b7b2aa9256848fd9c4ba4f4e3b85f28e0b75921cc5a",
+    "project_tree_sha256": "2bb15ad8105f13c5a9bb71aa783abd292a3bb0c08b6d50551bf11112c556959b",
+    "prepared_case_sha256": "8c6a81b6353990160cc17005b14f8bb931be0f031ee8ff89fe5ba0e7ce1b9d37"
+  }
+}

@@ -1,0 +1,275 @@
+"""
+VitalPulse CloudCare API — GraphQL Schema Definition (SDL)
+
+This schema provides a consolidated view over the Cloud-Care REST micro-services.
+It supports:
+• Fine-grained SMART on FHIR / OAuth 2.0 authorization via @auth
+• HIPAA-grade auditTrail via @audit
+• Cursor-based pagination compliant with Relay spec
+• Real-time updates through AWS AppSync / GraphQL Subscriptions
+• Command / Query segregation (mutations write, queries read)
+
+NOTE:
+The backing implementation enforces additional server-side validation
+against FHIR resources and performs request throttling via API-Gateway
+usage plans. See “/docs/security.md” for details.
+"""
+
+# ---------------------------------------------------------------------------
+# Scalars
+# ---------------------------------------------------------------------------
+scalar DateTime     # ISO-8601 Time-Z
+scalar JSON         # Generic JSON payload (FHIR resources, etc.)
+scalar UUID         # RFC 4122 identifier
+
+# ---------------------------------------------------------------------------
+# Directives
+# ---------------------------------------------------------------------------
+"""
+@auth enforces role-based access control.
+Example:  field @auth(requires: [CLINICIAN, ADMIN])
+"""
+directive @auth(
+  requires: [Role!]!
+) on OBJECT | FIELD_DEFINITION
+
+"""
+@audit triggers audit-trail logging for PHI mutations & queries.
+"""
+directive @audit(
+  event: AuditEvent!
+) on FIELD_DEFINITION
+
+"""
+@rateLimit guards against abusive traffic (burst & sustained).
+"""
+directive @rateLimit(
+  max: Int!,          # requests
+  window: Int!        # seconds
+) on FIELD_DEFINITION
+
+# ---------------------------------------------------------------------------
+# Enums
+# ---------------------------------------------------------------------------
+enum Role {
+  PATIENT
+  CLINICIAN
+  ADMIN
+  SYSTEM
+}
+
+enum AuditEvent {
+  READ
+  WRITE
+  DELETE
+}
+
+enum VitalSignType {
+  HEART_RATE
+  BLOOD_PRESSURE_SYSTOLIC
+  BLOOD_PRESSURE_DIASTOLIC
+  RESPIRATORY_RATE
+  OXYGEN_SATURATION
+  TEMPERATURE
+}
+
+enum MedicationOrderStatus {
+  ACTIVE
+  COMPLETED
+  ON_HOLD
+  CANCELLED
+  ENTERED_IN_ERROR
+}
+
+# ---------------------------------------------------------------------------
+# Pagination (Relay-compatible)
+# ---------------------------------------------------------------------------
+type PageInfo {
+  hasNextPage: Boolean!
+  endCursor: String
+}
+
+interface Edge {
+  cursor: String!
+}
+
+type VitalSignEdge implements Edge {
+  cursor: String!
+  node: VitalSign!
+}
+
+type MedicationOrderEdge implements Edge {
+  cursor: String!
+  node: MedicationOrder!
+}
+
+type VitalSignConnection {
+  edges: [VitalSignEdge!]!
+  pageInfo: PageInfo!
+  totalCount: Int!
+}
+
+type MedicationOrderConnection {
+  edges: [MedicationOrderEdge!]!
+  pageInfo: PageInfo!
+  totalCount: Int!
+}
+
+input PaginationInput {
+  first: Int = 20
+  after: String
+}
+
+# ---------------------------------------------------------------------------
+# Core Domain Types
+# ---------------------------------------------------------------------------
+type Patient @auth(requires: [CLINICIAN, ADMIN, PATIENT]) {
+  id: UUID!
+  mrn: String!                     # Medical Record Number
+  firstName: String!
+  lastName: String!
+  birthDate: DateTime
+  gender: String
+  # Relationships
+  vitalSigns(
+    filter: VitalSignFilter
+    page: PaginationInput
+  ): VitalSignConnection! @rateLimit(max: 30, window: 60)
+  medicationOrders(
+    status: MedicationOrderStatus
+    page: PaginationInput
+  ): MedicationOrderConnection! @rateLimit(max: 30, window: 60)
+}
+
+type VitalSign @auth(requires: [CLINICIAN, ADMIN, PATIENT, SYSTEM]) {
+  id: UUID!
+  type: VitalSignType!
+  value: Float!
+  unit: String!
+  recordedAt: DateTime!
+  deviceId: String
+  annotations: JSON
+  patient: Patient!
+}
+
+type MedicationOrder @auth(requires: [CLINICIAN, ADMIN]) {
+  id: UUID!
+  status: MedicationOrderStatus!
+  medicationCode: String!          # RxNorm / SNOMED CT code
+  dosageInstruction: String
+  startDate: DateTime
+  endDate: DateTime
+  lastModified: DateTime!
+  prescriberId: UUID!
+  patient: Patient!
+  notes: [String!]
+}
+
+# ---------------------------------------------------------------------------
+# Input Objects
+# ---------------------------------------------------------------------------
+input VitalSignFilter {
+  types: [VitalSignType!]
+  from: DateTime
+  to: DateTime
+}
+
+input VitalSignInput {
+  patientId: UUID!
+  type: VitalSignType!
+  value: Float!
+  unit: String!
+  deviceId: String
+  annotations: JSON
+  recordedAt: DateTime
+}
+
+input MedicationOrderInput {
+  patientId: UUID!
+  medicationCode: String!
+  dosageInstruction: String
+  startDate: DateTime
+  endDate: DateTime
+  notes: [String!]
+}
+
+# ---------------------------------------------------------------------------
+# Query Root — Read-only operations
+# ---------------------------------------------------------------------------
+type Query {
+  # -------------------- Patient --------------------
+  patient(id: UUID!): Patient
+    @auth(requires: [CLINICIAN, ADMIN, PATIENT])
+    @audit(event: READ)
+
+  patients(
+    page: PaginationInput
+  ): [Patient!]!
+    @auth(requires: [CLINICIAN, ADMIN])
+    @rateLimit(max: 60, window: 60)
+    @audit(event: READ)
+
+  # -------------------- Vital Signs --------------------
+  vitalSigns(
+    patientId: UUID!
+    filter: VitalSignFilter
+    page: PaginationInput
+  ): VitalSignConnection!
+    @auth(requires: [CLINICIAN, ADMIN, PATIENT])
+    @rateLimit(max: 60, window: 60)
+    @audit(event: READ)
+
+  # -------------------- Medication Orders --------------------
+  medicationOrders(
+    patientId: UUID!
+    status: MedicationOrderStatus
+    page: PaginationInput
+  ): MedicationOrderConnection!
+    @auth(requires: [CLINICIAN, ADMIN])
+    @rateLimit(max: 60, window: 60)
+    @audit(event: READ)
+}
+
+# ---------------------------------------------------------------------------
+# Mutation Root — Write/Update operations
+# ---------------------------------------------------------------------------
+type Mutation {
+  # -------------------- Vital Signs --------------------
+  recordVitalSign(input: VitalSignInput!): VitalSign!
+    @auth(requires: [SYSTEM, CLINICIAN])
+    @audit(event: WRITE)
+
+  # -------------------- Medication Orders --------------------
+  createMedicationOrder(input: MedicationOrderInput!): MedicationOrder!
+    @auth(requires: [CLINICIAN])
+    @audit(event: WRITE)
+
+  updateMedicationOrderStatus(
+    id: UUID!
+    status: MedicationOrderStatus!
+    notes: String
+  ): MedicationOrder!
+    @auth(requires: [CLINICIAN, ADMIN])
+    @audit(event: WRITE)
+}
+
+# ---------------------------------------------------------------------------
+# Subscription Root — Real-time streaming
+# ---------------------------------------------------------------------------
+type Subscription {
+  vitalSignRecorded(patientId: UUID!): VitalSign!
+    @auth(requires: [CLINICIAN, ADMIN, PATIENT])
+    @rateLimit(max: 10, window: 60)
+}
+
+# ---------------------------------------------------------------------------
+# Federation / Extensibility (for future versioned APIs)
+# ---------------------------------------------------------------------------
+extend type Patient {
+  """
+  Future v2 field exposing FHIR R4 resources
+  """
+  fhirBundle: JSON @auth(requires: [CLINICIAN, ADMIN])
+}
+
+# End of schema.graphqls

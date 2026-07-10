@@ -1,0 +1,546 @@
+```yaml
+openapi: 3.0.3
+info:
+  title: PayPalsphere Social Payments API
+  version: "1.0.0"
+  description: |
+    The PayPalsphere API powers the socially-driven payment experience.  
+    Every financial activity—from creating circles, to splitting expenses, to settling balances—is surfaced through rich, event-stream endpoints that handle KYC, risk, compliance, and settlement orchestration behind the scenes.
+
+    Core architectural assumptions:
+      • CQRS + Event Sourcing (async write/read segregation)  
+      • Saga pattern to coordinate multi-step payments  
+      • Security-by-Design with field-level encryption & RBAC  
+      • All responses are enveloped for auditability and traceability.
+
+    Unless otherwise noted, all endpoints require an OAuth2 Bearer token with the `payments` scope.
+contact:
+  name: Developer Relations
+  url: https://developer.paypalsphere.com
+  email: devrel@paypalsphere.com
+license:
+  name: MIT
+  url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: https://api.paypalsphere.com/v1
+    description: Production
+  - url: https://sandbox.paypalsphere.com/v1
+    description: Sandbox
+
+tags:
+  - name: Circles
+    description: Operations for managing social payment circles
+  - name: Payments
+    description: Create and manage payments within circles
+  - name: KYC
+    description: Know-Your-Customer verification flows
+  - name: Risk
+    description: Real-time risk scoring
+  - name: Compliance
+    description: Regulatory audit & reporting
+  - name: Settlement
+    description: Final money movement and ledger settlement
+
+paths:
+  /circles:
+    get:
+      tags: [Circles]
+      summary: List circles for the authenticated user
+      operationId: listCircles
+      security: [BearerAuth: []]
+      responses:
+        "200":
+          description: Array of circle summaries
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CircleListResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      tags: [Circles]
+      summary: Create a new circle
+      operationId: createCircle
+      security: [BearerAuth: []]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CircleCreateRequest"
+      responses:
+        "201":
+          description: Circle created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CircleResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /circles/{circleId}:
+    parameters:
+      - $ref: "#/components/parameters/CircleId"
+    get:
+      tags: [Circles]
+      summary: Retrieve a single circle
+      operationId: getCircle
+      security: [BearerAuth: []]
+      responses:
+        "200":
+          description: Circle details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CircleResponse"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /circles/{circleId}/payments:
+    parameters:
+      - $ref: "#/components/parameters/CircleId"
+    get:
+      tags: [Payments]
+      summary: List payments in a circle
+      operationId: listCirclePayments
+      security: [BearerAuth: []]
+      responses:
+        "200":
+          description: Array of payments for the circle
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaymentListResponse"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    post:
+      tags: [Payments]
+      summary: Create a payment in the circle
+      operationId: createCirclePayment
+      security: [BearerAuth: []]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PaymentCreateRequest"
+      responses:
+        "202":
+          description: Payment accepted for processing (asynchronous saga started)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaymentResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "402":
+          $ref: "#/components/responses/PaymentRequired"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /kyc/verify:
+    post:
+      tags: [KYC]
+      summary: Submit user documents for KYC verification
+      operationId: submitKyc
+      security: [BearerAuth: []]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: "#/components/schemas/KycVerificationRequest"
+      responses:
+        "202":
+          description: KYC verification started
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KycVerificationResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
+  /risk/score:
+    post:
+      tags: [Risk]
+      summary: Obtain a real-time risk score for a payment intent
+      operationId: getRiskScore
+      security: [BearerAuth: []]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RiskAssessmentRequest"
+      responses:
+        "200":
+          description: Risk score generated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RiskAssessmentResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
+  /settlements/{settlementId}:
+    parameters:
+      - name: settlementId
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Unique identifier for the settlement batch
+    get:
+      tags: [Settlement]
+      summary: Retrieve settlement details
+      operationId: getSettlement
+      security: [BearerAuth: []]
+      responses:
+        "200":
+          description: Settlement info
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SettlementResponse"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /compliance/reports:
+    get:
+      tags: [Compliance]
+      summary: Download a compliance audit report
+      operationId: getComplianceReport
+      security: [BearerAuth: []]
+      parameters:
+        - name: from
+          in: query
+          description: ISO date for report start range
+          required: true
+          schema:
+            type: string
+            format: date
+        - name: to
+          in: query
+          description: ISO date for report end range
+          required: true
+          schema:
+            type: string
+            format: date
+      responses:
+        "200":
+          description: A CSV file containing compliance data
+          content:
+            text/csv:
+              schema:
+                type: string
+                format: binary
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        OAuth2 access token issued by PayPalsphere Identity Service.
+        Scopes determine RBAC permissions on resources.
+  parameters:
+    CircleId:
+      name: circleId
+      in: path
+      required: true
+      schema:
+        type: string
+      description: Unique identifier of the circle
+  responses:
+    Unauthorized:
+      description: Missing or invalid authentication
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    BadRequest:
+      description: Malformed request or validation error
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    Forbidden:
+      description: Authenticated but not authorized
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    PaymentRequired:
+      description: Funding source not sufficient or credit failed
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+  schemas:
+    Envelope:
+      type: object
+      required: [meta, data]
+      properties:
+        meta:
+          type: object
+          description: Request/response metadata useful for audit trails
+          properties:
+            correlationId:
+              type: string
+            timestamp:
+              type: string
+              format: date-time
+        data:
+          description: Payload container (varies per endpoint)
+
+    CircleSummary:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        memberCount:
+          type: integer
+        createdAt:
+          type: string
+          format: date-time
+
+    Circle:
+      allOf:
+        - $ref: "#/components/schemas/CircleSummary"
+        - type: object
+          properties:
+            description:
+              type: string
+            members:
+              type: array
+              items:
+                $ref: "#/components/schemas/User"
+
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+        displayName:
+          type: string
+        avatarUrl:
+          type: string
+          format: uri
+
+    Payment:
+      type: object
+      properties:
+        id:
+          type: string
+        circleId:
+          type: string
+        amount:
+          type: number
+          format: decimal
+        currency:
+          type: string
+        status:
+          type: string
+          enum: [PENDING, COMPLETED, FAILED, CANCELED]
+        createdAt:
+          type: string
+          format: date-time
+
+    Settlement:
+      type: object
+      properties:
+        id:
+          type: string
+        status:
+          type: string
+          enum: [SCHEDULED, PROCESSING, SETTLED, FAILED]
+        totalAmount:
+          type: number
+          format: decimal
+        currency:
+          type: string
+        initiatedAt:
+          type: string
+          format: date-time
+        completedAt:
+          type: string
+          format: date-time
+          nullable: true
+
+    KycVerification:
+      type: object
+      properties:
+        requestId:
+          type: string
+        status:
+          type: string
+          enum: [PENDING, VERIFIED, REJECTED]
+        updatedAt:
+          type: string
+          format: date-time
+
+    RiskScore:
+      type: object
+      properties:
+        score:
+          type: integer
+          minimum: 0
+          maximum: 100
+        riskLevel:
+          type: string
+          enum: [LOW, MEDIUM, HIGH, CRITICAL]
+
+    ComplianceReport:
+      type: object
+      properties:
+        fileUrl:
+          type: string
+          format: uri
+        expiresAt:
+          type: string
+          format: date-time
+
+    ErrorResponse:
+      type: object
+      properties:
+        errorCode:
+          type: string
+        message:
+          type: string
+        details:
+          type: array
+          items:
+            type: string
+
+    #
+    # ---- Request/Response Envelopes ----
+    #
+    CircleListResponse:
+      allOf:
+        - $ref: "#/components/schemas/Envelope"
+        - type: object
+          properties:
+            data:
+              type: array
+              items:
+                $ref: "#/components/schemas/CircleSummary"
+
+    CircleResponse:
+      allOf:
+        - $ref: "#/components/schemas/Envelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/Circle"
+
+    CircleCreateRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        memberIds:
+          type: array
+          items:
+            type: string
+
+    PaymentListResponse:
+      allOf:
+        - $ref: "#/components/schemas/Envelope"
+        - type: object
+          properties:
+            data:
+              type: array
+              items:
+                $ref: "#/components/schemas/Payment"
+
+    PaymentCreateRequest:
+      type: object
+      required: [amount, currency, recipients]
+      properties:
+        amount:
+          type: number
+          format: decimal
+          minimum: 0.01
+        currency:
+          type: string
+        description:
+          type: string
+        recipients:
+          type: array
+          description: IDs of users who will share the expense
+          items:
+            type: string
+
+    PaymentResponse:
+      allOf:
+        - $ref: "#/components/schemas/Envelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/Payment"
+
+    KycVerificationRequest:
+      type: object
+      required: [documentFront, documentBack, selfie]
+      properties:
+        documentFront:
+          type: string
+          format: binary
+        documentBack:
+          type: string
+          format: binary
+        selfie:
+          type: string
+          format: binary
+
+    KycVerificationResponse:
+      allOf:
+        - $ref: "#/components/schemas/Envelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/KycVerification"
+
+    RiskAssessmentRequest:
+      type: object
+      required: [paymentId]
+      properties:
+        paymentId:
+          type: string
+
+    RiskAssessmentResponse:
+      allOf:
+        - $ref: "#/components/schemas/Envelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/RiskScore"
+
+    SettlementResponse:
+      allOf:
+        - $ref: "#/components/schemas/Envelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/Settlement"
+```

@@ -1,0 +1,360 @@
+```rust
+//! src/module_34.rs
+//!
+//! ChromaticCanvas Control Center – Session Authentication Middleware.
+//!
+//! This module wires together cookie-backed JWT sessions, CSRF protection,
+//! and a repository abstraction that can be backed by any database layer
+//! (Diesel, SeaORM, etc.).  It exposes a `SessionAuth` middleware for
+//! Actix-Web and a small helper service for issuing / refreshing tokens.
+//!
+//! NOTE: In the real project this file would live in the `middleware`
+//! crate; kept here (module_34) to satisfy the challenge constraints.
+
+#![allow(clippy::needless_pass_by_value)]
+
+use actix_web::{
+    cookie::{Cookie, SameSite},
+    dev::{forward_ready, Service, ServiceRequest, ServiceResponse, Transform},
+    error::ResponseError,
+    http::{header, StatusCode},
+    web::{Data, Payload},
+    Error, FromRequest, HttpMessage, HttpRequest, HttpResponse,
+};
+use chrono::{Duration, TimeZone, Utc};
+use futures_util::future::{LocalBoxFuture, Ready};
+use jsonwebtoken::{decode, encode, Algorithm, DecodingKey, EncodingKey, Header, Validation};
+use serde::{Deserialize, Serialize};
+use std::{
+    future::{ready, Ready as StdReady},
+    pin::Pin,
+    rc::Rc,
+    sync::Arc,
+    task::{Context, Poll},
+};
+use thiserror::Error;
+use uuid::Uuid;
+
+/// ---------------------------------------------------------------------------
+/// Domain Layer
+/// ---------------------------------------------------------------------------
+
+/// A domain representation of the (minimal) user information we store in the JWT.
+/// Larger payloads should be fetched from the database once the user id is known.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UserClaims {
+    sub: Uuid,         // Subject (user id)
+    exp: i64,          // Expiration timestamp
+    iat: i64,          // Issued at timestamp
+    csrf: String,      // Anti-CSRF token that must match the X-CSRF header
+}
+
+/// Utility struct returned by `AuthService::issue_token`.
+#[derive(Debug, Clone)]
+pub struct SessionToken {
+    pub jwt: String,
+    pub cookie: Cookie<'static>,
+    pub csrf: String,
+}
+
+/// Repository abstraction that can be backed by any database layer.
+pub trait UserRepository: Send + Sync + 'static {
+    /// Load a user id from storage and validate the account is still active.
+    fn validate_user(&self, id: Uuid) -> StdReady<Result<(), AuthError>>;
+}
+
+/// ---------------------------------------------------------------------------
+/// Error Handling
+/// ---------------------------------------------------------------------------
+
+#[derive(Debug, Error)]
+pub enum AuthError {
+    #[error("unauthorised")]
+    Unauthorised,
+    #[error("token expired")]
+    Expired,
+    #[error("csrf token mismatch")]
+    Csrf,
+    #[error("invalid token")]
+    Invalid,
+    #[error("internal auth error")]
+    Internal,
+}
+
+impl ResponseError for AuthError {
+    fn status_code(&self) -> StatusCode {
+        match self {
+            Self::Unauthorised | Self::Invalid | Self::Csrf => StatusCode::UNAUTHORIZED,
+            Self::Expired => StatusCode::FORBIDDEN,
+            Self::Internal => StatusCode::INTERNAL_SERVER_ERROR,
+        }
+    }
+
+    fn error_response(&self) -> HttpResponse {
+        HttpResponse::build(self.status_code()).json(serde_json::json!({
+            "error": self.to_string()
+        }))
+    }
+}
+
+/// ---------------------------------------------------------------------------
+/// Auth Service – responsible for issuing / verifying JWTs
+/// ---------------------------------------------------------------------------
+
+#[derive(Clone)]
+pub struct AuthService<R: UserRepository> {
+    secret: Arc<[u8]>,
+    expire_in: Duration,
+    repo: Arc<R>,
+}
+
+impl<R: UserRepository> AuthService<R> {
+    pub fn new(secret: impl AsRef<[u8]>, expire_in: Duration, repo: Arc<R>) -> Self {
+        Self {
+            secret: secret.as_ref().into(),
+            expire_in,
+            repo,
+        }
+    }
+
+    /// Issue a brand-new JWT & HTTP-only cookie.
+    pub fn issue_token(&self, user_id: Uuid) -> Result<SessionToken, AuthError> {
+        let now = Utc::now();
+        let csrf_token = Uuid::new_v4().to_string();
+        let claims = UserClaims {
+            sub: user_id,
+            iat: now.timestamp(),
+            exp: (now + self.expire_in).timestamp(),
+            csrf: csrf_token.clone(),
+        };
+
+        let header = Header::new(Algorithm::HS256);
+        let jwt = encode(
+            &header,
+            &claims,
+            &EncodingKey::from_secret(&self.secret),
+        )
+        .map_err(|_| AuthError::Internal)?;
+
+        let cookie = Cookie::build("cc_session", jwt.clone())
+            .http_only(true)
+            .secure(true)
+            .same_site(SameSite::Lax)
+            .path("/")
+            .max_age(time::Duration::seconds(self.expire_in.num_seconds()))
+            .finish();
+
+        Ok(SessionToken { jwt, cookie, csrf: csrf_token })
+    }
+
+    /// Verify the incoming token and additionally check CSRF token.
+    async fn verify_request(
+        &self,
+        req: &ServiceRequest,
+    ) -> Result<UserClaims, AuthError> {
+        let token = fetch_jwt_from_request(req)?;
+        let token_data = decode::<UserClaims>(
+            &token,
+            &DecodingKey::from_secret(&self.secret),
+            &Validation::new(Algorithm::HS256),
+        )
+        .map_err(|e| match e.kind() {
+            jsonwebtoken::errors::ErrorKind::ExpiredSignature => AuthError::Expired,
+            _ => AuthError::Invalid,
+        })?;
+
+        // Validate CSRF
+        let csrf_header = req
+            .headers()
+            .get("x-csrf-token")
+            .and_then(|v| v.to_str().ok())
+            .ok_or(AuthError::Csrf)?;
+
+        if csrf_header != token_data.claims.csrf {
+            return Err(AuthError::Csrf);
+        }
+
+        // Ask repository if user is still valid (not disabled, etc.)
+        self.repo
+            .validate_user(token_data.claims.sub)
+            .await
+            .map_err(|_| AuthError::Unauthorised)?;
+
+        Ok(token_data.claims)
+    }
+}
+
+/// Helper to extract the raw JWT from either the `Authorization` header
+/// (Bearer <token>) or the signed cookie.
+fn fetch_jwt_from_request(req: &ServiceRequest) -> Result<String, AuthError> {
+    // 1. Authorization: Bearer
+    if let Some(auth_header) = req.headers().get(header::AUTHORIZATION) {
+        if let Ok(bearer) = auth_header.to_str() {
+            if bearer.to_ascii_lowercase().starts_with("bearer ") {
+                return Ok(bearer[7..].to_string());
+            }
+        }
+    }
+
+    // 2. Cookie
+    if let Some(cookie) = req.cookie("cc_session") {
+        return Ok(cookie.value().to_string());
+    }
+
+    Err(AuthError::Unauthorised)
+}
+
+/// ---------------------------------------------------------------------------
+/// Actix-Web Middleware
+/// ---------------------------------------------------------------------------
+
+pub struct SessionAuth<R: UserRepository> {
+    service: AuthService<R>,
+}
+
+impl<R: UserRepository> SessionAuth<R> {
+    pub fn new(service: AuthService<R>) -> Self {
+        Self { service }
+    }
+}
+
+impl<S, R> Transform<S, ServiceRequest> for SessionAuth<R>
+where
+    S: Service<ServiceRequest, Response = ServiceResponse> + 'static,
+    S::Error: Into<Error> + 'static,
+    S::Future: 'static,
+    R: UserRepository,
+{
+    type Response = ServiceResponse;
+    type Error = Error;
+    type InitError = ();
+    type Transform = SessionAuthMiddleware<S, R>;
+    type Future = Ready<Result<Self::Transform, Self::InitError>>;
+
+    fn new_transform(&self, svc: S) -> Self::Future {
+        ready(Ok(SessionAuthMiddleware {
+            svc: Rc::new(svc),
+            inner: self.service.clone(),
+        }))
+    }
+}
+
+pub struct SessionAuthMiddleware<S, R: UserRepository> {
+    svc: Rc<S>,
+    inner: AuthService<R>,
+}
+
+impl<S, R> Service<ServiceRequest> for SessionAuthMiddleware<S, R>
+where
+    S: Service<ServiceRequest, Response = ServiceResponse> + 'static,
+    S::Error: Into<Error>,
+    S::Future: 'static,
+    R: UserRepository,
+{
+    type Response = ServiceResponse;
+    type Error = Error;
+    type Future = LocalBoxFuture<'static, Result<Self::Response, Self::Error>>;
+
+    forward_ready!(svc);
+
+    fn call(&self, mut req: ServiceRequest) -> Self::Future {
+        let inner = self.inner.clone();
+        let svc = self.svc.clone();
+
+        Box::pin(async move {
+            match inner.verify_request(&req).await {
+                Ok(claims) => {
+                    // Store claims in request extensions so handlers can access them.
+                    req.extensions_mut().insert(claims);
+                    svc.call(req).await.map_err(Into::into)
+                }
+                Err(err) => Err(err.into()),
+            }
+        })
+    }
+}
+
+/// ---------------------------------------------------------------------------
+/// Request extractor for use inside controllers.
+/// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone)]
+pub struct AuthenticatedUser(pub UserClaims);
+
+impl FromRequest for AuthenticatedUser {
+    type Error = Error;
+    type Future = StdReady<Result<Self, Self::Error>>;
+
+    fn from_request(req: &HttpRequest, _payload: &mut Payload) -> Self::Future {
+        match req.extensions().get::<UserClaims>().cloned() {
+            Some(c) => ready(Ok(Self(c))),
+            None => ready(Err(AuthError::Unauthorised.into())),
+        }
+    }
+}
+
+/// ---------------------------------------------------------------------------
+/// Example Controller
+/// ---------------------------------------------------------------------------
+
+/// A tiny example handler demonstrating the extractor.
+pub async fn who_am_i(user: AuthenticatedUser) -> HttpResponse {
+    HttpResponse::Ok().json(serde_json::json!({
+        "user_id": user.0.sub,
+        "issued_at": user.0.iat,
+        "expires_at": user.0.exp,
+    }))
+}
+
+/// ---------------------------------------------------------------------------
+/// Dummy In-Memory Repository (for tests / development)
+/// ---------------------------------------------------------------------------
+
+pub struct InMemoryRepo;
+
+impl UserRepository for InMemoryRepo {
+    fn validate_user(&self, _id: Uuid) -> StdReady<Result<(), AuthError>> {
+        ready(Ok(())) // Accept every user
+    }
+}
+
+/// ---------------------------------------------------------------------------
+/// Tests
+/// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use actix_web::{dev::Service, test, web, App};
+
+    #[actix_rt::test]
+    async fn test_auth_middleware() {
+        let secret = b"super-secret-key";
+        let repo = Arc::new(InMemoryRepo);
+        let auth_service = AuthService::new(secret, Duration::minutes(10), repo);
+
+        let user_id = Uuid::new_v4();
+        let token = auth_service.issue_token(user_id).unwrap();
+
+        let app = test::init_service(
+            App::new()
+                .app_data(Data::new(auth_service.clone()))
+                .wrap(SessionAuth::new(auth_service.clone()))
+                .route("/me", web::get().to(who_am_i)),
+        )
+        .await;
+
+        let req = test::TestRequest::get()
+            .uri("/me")
+            .insert_header(("x-csrf-token", token.csrf.clone()))
+            .insert_header((
+                header::AUTHORIZATION,
+                format!("Bearer {}", token.jwt.clone()),
+            ))
+            .to_request();
+
+        let resp = app.call(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+    }
+}
+```

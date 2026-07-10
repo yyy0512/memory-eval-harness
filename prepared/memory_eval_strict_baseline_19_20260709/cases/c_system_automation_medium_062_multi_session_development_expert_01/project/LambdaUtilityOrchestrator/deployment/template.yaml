@@ -1,0 +1,341 @@
+```yaml
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+
+Description: >
+  LambdaUtility Orchestrator – fully-serverless automation suite.  Each C-based
+  Lambda delivers a discrete systems-utility capability (alerting, config
+  management, backups, deployments, metrics, etc.) that can be chained together
+  through Command and Chain-of-Responsibility patterns to create ad-hoc
+  automation flows.
+
+###############################################################################
+# Parameters
+###############################################################################
+Parameters:
+
+  ProjectName:
+    Type: String
+    Default: "LambdaUtilityOrchestrator"
+    Description: Logical prefix applied to all named resources.
+
+  LogRetentionInDays:
+    Type: Number
+    Default: 14
+    MinValue: 1
+    MaxValue: 3653   # 10 years
+    Description: Retention period for function log groups.
+
+  VpcSubnetIds:
+    Type: CommaDelimitedList
+    Description: Optional private subnet IDs for VPC-enabled functions.
+    Default: ""
+
+  VpcSecurityGroupIds:
+    Type: CommaDelimitedList
+    Description: Optional security group IDs for VPC-enabled functions.
+    Default: ""
+
+###############################################################################
+# Globals – applied to every AWS::Serverless::Function
+###############################################################################
+Globals:
+  Function:
+    Runtime: provided.al2             # Custom (C) runtime
+    Handler: bootstrap
+    MemorySize: 256
+    Timeout: 30
+    Tracing: Active
+    Architectures: [arm64]
+    VpcConfig:
+      SubnetIds: !Ref VpcSubnetIds
+      SecurityGroupIds: !Ref VpcSecurityGroupIds
+    Environment:
+      Variables:
+        PROJECT_NAME: !Ref ProjectName
+    Tags:
+      project: !Ref ProjectName
+
+###############################################################################
+# Resources
+###############################################################################
+Resources:
+
+  ###########################################################################
+  # IAM – one execution role shared by all Lambdas
+  ###########################################################################
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${ProjectName}-lambda-execution"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: inline-utilities
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              # Parameter Store (configuration secrets)
+              - Sid: SSMParameterAccess
+                Effect: Allow
+                Action:
+                  - ssm:GetParameter
+                  - ssm:GetParameters
+                Resource: !Sub "arn:${AWS::Partition}:ssm:*:*:parameter/${ProjectName}/*"
+              # Publish notifications
+              - Sid: AllowSnsPublish
+                Effect: Allow
+                Action: sns:Publish
+                Resource: "*"
+              # Custom metrics
+              - Sid: AllowPutMetric
+                Effect: Allow
+                Action: cloudwatch:PutMetricData
+                Resource: "*"
+
+  ###########################################################################
+  # Message Bus (SNS) – decouples dispatch from consumer Lambdas
+  ###########################################################################
+  MessageBusTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub "${ProjectName}-message-bus"
+
+  ###########################################################################
+  # HTTP API – public endpoint for ad-hoc orchestration requests
+  ###########################################################################
+  ServerlessHttpApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      StageName: live
+      CorsConfiguration:
+        AllowMethods: [POST, OPTIONS]
+        AllowOrigins: ["*"]
+
+  ###########################################################################
+  # Event Dispatcher – entry point for any orchestration flow
+  ###########################################################################
+  EventDispatcherFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${ProjectName}-event-dispatcher"
+      CodeUri: ../build/event_dispatcher/
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Description: >
+        Routes inbound triggers (HTTP, schedule, SNS) to Command objects and
+        fans them out through an Observer pipeline.
+      Timeout: 15
+      Environment:
+        Variables:
+          DISPATCH_TABLE: "commandMap.json"
+          MESSAGE_BUS_TOPIC_ARN: !Ref MessageBusTopic
+      Events:
+        HttpInvoke:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ServerlessHttpApi
+            Path: /dispatch
+            Method: POST
+        ScheduleInvoke:
+          Type: Schedule
+          Properties:
+            Schedule: rate(15 minutes)
+            Input: '{"trigger":"schedule"}'
+        MessageBusInvoke:
+          Type: SNS
+          Properties:
+            Topic: !Ref MessageBusTopic
+
+  ###########################################################################
+  # Alerting Lambda
+  ###########################################################################
+  AlertingFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${ProjectName}-alerting"
+      CodeUri: ../build/alerting/
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Description: Sends notifications to Slack, e-mail, or SMS gateways.
+      Timeout: 5
+      MemorySize: 128
+      Events:
+        BusSubscription:
+          Type: SNS
+          Properties:
+            Topic: !Ref MessageBusTopic
+
+  ###########################################################################
+  # Configuration Management Lambda
+  ###########################################################################
+  ConfigManagementFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${ProjectName}-config-management"
+      CodeUri: ../build/config_mgmt/
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Description: Pushes updated system configuration (e.g., Nginx conf).
+      Timeout: 30
+      MemorySize: 256
+      Events:
+        BusSubscription:
+          Type: SNS
+          Properties:
+            Topic: !Ref MessageBusTopic
+
+  ###########################################################################
+  # Backup & Recovery Lambda
+  ###########################################################################
+  BackupFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${ProjectName}-backup"
+      CodeUri: ../build/backup/
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Description: Creates snapshots, verifies integrity, and tags recovery points.
+      Timeout: 900
+      MemorySize: 512
+      Events:
+        NightlySchedule:
+          Type: Schedule
+          Properties:
+            Schedule: cron(0 3 * * ? *)     # 03:00 AM UTC
+
+  ###########################################################################
+  # Deployment Automation Lambda
+  ###########################################################################
+  DeploymentAutomationFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${ProjectName}-deployment-automation"
+      CodeUri: ../build/deployment_automation/
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Description: Orchestrates blue/green binary deployments across fleets.
+      Timeout: 300
+      MemorySize: 512
+      Environment:
+        Variables:
+          MAX_PARALLEL_HOSTS: "4"
+      Events:
+        BusSubscription:
+          Type: SNS
+          Properties:
+            Topic: !Ref MessageBusTopic
+
+  ###########################################################################
+  # Performance Metrics Lambda
+  ###########################################################################
+  MetricsHarvestFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${ProjectName}-metrics-harvest"
+      CodeUri: ../build/metrics/
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Description: Collects system metrics and publishes to CloudWatch.
+      Timeout: 30
+      MemorySize: 256
+      Events:
+        FiveMinuteSchedule:
+          Type: Schedule
+          Properties:
+            Schedule: rate(5 minutes)
+
+  ###########################################################################
+  # Custom resource – set CW log-group retention for each Lambda
+  ###########################################################################
+  LogRetentionLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub "${ProjectName}-cw-log-retention"
+      Runtime: python3.10
+      Handler: index.handler
+      Timeout: 60
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Code:
+        ZipFile: |
+          import boto3, cfnresponse, logging, os
+          LOG = logging.getLogger(__name__)
+          LOG.setLevel(logging.INFO)
+          logs = boto3.client('logs')
+
+          def handler(event, context):
+              try:
+                  props = event['ResourceProperties']
+                  group = props['LogGroupName']
+                  retention = int(props['RetentionInDays'])
+                  logs.create_log_group(logGroupName=group)  # idempotent
+                  logs.put_retention_policy(logGroupName=group,
+                                            retentionInDays=retention)
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+              except Exception as exc:
+                  LOG.exception("Retention update failed")
+                  cfnresponse.send(event, context, cfnresponse.FAILED,
+                                   {'Error': str(exc)})
+
+  # Generate a LogRetention custom resource for every Lambda
+  # (Macro/loop not available in CFN, so declare each explicitly)
+  AlertingLogRetention:
+    Type: Custom::LogRetention
+    Properties:
+      ServiceToken: !GetAtt LogRetentionLambda.Arn
+      LogGroupName: !Sub "/aws/lambda/${ProjectName}-alerting"
+      RetentionInDays: !Ref LogRetentionInDays
+
+  ConfigMgmtLogRetention:
+    Type: Custom::LogRetention
+    Properties:
+      ServiceToken: !GetAtt LogRetentionLambda.Arn
+      LogGroupName: !Sub "/aws/lambda/${ProjectName}-config-management"
+      RetentionInDays: !Ref LogRetentionInDays
+
+  BackupLogRetention:
+    Type: Custom::LogRetention
+    Properties:
+      ServiceToken: !GetAtt LogRetentionLambda.Arn
+      LogGroupName: !Sub "/aws/lambda/${ProjectName}-backup"
+      RetentionInDays: !Ref LogRetentionInDays
+
+  DeployLogRetention:
+    Type: Custom::LogRetention
+    Properties:
+      ServiceToken: !GetAtt LogRetentionLambda.Arn
+      LogGroupName: !Sub "/aws/lambda/${ProjectName}-deployment-automation"
+      RetentionInDays: !Ref LogRetentionInDays
+
+  MetricsLogRetention:
+    Type: Custom::LogRetention
+    Properties:
+      ServiceToken: !GetAtt LogRetentionLambda.Arn
+      LogGroupName: !Sub "/aws/lambda/${ProjectName}-metrics-harvest"
+      RetentionInDays: !Ref LogRetentionInDays
+
+  DispatcherLogRetention:
+    Type: Custom::LogRetention
+    Properties:
+      ServiceToken: !GetAtt LogRetentionLambda.Arn
+      LogGroupName: !Sub "/aws/lambda/${ProjectName}-event-dispatcher"
+      RetentionInDays: !Ref LogRetentionInDays
+
+###############################################################################
+# Outputs
+###############################################################################
+Outputs:
+
+  ApiInvokeUrl:
+    Description: Public HTTP endpoint for /dispatch
+    Value: !Sub "https://${ServerlessHttpApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/live/dispatch"
+
+  MessageBusTopicArn:
+    Description: SNS topic used as the central message bus
+    Value: !Ref MessageBusTopic
+
+  DispatcherLambdaArn:
+    Description: ARN of the Event Dispatcher Lambda
+    Value: !GetAtt EventDispatcherFunction.Arn
+```

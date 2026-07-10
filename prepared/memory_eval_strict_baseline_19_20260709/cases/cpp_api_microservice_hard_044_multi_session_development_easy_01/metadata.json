@@ -1,0 +1,54 @@
+{
+  "scenario_id": "cpp_api_microservice_hard_044_multi_session_development_easy_01",
+  "case_id": "cpp_api_microservice_hard_044",
+  "title": "Implement Configurable Default Log Level",
+  "description": "ChronoFlow Nexus is a high-performance C++ microservice. Currently, its logging level is hardcoded, making it difficult to adjust verbosity in different environments (e.g., verbose DEBUG logs in development vs. concise ERROR logs in production) without recompiling. This multi-session task involves introducing a new configuration option to control the application's default log level.",
+  "difficulty": "easy",
+  "project_spec": {
+    "unique_id": "cpp_api_microservice_hard_044",
+    "name": "ChronoFlow Nexus",
+    "description": "ChronoFlow Nexus is a high-performance C++ microservice dedicated to boosting enterprise productivity by orchestrating time-tracking, task analytics, and team workload insights through a single, versioned API layer. The service exposes both REST endpoints and a GraphQL schema so client applications—ranging from calendar widgets to Kanban dashboards—can query exactly the data they need, eliminate over-fetching, and remain extremely responsive on any device. ChronoFlow Nexus embodies a finely grained layered architecture: transport, interface, application, domain, and infrastructure layers keep responsibilities isolated, enabling rapid feature evolution without jeopardizing system stability. \n\nDesigned for hard-scale environments, the project integrates response caching, adaptive rate limiting, and request validation to guarantee consistent latency even under unpredictable traffic bursts. Built-in observability (metrics, structured logging, tracing) and an API gateway façade ensure that operations teams can deploy, monitor, and roll out new versions independently, while developers iterate on productivity-centric features—like real-time focus analytics—behind a robust Command–Query Separation boundary.\n\nWith 67 thoughtfully organized source files and roughly 370 k tokens of code, ChronoFlow Nexus stands apart from typical microservice examples by focusing obsessively on the productivity domain: every endpoint (REST and GraphQL) surfaces KPIs such as time-on-task, context-switch frequency, and flow-state interruptions, empowering organizations to remove friction and maximize deep-work hours.",
+    "domain": "api_microservice",
+    "complexity": "hard",
+    "language": "cpp",
+    "architecture": "layered",
+    "theme": "productivity",
+    "target_file_count": 67,
+    "target_token_count": 367202,
+    "features": [
+      "api_documentation",
+      "response_caching",
+      "graphql_schema",
+      "rate_limiting",
+      "pagination",
+      "request_validation",
+      "rest_endpoints",
+      "monitoring",
+      "versioning",
+      "authentication"
+    ],
+    "architecture_patterns": [
+      "REST_Architecture",
+      "GraphQL_Schema",
+      "Repository_Pattern",
+      "Command_Query_Separation",
+      "API_Gateway",
+      "Microservices"
+    ],
+    "dependencies": [
+      "cpprestsdk (Casablanca) – primary REST transport",
+      "Boost.Beast – low-level HTTP/2 & WebSocket handling",
+      "graphqlcpp (or diy GraphQL parser) – GraphQL Schema execution",
+      "gRPC & Protobuf – internal service-to-service communication",
+      "nlohmann/json – JSON (de)serialization & schema validation",
+      "jwt-cpp – stateless JWT authentication/authorization",
+      "cpp_redis + Redis – response caching and rate-limiter buckets",
+      "libpqxx – PostgreSQL access via Repository pattern",
+      "spdlog + fmt – structured, high-throughput logging",
+      "Prometheus-cpp + OpenTelemetry – metrics, tracing, monitoring",
+      "Boost.Asio – asynchronous I/O backbone",
+      "C++17 STL & filesystem – core language/library features"
+    ],
+    "seed": 73592
+  }
+}

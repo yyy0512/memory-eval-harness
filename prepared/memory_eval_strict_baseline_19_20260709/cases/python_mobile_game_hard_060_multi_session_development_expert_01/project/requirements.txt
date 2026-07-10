@@ -1,0 +1,35 @@
+# QuestSmith: Productivity RPG Forge – Python Dependencies
+# ---------------------------------------------------------
+# Pin versions to ensure build reproducibility across iOS, Android, and desktop
+# targets (via Python-for-Android / Buildozer & Kivy-iOS toolchains).
+
+# Core UI / Rendering ---------------------------------------------------------
+kivy==2.2.1                    # Cross-platform UI framework (OpenGL ES 2.0)
+
+# Domain / Persistence Layer --------------------------------------------------
+peewee==3.16.0                 # Lightweight ORM wrapping SQLite
+pydantic==2.3.0                # Data-model validation for Repository Pattern
+
+# Reactive & Architectural Utilities -----------------------------------------
+rx==3.2.0                      # Observer Pattern – reactive event streams
+injector==0.21.0               # Simple dependency-injection container
+tenacity==8.2.3                # Retry/back-off helpers for flaky mobile APIs
+
+# Platform & Hardware Adapters -----------------------------------------------
+plyer==2.1.0                   # Cross-platform access to notifications, sensors
+geopy==2.4.0                   # Geolocation helpers for location-based quests
+pycryptodome==3.19.0           # Secure local credential / biometric token store
+
+# Networking, Auth & Social ---------------------------------------------------
+requests==2.31.0               # HTTP client for REST back-ends
+requests-oauthlib==1.3.1       # OAuth flows for social-sharing adapters
+
+# Analytics & Crash Reporting -------------------------------------------------
+sentry-sdk==1.35.0             # Crash reporting + real-time analytics
+
+# Scheduling & Background Tasks ----------------------------------------------
+APScheduler==3.10.4            # Local cron-like scheduler for quest triggers
+
+# Misc Utilities --------------------------------------------------------------
+loguru==0.7.0                  # Structured logging with rotation
+packaging==23.2                # Version constraint parsing/helpers

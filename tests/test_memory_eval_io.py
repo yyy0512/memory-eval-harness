@@ -1,4 +1,11 @@
-from locobench.memory_eval.io import read_jsonl, sha256_tree, write_jsonl
+from locobench.memory_eval.io import (
+    read_json,
+    read_jsonl,
+    sha256_tree,
+    snapshot_workspace_delta,
+    tree_file_hashes,
+    write_jsonl,
+)
 from locobench.memory_eval.schema import TokenMetrics
 
 
@@ -46,3 +53,23 @@ def test_sha256_tree_changes_when_file_content_changes(tmp_path):
     second = sha256_tree(root)
 
     assert first != second
+
+
+def test_snapshot_workspace_delta_records_only_current_session_changes(tmp_path):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "kept.txt").write_text("before\n", encoding="utf-8")
+    (workspace / "deleted.txt").write_text("remove\n", encoding="utf-8")
+    before = tree_file_hashes(workspace)
+
+    (workspace / "kept.txt").write_text("after\n", encoding="utf-8")
+    (workspace / "deleted.txt").unlink()
+    (workspace / "new.txt").write_text("new\n", encoding="utf-8")
+    snapshot = tmp_path / "delta"
+    snapshot_workspace_delta(workspace, before, snapshot)
+
+    manifest = read_json(snapshot / "manifest.json")
+    assert manifest["added"] == ["new.txt"]
+    assert manifest["modified"] == ["kept.txt"]
+    assert manifest["deleted"] == ["deleted.txt"]
+    assert (snapshot / "files" / "kept.txt").read_text(encoding="utf-8") == "after\n"

@@ -101,8 +101,13 @@ class SessionRunResult:
     errors: List[Any] = field(default_factory=list)
     token_metrics: Dict[str, Any] = field(default_factory=dict)
     diff: Optional[str] = None
+    workspace_delta: Optional[str] = None
+    environment_root: Optional[str] = None
     memory_snapshot: Optional[str] = None
     memory_diff: Optional[str] = None
+    openviking_snapshot: Optional[str] = None
+    openviking_identity: Optional[Dict[str, Any]] = None
+    memory_settle: Optional[Dict[str, Any]] = None
     files_changed: List[str] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
@@ -120,6 +125,12 @@ class CaseRunResult:
     sessions: List[SessionRunResult]
     final_diff: Optional[str] = None
     final_memory_snapshot: Optional[str] = None
+    final_openviking_snapshot: Optional[str] = None
+    prepared_snapshot: Optional[str] = None
+    prepared_provenance: Optional[str] = None
+    test_result: Optional[Dict[str, Any]] = None
+    memory_backend: Optional[str] = None
+    openviking_identity: Optional[Dict[str, Any]] = None
     errors: List[str] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:

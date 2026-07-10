@@ -1,0 +1,63 @@
+{
+  "scenario_id": "rust_web_dashboard_hard_039_multi_session_development_easy_01",
+  "case_id": "rust_web_dashboard_hard_039",
+  "title": "Implement Configurable Session Timeout",
+  "description": "The ChromaticCanvas Control Center is a web dashboard for managing digital art installations. A recent security audit recommended that the user session timeout, which is currently hardcoded, should be made configurable. This task involves updating the application to read the timeout value from a configuration file, applying it to the session management logic, and adding a test to verify the new behavior. The work will be split across three distinct development sessions.",
+  "difficulty": "easy",
+  "project_spec": {
+    "unique_id": "rust_web_dashboard_hard_039",
+    "name": "ChromaticCanvas Control Center",
+    "description": "ChromaticCanvas Control Center is an advanced, component-driven web dashboard written entirely in Rust that empowers visual artists, design studios, and interactive agencies to orchestrate their creative assets, live project data, and client interactions from a single, secure hub. Every tile, graph, or widget on the dashboard is treated as a self-contained “color swatch” component that can be remixed, themed, or replaced at runtime, reflecting the way a creative professional layers strokes on an actual canvas.    \n\nBuilt for hard-level complexity, the system weaves together a RESTful service layer, an MVC-inspired UI renderer, and a rich palette of middleware components—authentication, payment processing, search, caching, and real-time notifications—each mounted into the dashboard like modular art supplies. The project highlights creative workflows: drag-and-drop file uploads for artwork, AI-driven color-scheme suggestions, time-lapse render replays, and revenue analytics for commissioned pieces, all while enforcing strict data validation, session management, SSL security, and robust error handling. Because every capability is encapsulated as a reusable component, studios can curate bespoke dashboards for different clients (e.g., motion graphics vs. illustration) without touching the core framework.    \n\nThe visual front-end is rendered with Yew and Tailwind-inspired styling, providing a fully responsive layout that feels as fluid on a stylus-driven tablet as on a 5K desktop. A strong logging system, pluggable search index, and email/SMS notification pipeline round out the pro-grade feature set, ensuring ChromaticCanvas scales from a solo creator to a multi-agency enterprise—all while maintaining the elegance and safety guarantees of Rust.",
+    "domain": "web_dashboard",
+    "complexity": "hard",
+    "language": "rust",
+    "architecture": "component_based",
+    "theme": "creative",
+    "target_file_count": 52,
+    "target_token_count": 368160,
+    "features": [
+      "error_handling",
+      "frontend_interface",
+      "session_management",
+      "ssl_security",
+      "responsive_design",
+      "logging_system",
+      "api_endpoints",
+      "caching",
+      "payment_processing",
+      "search_functionality",
+      "email_notifications",
+      "user_authentication",
+      "data_validation",
+      "file_upload",
+      "database_integration"
+    ],
+    "architecture_patterns": [
+      "Component_Architecture",
+      "Authentication_Middleware",
+      "Database_ORM",
+      "MVC",
+      "Service_Layer",
+      "REST_API"
+    ],
+    "dependencies": [
+      "actix-web (HTTP server, middleware spine)",
+      "sea-orm (async Database ORM, PostgreSQL/MySQL/SQLite support)",
+      "jsonwebtoken (JWT-based Authentication_Middleware)",
+      "tide-payments or custom stripe-rust wrapper (payment_processing)",
+      "yew (WebAssembly front-end components)",
+      "serde / serde_json (data serialization & validation)",
+      "validator (additional validation macros)",
+      "tera (server-side templating for SSR fallbacks, MVC view layer)",
+      "actix-session (session_management, cookie + Redis back-end)",
+      "actix-redis (caching, distributed session store)",
+      "lettre (email_notifications)",
+      "tracing + tracing-subscriber (structured logging_system)",
+      "rustls + actix-web-openssl (ssl_security, HTTP/2 ALPN)",
+      "elasticlunr-rs (client-side & server-side search_functionality)",
+      "tokio (async runtime)",
+      "aws-sdk-s3 or cloud storage crate (file_upload, asset CDN integration)"
+    ],
+    "seed": 742385
+  }
+}

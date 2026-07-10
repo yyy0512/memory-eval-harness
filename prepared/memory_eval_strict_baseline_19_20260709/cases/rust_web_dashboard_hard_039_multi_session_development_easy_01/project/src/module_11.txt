@@ -1,0 +1,396 @@
+```rust
+//! module_11 – Session management & SSL security middleware
+//!
+//! This module wires two production-grade middle-ware components into the
+//! ChromaticCanvas Control Center web stack:
+//!  1. `SessionMiddleware`  – JWT–backed session validation & refresh.
+//!  2. `RequireHttps`       – Transparent HTTPS enforcement / redirect.
+//!
+//! The implementation is framework-agnostic enough to be re-used in any
+//! `actix-web` powered micro-service that lives behind the ChromaticCanvas
+//! API‐gateway.
+
+use std::{
+    future::{ready, Future, Ready},
+    pin::Pin,
+    sync::Arc,
+    task::{Context, Poll},
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
+
+use actix_service::{forward_ready, Service, Transform};
+use actix_web::{
+    body::BoxBody,
+    cookie::{time::OffsetDateTime, Cookie, SameSite},
+    dev::{ServiceRequest, ServiceResponse},
+    error::{ErrorUnauthorized, InternalError},
+    http::{header, StatusCode},
+    Error, HttpMessage,
+};
+use futures_util::future::LocalBoxFuture;
+use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
+use serde::{Deserialize, Serialize};
+use tracing::{debug, error, info, warn};
+use uuid::Uuid;
+
+/// Default cookie name used across the Control Center
+pub const AUTH_COOKIE: &str = "cc_auth_token";
+
+/// Strongly-typed wrapper around the JWT claims we issue/expect.
+///
+/// * `sub` – User id (always UUID v4)
+/// * `exp` – Expiration epoch (seconds)
+/// * `iat` – Issued-at epoch (seconds)  
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Claims {
+    pub sub: Uuid,
+    pub exp: usize,
+    pub iat: usize,
+}
+
+/// Configuration object shared between all middleware instances.
+///
+/// The struct is intentionally clone-cheap (`Arc`) so it can be copied into
+/// each service factory created by `Transform`.
+#[derive(Debug, Clone)]
+pub struct SessionConfig {
+    pub secret: Arc<[u8]>,
+    pub ttl: Duration,
+    /// When the remaining life-time of a token drops below this threshold, the
+    /// middleware will proactively issue a refreshed token and attach it to the
+    /// outgoing response to achieve seamless session extension.
+    pub refresh_grace: Duration,
+}
+
+impl SessionConfig {
+    pub fn encoding_key(&self) -> EncodingKey {
+        EncodingKey::from_secret(&self.secret)
+    }
+    pub fn decoding_key(&self) -> DecodingKey<'_> {
+        DecodingKey::from_secret(&self.secret)
+    }
+}
+
+/// Session middleware factory. Construct this via `SessionMiddleware::new(...)`
+/// and wire it into your `App`.
+pub struct SessionMiddleware {
+    cfg: SessionConfig,
+}
+
+impl SessionMiddleware {
+    pub fn new(secret: impl AsRef<[u8]>, ttl: Duration) -> Self {
+        Self {
+            cfg: SessionConfig {
+                secret: Arc::from(secret.as_ref()),
+                ttl,
+                refresh_grace: Duration::from_secs(60 * 10), // 10 min default
+            },
+        }
+    }
+
+    pub fn with_refresh_grace(mut self, grace: Duration) -> Self {
+        self.cfg.refresh_grace = grace;
+        self
+    }
+}
+
+impl<S, B> Transform<S, ServiceRequest> for SessionMiddleware
+where
+    S: Service<ServiceRequest, Response = ServiceResponse<B>, Error = Error> + 'static,
+    B: 'static,
+{
+    type Response = ServiceResponse<BoxBody>;
+    type Error = Error;
+    type InitError = ();
+    type Transform = SessionMiddlewareService<S>;
+    type Future = Ready<Result<Self::Transform, Self::InitError>>;
+
+    fn new_transform(&self, next: S) -> Self::Future {
+        ready(Ok(SessionMiddlewareService {
+            next,
+            cfg: self.cfg.clone(),
+        }))
+    }
+}
+
+pub struct SessionMiddlewareService<S> {
+    next: S,
+    cfg: SessionConfig,
+}
+
+impl<S, B> Service<ServiceRequest> for SessionMiddlewareService<S>
+where
+    S: Service<ServiceRequest, Response = ServiceResponse<B>, Error = Error> + 'static,
+    B: 'static,
+{
+    type Response = ServiceResponse<BoxBody>;
+    type Error = Error;
+    type Future = LocalBoxFuture<'static, Result<Self::Response, Self::Error>>;
+
+    forward_ready!(next);
+
+    fn call(&self, mut req: ServiceRequest) -> Self::Future {
+        let cfg = self.cfg.clone();
+        let mut skip_auth = false;
+
+        // Public endpoints are conventionally prefixed with `/public`.
+        if let Ok(path) = req.match_pattern() {
+            if path.starts_with("/public") {
+                skip_auth = true;
+            }
+        }
+
+        // Attempt to extract & validate JWT claims
+        if !skip_auth {
+            match extract_jwt_claims(&req, &cfg) {
+                Ok((claims, token_age)) => {
+                    // Attach claims to request extensions
+                    req.extensions_mut().insert(claims.clone());
+
+                    // Determine if we need to refresh the cookie
+                    let must_refresh =
+                        cfg.ttl.saturating_sub(token_age) <= cfg.refresh_grace;
+
+                    let fut = self.next.call(req);
+                    let cfg = cfg.clone();
+                    return Box::pin(async move {
+                        let mut res = fut.await?.map_into_boxed_body();
+
+                        if must_refresh {
+                            info!("Refreshing JWT token (grace threshold reached)");
+                            if let Ok(cookie) = build_cookie(&claims.sub, &cfg) {
+                                res.headers_mut().append(
+                                    header::SET_COOKIE,
+                                    cookie.to_string().parse().unwrap(),
+                                );
+                            }
+                        }
+                        Ok(res)
+                    });
+                }
+                Err(err) => {
+                    warn!("Invalid session – {}", err);
+                    let fut = async move {
+                        Err(ErrorUnauthorized("Invalid or expired session token"))
+                    };
+                    return Box::pin(fut);
+                }
+            }
+        }
+
+        // If the endpoint is public OR we bypassed auth for any reason
+        let fut = self.next.call(req);
+        Box::pin(async move { fut.await.map(|res| res.map_into_boxed_body()) })
+    }
+}
+
+// ───────────────────────────────────────────────────────────────────────────────
+// Helper utilities
+// ───────────────────────────────────────────────────────────────────────────────
+
+fn extract_jwt_claims(
+    req: &ServiceRequest,
+    cfg: &SessionConfig,
+) -> Result<(Claims, Duration), String> {
+    let cookie = req
+        .cookie(AUTH_COOKIE)
+        .ok_or_else(|| "auth cookie missing".to_string())?;
+
+    let token = cookie.value();
+    let validation = Validation::default();
+    let token_data = decode::<Claims>(token, &cfg.decoding_key(), &validation)
+        .map_err(|e| format!("jwt decode failed: {e}"))?;
+
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("time went backwards")
+        .as_secs() as usize;
+
+    if token_data.claims.exp < now {
+        return Err("token expired".into());
+    }
+
+    let age_secs = now.saturating_sub(token_data.claims.iat);
+    Ok((token_data.claims, Duration::from_secs(age_secs as u64)))
+}
+
+/// Builds a *freshly-signed* JWT token + matching `Set-Cookie` header.
+fn build_cookie(uid: &Uuid, cfg: &SessionConfig) -> Result<Cookie<'static>, Error> {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("time went backwards")
+        .as_secs() as usize;
+
+    let claims = Claims {
+        sub: *uid,
+        iat: now,
+        exp: now + cfg.ttl.as_secs() as usize,
+    };
+
+    let header = Header::default();
+    let token = encode(&header, &claims, &cfg.encoding_key())
+        .map_err(|e| InternalError::new(e, StatusCode::INTERNAL_SERVER_ERROR))?;
+
+    let expires = OffsetDateTime::from_unix_timestamp(claims.exp as i64)
+        .map_err(|e| InternalError::new(e, StatusCode::INTERNAL_SERVER_ERROR))?;
+
+    let cookie = Cookie::build(AUTH_COOKIE, token)
+        .http_only(true)
+        .same_site(SameSite::Lax)
+        .expires(expires)
+        .secure(true) // we always serve behind TLS
+        .path("/")
+        .finish();
+
+    Ok(cookie)
+}
+
+// ───────────────────────────────────────────────────────────────────────────────
+// HTTPS enforcement
+// ───────────────────────────────────────────────────────────────────────────────
+
+/// Lightweight middleware that redirects every `http://` request to `https://`.
+///
+/// This is a _belt-and-suspenders_ guard; the primary TLS termination is done
+/// by the edge load-balancer, but we prefer to err on the safe side in case the
+/// service is ever run stand-alone.
+pub struct RequireHttps;
+
+impl<S, B> Transform<S, ServiceRequest> for RequireHttps
+where
+    S: Service<ServiceRequest, Response = ServiceResponse<B>, Error = Error> + 'static,
+    B: 'static,
+{
+    type Response = ServiceResponse<BoxBody>;
+    type Error = Error;
+    type InitError = ();
+    type Transform = RequireHttpsService<S>;
+    type Future = Ready<Result<Self::Transform, Self::InitError>>;
+
+    fn new_transform(&self, service: S) -> Self::Future {
+        ready(Ok(RequireHttpsService { service }))
+    }
+}
+
+pub struct RequireHttpsService<S> {
+    service: S,
+}
+
+impl<S, B> Service<ServiceRequest> for RequireHttpsService<S>
+where
+    S: Service<ServiceRequest, Response = ServiceResponse<B>, Error = Error> + 'static,
+    B: 'static,
+{
+    type Response = ServiceResponse<BoxBody>;
+    type Error = Error;
+    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>>>>;
+
+    forward_ready!(service);
+
+    fn call(&self, req: ServiceRequest) -> Self::Future {
+        let secure = req
+            .connection_info()
+            .scheme()
+            .eq_ignore_ascii_case("https");
+
+        if secure {
+            let fut = self.service.call(req);
+            Box::pin(async move { fut.await.map(|r| r.map_into_boxed_body()) })
+        } else {
+            let host = req.connection_info().host();
+            let uri = req.uri().to_string();
+            let target = format!("https://{host}{uri}");
+            info!("Redirecting insecure request to {}", target);
+
+            Box::pin(async move {
+                Ok(req.into_response(
+                    actix_web::HttpResponse::MovedPermanently()
+                        .insert_header((header::LOCATION, target))
+                        .finish()
+                        .map_into_boxed_body(),
+                ))
+            })
+        }
+    }
+}
+
+// ───────────────────────────────────────────────────────────────────────────────
+// Auto tests (run: `cargo test -p web_dashboard -- module_11`)
+// ───────────────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use actix_web::{
+        dev::Service, test, web, App, HttpResponse, Responder,
+    };
+
+    async fn ping() -> impl Responder {
+        HttpResponse::Ok().body("pong")
+    }
+
+    #[actix_rt::test]
+    async fn session_roundtrip() {
+        let secret = b"test_secret_key";
+        let jwt_ttl = Duration::from_secs(30);
+
+        let mw = SessionMiddleware::new(secret, jwt_ttl);
+
+        let app = test::init_service(
+            App::new()
+                .wrap(mw)
+                .route("/secure/ping", web::get().to(ping)),
+        )
+        .await;
+
+        // Build a valid auth cookie
+        let mut req = test::TestRequest::with_uri("/secure/ping");
+        let user_id = Uuid::new_v4();
+        let cookie = build_cookie(&user_id, &SessionConfig {
+            secret: secret.to_vec().into(),
+            ttl: jwt_ttl,
+            refresh_grace: Duration::from_secs(5),
+        })
+        .unwrap();
+        req.cookie(cookie.clone());
+
+        let resp = test::call_service(&app, req.to_request()).await;
+        assert!(resp.status().is_success());
+        let body = test::read_body(resp).await;
+        assert_eq!(body, "pong");
+    }
+
+    #[actix_rt::test]
+    async fn missing_cookie_triggers_401() {
+        let secret = b"test_secret_key";
+        let app = test::init_service(
+            App::new()
+                .wrap(SessionMiddleware::new(secret, Duration::from_secs(10)))
+                .route("/secure/ping", web::get().to(ping)),
+        )
+        .await;
+
+        let req = test::TestRequest::with_uri("/secure/ping").to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[actix_rt::test]
+    async fn http_is_redirected_to_https() {
+        let app = test::init_service(
+            App::new()
+                .wrap(RequireHttps)
+                .route("/", web::get().to(ping)),
+        )
+        .await;
+
+        let req = test::TestRequest::with_uri("/")
+            .insert_header((header::HOST, "example.com"))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), StatusCode::MOVED_PERMANENTLY);
+        let loc = resp.headers().get(header::LOCATION).unwrap().to_str().unwrap();
+        assert_eq!(loc, "https://example.com/");
+    }
+}
+```

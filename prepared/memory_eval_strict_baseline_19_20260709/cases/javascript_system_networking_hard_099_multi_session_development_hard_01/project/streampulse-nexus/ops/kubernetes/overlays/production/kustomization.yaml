@@ -1,0 +1,154 @@
+```yaml
+# ======================================================================
+# kustomization.yaml — Production Overlay for StreamPulse Nexus
+# ----------------------------------------------------------------------
+# This kustomization file wires the production-grade deployment stack
+# for StreamPulse Nexus.  It layers operational add-ons (monitoring,
+# security, backup), hardens resources via patches, and pins container
+# images to immutable digests for reproducible roll-outs.
+# ======================================================================
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# ----------------------------------------------------------------------
+# Namespace & Naming
+# ----------------------------------------------------------------------
+namespace: streampulse-nexus-prod
+
+# Prefix every resource name with “prod-” to avoid cross-env collisions.
+namePrefix: prod-
+
+# ----------------------------------------------------------------------
+# Base Manifests & Add-ons
+# ----------------------------------------------------------------------
+resources:
+  # Core application micro-services and RBAC rules
+  - ../../base
+
+  # Operational add-ons (declared as reusable bases)
+  - ../../addons/monitoring/prometheus
+  - ../../addons/logging/loki
+  - ../../addons/security/opa-gatekeeper
+  - ../../addons/backup/velero
+
+# ----------------------------------------------------------------------
+# Global Labels & Annotations
+# ----------------------------------------------------------------------
+commonLabels:
+  app.kubernetes.io/part-of: streampulse-nexus
+  app.kubernetes.io/managed-by: kustomize
+  environment: production
+
+commonAnnotations:
+  repo.github.com/project: streampulse-nexus
+  repo.github.com/revision: ${COMMIT_SHA}
+
+# ----------------------------------------------------------------------
+# Container Images ‑ pin to immutable digests for supply-chain security
+# ----------------------------------------------------------------------
+images:
+  - name: streampulse-nexus/router
+    newName: public.ecr.aws/streampulse/nexus/router
+    digest: "sha256:1f5c6dbb89d34be2184587ef7b3e12fbd53c9e12880c155d4f5c6a3f1e4d1234"
+  - name: streampulse-nexus/ingress
+    newName: public.ecr.aws/streampulse/nexus/ingress
+    digest: "sha256:0a33944c18ea1d8843f3e8a2ee7b2ab947ef126e3f1cb987e110fe1815dc5678"
+  - name: streampulse-nexus/edge-cache
+    newName: public.ecr.aws/streampulse/nexus/edge-cache
+    digest: "sha256:2b41f6761d846d63dce5b9ef9c041f4e6cb125ede2eb2b6297b4e0be78c9abcd"
+  - name: streampulse-nexus/analytics
+    newName: public.ecr.aws/streampulse/nexus/analytics
+    digest: "sha256:7c0d4fe8d1e9c0b1a4dbea139c8b4e5c91fa62d0c2aecf90fe1b2aa56e3e88ef"
+
+# ----------------------------------------------------------------------
+# ConfigMap & Secret Generation
+# ----------------------------------------------------------------------
+configMapGenerator:
+  - name: router-config
+    behavior: merge
+    literals:
+      - LOG_LEVEL=info
+      - METRICS_SAMPLING_RATE=0.10    # sample 10 % of packets
+      - HEALTHCHECK_INTERVAL=3s
+  - name: feature-flags
+    behavior: merge
+    literals:
+      - ENABLE_AR_SYNC=true
+      - ENABLE_TRIVIA_OVERLAY=true
+      - ENABLE_ZERO_TRUST=true
+
+secretGenerator:
+  - name: nexus-secrets
+    behavior: merge
+    files:
+      - secrets/prod/jwt_private.pem
+      - secrets/prod/postgres_password.txt
+    type: Opaque
+
+generatorOptions:
+  disableNameSuffixHash: true   # preserve stable ConfigMap/Secret names
+
+# ----------------------------------------------------------------------
+# Patch Sets (Strategic-Merge & JSON 6902)
+# ----------------------------------------------------------------------
+patchesStrategicMerge:
+  # Scale and resource-tune critical workloads
+  - patches/router-resources.yaml
+  - patches/ingress-tls.yaml
+  - patches/edgecache-hpa.yaml
+  - patches/analytics-node-affinity.yaml
+
+patchesJson6902:
+  # Harden security-context for every container in the router deployment
+  - target:
+      group: apps
+      version: v1
+      kind: Deployment
+      name: router
+    path: patches/security-context.json
+
+  # Convert the ingress service to a LoadBalancer with static IP
+  - target:
+      version: v1
+      kind: Service
+      name: ingress
+    path: patches/ingress-service-type.json
+
+# ----------------------------------------------------------------------
+# Transformers
+# ----------------------------------------------------------------------
+transformers:
+  - transformers/add-prometheus-annotations.yaml
+  - transformers/set-image-pull-secret.yaml
+  - transformers/rewrite-ingress-hosts.yaml
+
+# ----------------------------------------------------------------------
+# Replicas Override
+# ----------------------------------------------------------------------
+replicas:
+  - name: router
+    count: 6
+  - name: ingress
+    count: 4
+  - name: edge-cache
+    count: 8
+
+# ----------------------------------------------------------------------
+# CRDs required by add-ons (Velero, Gatekeeper, etc.)
+# ----------------------------------------------------------------------
+crds:
+  - ../../crds/velero.io_schedules.yaml
+  - ../../crds/policy.gatekeeper.sh_template.yaml
+
+# ----------------------------------------------------------------------
+# Variable Substitution
+# ----------------------------------------------------------------------
+vars:
+  - name: COMMIT_SHA
+    objref:
+      apiVersion: v1
+      kind: ConfigMap
+      name: build-info
+    fieldref:
+      fieldpath: data.commitSha
+```

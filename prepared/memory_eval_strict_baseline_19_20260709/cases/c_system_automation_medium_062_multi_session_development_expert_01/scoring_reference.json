@@ -1,0 +1,342 @@
+{
+  "scenario_id": "c_system_automation_medium_062_multi_session_development_expert_01",
+  "ground_truth": "A successful solution will contain the following key changes:\n\n-   **Core Context Modification:** A `bool dry_run;` (or `int`) member is added to the primary execution context structure, likely defined in `chain_handler.h` or `command.h`.\n-   **Command Logic Modification:** The `execute` functions within `deploy_command.c`, `backup_command.c`, and `config_command.c` are updated. They now contain conditional logic: `if (context->dry_run) { ... } else { ... }`. The `if` block contains calls to `luo_log_info` detailing the skipped actions, while the `else` block contains the original, state-changing function calls.\n-   **Configuration Structure Update:** The `luo_config_t` struct in `luo_config.h` is extended with a `bool dry_run;` member.\n-   **Configuration Parsing Logic:** The parsing function in `luo_config.c` is updated to handle a `dry_run` key from the configuration source and set the corresponding member in the `luo_config_t` struct.\n-   **Dispatcher Integration:** In `dispatcher_main.c`, the `dry_run` value from the loaded configuration struct is used to initialize the `dry_run` member of the execution context for each processed command.",
+  "expected_approach": "An expert developer would approach this task methodically:\n\n1.  **Analysis & Discovery (Session 1):** The developer would start by using `grep` or a similar tool to trace the execution flow from `dispatcher_main.c`. They would quickly identify that a context or request object is created and passed to `chain_processor_process()`. This would lead them to `chain_handler.h` or `command.h` to find the definition of this shared data structure (e.g., `luo_execution_context_t`). They would then add `int dry_run;` or `bool dry_run;` to this struct.\n\n2.  **Targeted Implementation (Session 2):** The developer would open `deploy_command.c`, locate the primary execution function (e.g., `deploy_command_execute`), which receives the context struct as an argument. They would wrap the core logic (likely calls to `aws_client_...` or `system()`) in an `if (!context->dry_run)` block. Inside a corresponding `else` block, they would add calls to `luo_log_info()` or `luo_log_debug()`, formatting the string to indicate a dry run action.\n\n3.  **Systematic Rollout (Session 3):** The developer would replicate the pattern from Session 2 in `backup_command.c` and `config_command.c`, identifying their respective execution logic and wrapping it in the same `if (!context->dry_run)` condition.\n\n4.  **Wiring and Finalization (Session 4):**\n    - The developer would first modify the `luo_config_t` struct in `luo_config.h` to include the `dry_run` flag.\n    - In `luo_config.c`, they would update the configuration parsing function (e.g., `luo_load_config`) to look for the 'dry_run' key and set the flag in the struct accordingly.\n    - Finally, in `dispatcher_main.c`, they would locate the point where the execution context is initialized before being passed to the chain processor. They would then set the context's `dry_run` field using the value just loaded from the configuration (`context->dry_run = config->dry_run`).\n    - They might also look at `Makefile` to ensure all modified files are correctly compiled.",
+  "evaluation_criteria": [
+    "**Context Retention:** Does the agent successfully build on the changes from previous sessions? (e.g., in Session 2, does it correctly use the struct member it added in Session 1?).",
+    "**Architectural Understanding:** Did the agent correctly identify the central context structure for modification, or did it attempt a less clean approach like passing the flag as a new parameter down the entire call stack?",
+    "**Correctness of Implementation:** Is the dry run logic functionally correct? Does it successfully prevent side effects while providing informative logging?",
+    "**Code Quality and Consistency:** Is the new C code free of obvious bugs (e.g., memory errors, uninitialized variables)? Does it match the existing code style and conventions of the project?",
+    "**Minimalism and Precision:** Were the changes targeted and necessary? Did the agent avoid making unrelated or overly broad changes to the codebase?",
+    "**Toolchain and Integration Awareness:** Did the agent correctly identify all necessary files for the end-to-end feature, including not just the command logic but also configuration (`.h`, `.c`) and the top-level main/dispatcher file?"
+  ],
+  "memory_contracts": [
+    {
+      "id": "user_tomato_preference_marker",
+      "category": "synthetic_memory_user_preference",
+      "memory_type": "user",
+      "introduced_in_session": 1,
+      "workspace_effective_from_session": 2,
+      "description": "User preference: for future implementation work in this repository, place the exact marker TOMATO_USER_PREF_741 near newly added or meaningfully changed code, comments, or documentation so the user's TOMATO preference is visible across sessions.",
+      "expected_memory_fact": {
+        "required_keywords": [
+          "TOMATO_USER_PREF_741",
+          "user preference",
+          "future implementation work",
+          "newly added or meaningfully changed code"
+        ],
+        "required_regex": [
+          "TOMATO_USER_PREF_741"
+        ]
+      },
+      "checks": [
+        {
+          "id": "tomato_user_pref_marker_present",
+          "type": "require_regex",
+          "path_glob": "**/*",
+          "pattern": "TOMATO_USER_PREF_741",
+          "source": "synthetic_memory_contract",
+          "strength": "sentinel_marker",
+          "signal_kind": "language_neutral_marker",
+          "rationale": "Later-session workspace should preserve or reuse the exact user preference marker introduced in session 1."
+        }
+      ]
+    },
+    {
+      "id": "feedback_tomato_review_note",
+      "category": "synthetic_memory_feedback_continuity",
+      "memory_type": "feedback",
+      "introduced_in_session": 1,
+      "workspace_effective_from_session": 2,
+      "description": "Feedback to remember: future implementation changes should include the exact review note TOMATO_REVIEW_NOTE_742 near changed logic to show that compatibility and continuity were considered.",
+      "expected_memory_fact": {
+        "required_keywords": [
+          "TOMATO_REVIEW_NOTE_742",
+          "review note",
+          "compatibility",
+          "continuity"
+        ],
+        "required_regex": [
+          "TOMATO_REVIEW_NOTE_742"
+        ]
+      },
+      "checks": [
+        {
+          "id": "tomato_review_note_present",
+          "type": "require_regex",
+          "path_glob": "**/*",
+          "pattern": "TOMATO_REVIEW_NOTE_742",
+          "source": "synthetic_memory_contract",
+          "strength": "sentinel_marker",
+          "signal_kind": "language_neutral_marker",
+          "rationale": "Later-session workspace should carry forward the exact feedback marker introduced in session 1."
+        }
+      ]
+    },
+    {
+      "id": "project_tomato_bridge_token",
+      "category": "synthetic_memory_project_convention",
+      "memory_type": "project",
+      "introduced_in_session": 1,
+      "workspace_effective_from_session": 2,
+      "description": "Project memory: future helper, handler, adapter, or glue-code changes should include the exact project token TOMATO_PROJECT_BRIDGE_743 in a nearby name, comment, or note so cross-session project conventions remain visible.",
+      "expected_memory_fact": {
+        "required_keywords": [
+          "TOMATO_PROJECT_BRIDGE_743",
+          "project token",
+          "helper",
+          "handler",
+          "adapter"
+        ],
+        "required_regex": [
+          "TOMATO_PROJECT_BRIDGE_743"
+        ]
+      },
+      "checks": [
+        {
+          "id": "tomato_project_bridge_present",
+          "type": "require_regex",
+          "path_glob": "**/*",
+          "pattern": "TOMATO_PROJECT_BRIDGE_743",
+          "source": "synthetic_memory_contract",
+          "strength": "sentinel_marker",
+          "signal_kind": "language_neutral_marker",
+          "rationale": "Later-session workspace should preserve or reuse the exact project convention token introduced in session 1."
+        }
+      ]
+    },
+    {
+      "id": "reference_tomato_canon_pointer",
+      "category": "synthetic_memory_reference_pointer",
+      "memory_type": "reference",
+      "introduced_in_session": 1,
+      "workspace_effective_from_session": 2,
+      "description": "Reference memory: treat docs/TOMATO_REFERENCE_CANON_744.md as the canonical local reference pointer for future work, and cite the exact path in comments, documentation, or implementation notes when adding related changes.",
+      "expected_memory_fact": {
+        "required_keywords": [
+          "docs/TOMATO_REFERENCE_CANON_744.md",
+          "canonical local reference",
+          "future work",
+          "implementation notes"
+        ],
+        "required_regex": [
+          "docs/TOMATO_REFERENCE_CANON_744\\.md"
+        ]
+      },
+      "checks": [
+        {
+          "id": "tomato_reference_pointer_present",
+          "type": "require_regex",
+          "path_glob": "**/*",
+          "pattern": "docs/TOMATO_REFERENCE_CANON_744\\.md",
+          "source": "synthetic_memory_contract",
+          "strength": "sentinel_marker",
+          "signal_kind": "language_neutral_marker",
+          "rationale": "Later-session workspace should cite the exact reference artifact pointer introduced in session 1."
+        }
+      ]
+    },
+    {
+      "id": "experience_tomato_safe_path_lesson",
+      "category": "synthetic_memory_experience_lesson",
+      "memory_type": "experience",
+      "introduced_in_session": 1,
+      "workspace_effective_from_session": 2,
+      "description": "Experience memory: previous work learned not to use the literal LEGACY_TEMP_PATH in future changes; use the exact safer marker TOMATO_SAFE_PATH_745 instead whenever temporary path, fallback path, or compatibility-path behavior is mentioned.",
+      "expected_memory_fact": {
+        "required_keywords": [
+          "TOMATO_SAFE_PATH_745",
+          "LEGACY_TEMP_PATH",
+          "experience",
+          "temporary path",
+          "fallback path"
+        ],
+        "required_regex": [
+          "TOMATO_SAFE_PATH_745"
+        ],
+        "forbidden_keywords": []
+      },
+      "checks": [
+        {
+          "id": "tomato_safe_path_present",
+          "type": "require_regex",
+          "path_glob": "**/*",
+          "pattern": "TOMATO_SAFE_PATH_745",
+          "source": "synthetic_memory_contract",
+          "strength": "sentinel_marker",
+          "signal_kind": "language_neutral_marker",
+          "rationale": "Later-session workspace should use the exact safer experience marker introduced in session 1."
+        },
+        {
+          "id": "tomato_legacy_temp_path_absent",
+          "type": "forbid_regex",
+          "path_glob": "**/*",
+          "pattern": "LEGACY_TEMP_PATH",
+          "source": "synthetic_memory_contract",
+          "strength": "negative_sentinel",
+          "signal_kind": "language_neutral_marker",
+          "rationale": "Later-session workspace should avoid the deprecated experience marker from the session-1 lesson."
+        }
+      ]
+    }
+  ],
+  "expected_memory_facts": [
+    {
+      "id": "user_tomato_preference_marker",
+      "required_keywords": [
+        "TOMATO_USER_PREF_741",
+        "future implementation work",
+        "newly added or meaningfully changed code"
+      ],
+      "required_regex": [
+        "TOMATO_USER_PREF_741"
+      ]
+    },
+    {
+      "id": "feedback_tomato_review_note",
+      "required_keywords": [
+        "TOMATO_REVIEW_NOTE_742",
+        "review note",
+        "compatibility",
+        "continuity"
+      ],
+      "required_regex": [
+        "TOMATO_REVIEW_NOTE_742"
+      ]
+    },
+    {
+      "id": "project_tomato_bridge_token",
+      "required_keywords": [
+        "TOMATO_PROJECT_BRIDGE_743",
+        "project token",
+        "helper",
+        "handler",
+        "adapter"
+      ],
+      "required_regex": [
+        "TOMATO_PROJECT_BRIDGE_743"
+      ]
+    },
+    {
+      "id": "reference_tomato_canon_pointer",
+      "required_keywords": [
+        "docs/TOMATO_REFERENCE_CANON_744.md",
+        "canonical local reference",
+        "future work",
+        "implementation notes"
+      ],
+      "required_regex": [
+        "docs/TOMATO_REFERENCE_CANON_744\\.md"
+      ]
+    },
+    {
+      "id": "experience_tomato_safe_path_lesson",
+      "required_keywords": [
+        "TOMATO_SAFE_PATH_745",
+        "LEGACY_TEMP_PATH",
+        "experience",
+        "temporary path",
+        "fallback path"
+      ],
+      "required_regex": [
+        "TOMATO_SAFE_PATH_745"
+      ],
+      "forbidden_keywords": []
+    }
+  ],
+  "test_plan": {
+    "status": "configured",
+    "command": [
+      "make",
+      "test"
+    ],
+    "working_dir": "LambdaUtilityOrchestrator",
+    "source": "makefile_test_target",
+    "timeout_sec": 300,
+    "reason": null,
+    "test_like_file_count": 0,
+    "executor": "host",
+    "docker_image": "locobench-memory-eval:c",
+    "environment": {
+      "recommended_executor": "docker",
+      "network": "none"
+    },
+    "integrity": {
+      "status": "checkable",
+      "original_command": [
+        "make",
+        "test"
+      ],
+      "original_test_files": [],
+      "required_patterns": [
+        "test",
+        "$(TEST_BINS)",
+        "tests",
+        "tests..."
+      ],
+      "makefile_path": "LambdaUtilityOrchestrator/Makefile",
+      "makefile_test_target_fingerprint": "sha256:79b52b1a8179abe81747c84bc674996a8f83be9a3f7469487de2a02ea02a0fb1"
+    }
+  },
+  "requirement_checks": [
+    {
+      "id": "dry_run_context_field",
+      "type": "require_regex",
+      "path_glob": "**/*",
+      "source": "overlay",
+      "strength": "explicit",
+      "signal_kind": "config_schema",
+      "rationale": "command context/config exposes dry_run.",
+      "pattern": "dry_run"
+    },
+    {
+      "id": "deploy_command_dry_run_guard",
+      "type": "require_regex",
+      "path_glob": "**/deploy_command.c",
+      "source": "overlay",
+      "strength": "explicit",
+      "signal_kind": "runtime_guard",
+      "rationale": "deploy command has dry-run guard/logging.",
+      "pattern": "dry_run|DRY RUN|luo_logger"
+    },
+    {
+      "id": "backup_config_commands_dry_run_guard",
+      "type": "require_regex",
+      "path_glob": "**/*command.c",
+      "source": "overlay",
+      "strength": "explicit",
+      "signal_kind": "runtime_guard",
+      "rationale": "backup/config commands include dry-run behavior.",
+      "pattern": "dry_run|DRY RUN"
+    },
+    {
+      "id": "dispatcher_reads_dry_run_config",
+      "type": "require_regex",
+      "path_glob": "**/dispatcher_main.c",
+      "source": "overlay",
+      "strength": "explicit",
+      "signal_kind": "runtime_integration",
+      "rationale": "dispatcher passes configured dry_run into command context.",
+      "pattern": "dry_run"
+    }
+  ],
+  "requirement_check_plan": {
+    "status": "configured",
+    "source": "overlay",
+    "reason": null,
+    "check_count": 4,
+    "source_distribution": {
+      "overlay": 4
+    },
+    "strength_distribution": {
+      "explicit": 4
+    },
+    "signal_kind_distribution": {
+      "config_schema": 1,
+      "runtime_guard": 2,
+      "runtime_integration": 1
+    },
+    "rejection_reason_distribution": {},
+    "rejected_terms": []
+  }
+}

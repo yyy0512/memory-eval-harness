@@ -1,9 +1,0 @@
-You are working in the repository at the current working directory. This is session 4 of a 4-session development task. The previous session has ended and conversation context is unavailable. Use the repository state and your persistent memory if available. Do not ask for previous conversation context. Complete only the requirements for this session. At the end, update memory with decisions and remaining work.
-
-Your goal is to implement a comprehensive File Integrity Monitoring (FIM) feature. This is a multi-stage task. Treat each stage as a separate development session, ensuring you maintain context between sessions.
-
-**Session 4: Alerting and Finalization**
-1.  Modify the `alerting_service`'s rule engine in `services/alerting_service/src/rule_engine.c` to process the new FIM events.
-2.  Implement a simple rule: if an event of type `SENTINEL_EVENT_FIM` is received, generate a high-priority alert log message.
-3.  Update the necessary `CMakeLists.txt` files (especially for the agent service) to include your new `collector_fim.c` file in the build.
-4.  Ensure the entire project compiles successfully and the new feature is fully integrated.

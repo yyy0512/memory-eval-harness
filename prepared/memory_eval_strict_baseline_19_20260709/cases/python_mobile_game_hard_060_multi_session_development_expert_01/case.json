@@ -1,0 +1,56 @@
+{
+  "scenario_id": "python_mobile_game_hard_060_multi_session_development_expert_01",
+  "case_id": "python_mobile_game_hard_060",
+  "category": "extended_development_projects",
+  "original_task_category": "multi_session_development",
+  "project_source": "cases/python_mobile_game_hard_060_multi_session_development_expert_01/project",
+  "project_name": "QuestSmith: Productivity RPG Forge",
+  "language": "python",
+  "complexity": "hard",
+  "session_count": 4,
+  "turns": [
+    {
+      "session": 1,
+      "file": "turns/session_1.jsonl",
+      "turn_count": 2
+    },
+    {
+      "session": 2,
+      "file": "turns/session_2.jsonl",
+      "turn_count": 1
+    },
+    {
+      "session": 3,
+      "file": "turns/session_3.jsonl",
+      "turn_count": 1
+    },
+    {
+      "session": 4,
+      "file": "turns/session_4.jsonl",
+      "turn_count": 1
+    }
+  ],
+  "prompts_for_review": [
+    {
+      "session": 1,
+      "file": "prompts/session_1.txt"
+    },
+    {
+      "session": 2,
+      "file": "prompts/session_2.txt"
+    },
+    {
+      "session": 3,
+      "file": "prompts/session_3.txt"
+    },
+    {
+      "session": 4,
+      "file": "prompts/session_4.txt"
+    }
+  ],
+  "hashes": {
+    "scenario_json_sha256": "b751eb6769168e4fa1785874b7b718119e244528df5a8cf38740e57d9dc028aa",
+    "project_tree_sha256": "309beb4919c1e58cb108cd7a8ae3540b8b5971ff1c85c29619602a972962d273",
+    "prepared_case_sha256": "39149881641389eb9e845a9388c5d45d695f3ba8fbe518991cb922dbdb70927a"
+  }
+}

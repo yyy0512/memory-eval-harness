@@ -1,0 +1,16 @@
+You are working in the repository at the current working directory. This is session 3 of a 3-session development task. The previous session has ended and conversation context is unavailable. Use the repository state to continue the task. Do not ask for previous conversation context. Complete only the requirements for this session.
+
+You are tasked with implementing the Canary Deployment feature. This will be done over several sessions. Follow the instructions for each session carefully, building upon your previous work.
+
+**Session 3: Analysis, Promotion, and Rollback**
+This is the final implementation step. You will integrate the canary deployment with the metric and policy systems to complete the workflow.
+1.  In `vitalops_orchestrator/vitalops/coordinators/deployment.py`, after calling `_deploy_canary_instances`, implement the monitoring phase. This should run for the `analysis_duration` specified in the config.
+2.  During the monitoring phase, periodically call the `MetricCollector` service to fetch performance metrics for the canary instances.
+3.  Use the `PolicyEngine` service to evaluate these metrics against the `success_criteria` from the configuration. The PolicyEngine is expected to return a boolean `is_healthy` result.
+4.  Based on the result from the `PolicyEngine`, call one of two new methods you must create: `_promote_canary` (which deploys the new version to the rest of the fleet) or `_rollback_canary` (which reverts the canary instances to the old version).
+
+**Final Task: Testing**
+To ensure your feature works, add a unit test.
+1.  Modify `vitalops_orchestrator/tests/test_coordinators.py`: Add a new test method, `test_canary_deployment_successful_promotion`.
+2.  In this test, mock the `MetricCollector` and `PolicyEngine` services. Configure the mock `PolicyEngine` to return a successful result.
+3.  Run a simulated canary deployment and assert that the `_promote_canary` method is called and not `_rollback_canary`.

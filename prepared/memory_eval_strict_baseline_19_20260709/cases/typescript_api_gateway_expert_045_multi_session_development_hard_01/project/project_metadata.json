@@ -1,0 +1,455 @@
+{
+  "specification": {
+    "unique_id": "typescript_api_gateway_expert_045",
+    "name": "SocialPulse Gateway",
+    "description": "SocialPulse Gateway is an expert-level, TypeScript-based API gateway designed for large-scale social platforms that aggregate diverse interaction streams\u2014posts, reactions, live chats, and stories\u2014into a single, coherent programmable surface. Sitting in front of a constellation of micro-services (timeline, media, messaging, notifications, and social-graph), it exposes both REST and GraphQL entry points while enforcing strict clean_architecture boundaries: presentation (controllers/resolvers), application (use-cases & DTOs), domain (aggregates, value objects, policies), and infrastructure (adapters & external integrations).\n\nThe gateway prioritizes social-centric concerns such as activity-feed fan-out, real-time presence, and community safety. Built-in rate-limiting and behavioral analytics guard against abusive patterns like follow-spam or message floods. Versioned routing enables gradual rollout of social algorithms (e.g., ranking V2) without breaking third-party clients. Response caching (Redis) accelerates high-fanout endpoints\u2014public timelines, trending hashtags\u2014while WebSocket subscriptions for GraphQL keep users up-to-date with new likes or comments. Comprehensive monitoring, structured logging, and OpenAPI/GraphQL self-documentation make the gateway production-ready for a rapidly evolving social ecosystem.",
+    "domain": "api_gateway",
+    "complexity": "expert",
+    "language": "typescript",
+    "architecture": "clean_architecture",
+    "theme": "social",
+    "target_file_count": 97,
+    "target_token_count": 997410,
+    "features": [
+      "versioning",
+      "response_caching",
+      "api_documentation",
+      "logging",
+      "request_validation",
+      "graphql_schema",
+      "rate_limiting",
+      "monitoring",
+      "rest_endpoints",
+      "authentication",
+      "pagination",
+      "error_handling"
+    ],
+    "architecture_patterns": [
+      "GraphQL_Schema",
+      "Repository_Pattern",
+      "REST_Architecture",
+      "API_Gateway",
+      "Microservices",
+      "Command_Query_Separation",
+      "Service_Layer"
+    ],
+    "dependencies": [
+      "typescript (>=5.x)",
+      "ts-node / esbuild-register (dev, runtime compilation)",
+      "express 5 (HTTP transport layer)",
+      "apollo-server-express (GraphQL schema & gateway stitching)",
+      "graphql-tools & @graphql-codegen/cli (schema generation)",
+      "swagger-ui-express & @nestjs/swagger or tsoa (REST docs)",
+      "class-validator / class-transformer (request validation)",
+      "ajv (JSON Schema validation for dynamic message payloads)",
+      "redis & ioredis (response caching, rate-limit buckets)",
+      "express-rate-limit & rate-limit-redis (rate limiting)",
+      "helmet & cors (security middleware)",
+      "passport, passport-jwt, passport-oauth2 (auth strategies)",
+      "winston & express-winston (structured logging)",
+      "prom-client & prom-bundle (Prometheus metrics)",
+      "pino-pretty (local log formatting)",
+      "typedi or tsyringe (dependency injection for clean_architecture)",
+      "type-graphql (code-first schema tied to application layer)",
+      "dataloader (N+1 mitigation across micro-service calls)",
+      "axios / got (upstream service communication)",
+      "node-cache (in-process short-TTL caching)",
+      "jest & supertest (testing)",
+      "husky & lint-staged (pre-commit quality gates)"
+    ],
+    "seed": 837611
+  },
+  "generated_timestamp": 1754355695.1072361,
+  "phase_1_complete": true,
+  "uniqueness_factors": {
+    "domain": "api_gateway",
+    "complexity": "expert",
+    "architecture": "clean_architecture",
+    "theme": "social",
+    "seed": 837611
+  },
+  "files": [
+    {
+      "path": "src/utils.ts",
+      "type": "source"
+    },
+    {
+      "path": "src/config.ts",
+      "type": "config"
+    },
+    {
+      "path": "src/constants.ts",
+      "type": "source"
+    },
+    {
+      "path": "tests/test_main.ts",
+      "type": "test"
+    },
+    {
+      "path": "tests/test_utils.ts",
+      "type": "test"
+    },
+    {
+      "path": "README.md",
+      "type": "documentation"
+    },
+    {
+      "path": "package.json",
+      "type": "config"
+    },
+    {
+      "path": ".gitignore",
+      "type": "source"
+    },
+    {
+      "path": "Dockerfile",
+      "type": "documentation"
+    },
+    {
+      "path": "docs/api.md",
+      "type": "documentation"
+    },
+    {
+      "path": "src/module_1.ts",
+      "type": "source"
+    },
+    {
+      "path": "src/module_2.ts",
+      "type": "source"
+    },
+    {
+      "path": "src/module_3.ts",
+      "type": "source"
+    },
+    {
+      "path": "src/module_4.ts",
+      "type": "source"
+    },
+    {
+      "path": "src/module_5.ts",
+      "type": "source"
+    },
+    {
+      "path": "src/module_6.ts",
+      "type": "source"
+    },
+    {
+      "path": "src/module_7.ts",
+      "type": "source"
+    },
+    {
+      "path": "src/module_8.ts",
+      "type": "source"
+    },
+    {
+      "path": "src/module_9.ts",
+      "type": "source"
+    },
+    {
+      "path": "src/module_10.ts",
+      "type": "source"
+    },
+    {
+      "path": "src/module_11.ts",
+      "type": "source"
+    },
+    {
+      "path": "src/module_12.ts",
+      "type": "source"
+    },
+    {
+      "path": "src/module_13.ts",
+      "type": "source"
+    },
+    {
+      "path": "src/module_14.ts",
+      "type": "source"
+    },
+    {
+      "path": "src/module_15.ts",
+      "type": "source"
+    },
+    {
+      "path": "src/module_16.ts",
+      "type": "source"
+    },
+    {
+      "path": "src/module_17.ts",
+      "type": "source"
+    },
+    {
+      "path": "src/module_18.ts",
+      "type": "source"
+    },
+    {
+      "path": "src/module_19.ts",
+      "type": "source"
+    },
+    {
+      "path": "src/module_20.ts",
+      "type": "source"
+    },
+    {
+      "path": "src/module_21.ts",
+      "type": "source"
+    },
+    {
+      "path": "src/module_22.ts",
+      "type": "source"
+    },
+    {
+      "path": "src/module_23.ts",
+      "type": "source"
+    },
+    {
+      "path": "src/module_24.ts",
+      "type": "source"
+    },
+    {
+      "path": "src/module_25.ts",
+      "type": "source"
+    },
+    {
+      "path": "src/module_26.ts",
+      "type": "source"
+    },
+    {
+      "path": "src/module_27.ts",
+      "type": "source"
+    },
+    {
+      "path": "src/module_28.ts",
+      "type": "source"
+    },
+    {
+      "path": "src/module_29.ts",
+      "type": "source"
+    },
+    {
+      "path": "src/module_30.ts",
+      "type": "source"
+    },
+    {
+      "path": "src/module_31.ts",
+      "type": "source"
+    },
+    {
+      "path": "src/module_32.ts",
+      "type": "source"
+    },
+    {
+      "path": "src/module_33.ts",
+      "type": "source"
+    },
+    {
+      "path": "src/module_34.ts",
+      "type": "source"
+    },
+    {
+      "path": "src/module_35.ts",
+      "type": "source"
+    },
+    {
+      "path": "src/module_36.ts",
+      "type": "source"
+    },
+    {
+      "path": "src/module_37.ts",
+      "type": "source"
+    },
+    {
+      "path": "src/module_38.ts",
+      "type": "source"
+    },
+    {
+      "path": "src/module_39.ts",
+      "type": "source"
+    },
+    {
+      "path": "src/module_40.ts",
+      "type": "source"
+    },
+    {
+      "path": "src/module_41.ts",
+      "type": "source"
+    },
+    {
+      "path": "src/module_42.ts",
+      "type": "source"
+    },
+    {
+      "path": "src/module_43.ts",
+      "type": "source"
+    },
+    {
+      "path": "src/module_44.ts",
+      "type": "source"
+    },
+    {
+      "path": "src/module_45.ts",
+      "type": "source"
+    },
+    {
+      "path": "src/module_46.ts",
+      "type": "source"
+    },
+    {
+      "path": "src/module_47.ts",
+      "type": "source"
+    },
+    {
+      "path": "src/module_48.ts",
+      "type": "source"
+    },
+    {
+      "path": "src/module_49.ts",
+      "type": "source"
+    },
+    {
+      "path": "src/module_50.ts",
+      "type": "source"
+    },
+    {
+      "path": "src/module_51.ts",
+      "type": "source"
+    },
+    {
+      "path": "src/module_52.ts",
+      "type": "source"
+    },
+    {
+      "path": "src/module_53.ts",
+      "type": "source"
+    },
+    {
+      "path": "src/module_54.ts",
+      "type": "source"
+    },
+    {
+      "path": "src/module_55.ts",
+      "type": "source"
+    },
+    {
+      "path": "src/module_56.ts",
+      "type": "source"
+    },
+    {
+      "path": "src/module_57.ts",
+      "type": "source"
+    },
+    {
+      "path": "src/module_58.ts",
+      "type": "source"
+    },
+    {
+      "path": "src/module_59.ts",
+      "type": "source"
+    },
+    {
+      "path": "src/module_60.ts",
+      "type": "source"
+    },
+    {
+      "path": "src/module_61.ts",
+      "type": "source"
+    },
+    {
+      "path": "src/module_62.ts",
+      "type": "source"
+    },
+    {
+      "path": "src/module_63.ts",
+      "type": "source"
+    },
+    {
+      "path": "src/module_64.ts",
+      "type": "source"
+    },
+    {
+      "path": "src/module_65.ts",
+      "type": "source"
+    },
+    {
+      "path": "src/module_66.ts",
+      "type": "source"
+    },
+    {
+      "path": "src/module_67.ts",
+      "type": "source"
+    },
+    {
+      "path": "src/module_68.ts",
+      "type": "source"
+    },
+    {
+      "path": "src/module_69.ts",
+      "type": "source"
+    },
+    {
+      "path": "src/module_70.ts",
+      "type": "source"
+    },
+    {
+      "path": "src/module_71.ts",
+      "type": "source"
+    },
+    {
+      "path": "src/module_72.ts",
+      "type": "source"
+    },
+    {
+      "path": "src/module_73.ts",
+      "type": "source"
+    },
+    {
+      "path": "src/module_74.ts",
+      "type": "source"
+    },
+    {
+      "path": "src/module_75.ts",
+      "type": "source"
+    },
+    {
+      "path": "src/module_76.ts",
+      "type": "source"
+    },
+    {
+      "path": "src/module_77.ts",
+      "type": "source"
+    },
+    {
+      "path": "src/module_78.ts",
+      "type": "source"
+    },
+    {
+      "path": "src/module_79.ts",
+      "type": "source"
+    },
+    {
+      "path": "src/module_80.ts",
+      "type": "source"
+    },
+    {
+      "path": "src/module_81.ts",
+      "type": "source"
+    },
+    {
+      "path": "src/module_82.ts",
+      "type": "source"
+    },
+    {
+      "path": "src/module_83.ts",
+      "type": "source"
+    },
+    {
+      "path": "src/module_84.ts",
+      "type": "source"
+    }
+  ],
+  "generated_stats": {
+    "files_count": 97,
+    "lines_count": 30424,
+    "generation_time": 2534.708570957184,
+    "timestamp": 1754374608.327764
+  }
+}

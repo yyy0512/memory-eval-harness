@@ -1,0 +1,454 @@
+```rust
+//! src/module_39.rs
+//!
+//! Hardened session-management layer for ChromaticCanvas Control Center.
+//!
+//! This module exposes a reusable Actix-web middleware + extractor pair that
+//! performs the following duties:
+//!  • Creates, stores and validates signed session cookies (`Secure`, `HttpOnly`,
+//!    `SameSite=Strict`) to protect against XSS / CSRF.
+//!  • Transparently injects the `AuthSession` extractor into request handlers
+//!    once a session has been verified.
+//!  • Ships with an in-memory store for testing and a Redis implementation for
+//!    production (feature-gated behind `redis-store`).
+//!
+//! The design purposefully avoids leaking cryptographic primitives to calling
+//! code; all signing/verification happens inside the middleware boundary.
+
+// ===============  External Crates  =================
+use actix_session::SessionExt;
+use actix_web::{
+    cookie::{time::Duration as CookieDuration, Cookie, SameSite},
+    dev::{forward_ready, Service, ServiceRequest, ServiceResponse, Transform},
+    error::{ErrorForbidden, ErrorInternalServerError, ErrorUnauthorized},
+    http::header,
+    web, Error, FromRequest, HttpMessage, HttpRequest, HttpResponse,
+};
+use async_trait::async_trait;
+use futures_util::future::{ok, LocalBoxFuture, Ready};
+use hmac::{Hmac, Mac};
+use rand::RngCore;
+use serde::{Deserialize, Serialize};
+use sha2::Sha256;
+use std::{
+    collections::HashMap,
+    future::Future,
+    pin::Pin,
+    sync::{Arc, RwLock},
+    task::{Context, Poll},
+};
+use time::{OffsetDateTime, Duration};
+use uuid::Uuid;
+
+// ===============  Constants & Types  ===============
+const SESSION_COOKIE: &str = "cc_session";
+const CSRF_HEADER: &str = "x-cc-csrf-token";
+const DEFAULT_TTL_MINUTES: i64 = 60;
+
+type HmacSha256 = Hmac<Sha256>;
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SessionState {
+    pub id: Uuid,
+    pub user_id: Uuid,
+    pub csrf: String,
+    pub expires_at: OffsetDateTime,
+}
+
+impl SessionState {
+    /// Create a brand-new, unpersisted session.
+    fn new(user_id: Uuid) -> Self {
+        let mut bytes = [0u8; 32];
+        rand::thread_rng().fill_bytes(&mut bytes);
+        Self {
+            id: Uuid::new_v4(),
+            user_id,
+            csrf: base64::encode(bytes),
+            expires_at: OffsetDateTime::now_utc()
+                + Duration::minutes(DEFAULT_TTL_MINUTES),
+        }
+    }
+
+    /// Validate session expiration and optional CSRF token.
+    fn validate(&self, incoming_csrf: Option<&str>) -> Result<(), SessionError> {
+        if self.expires_at < OffsetDateTime::now_utc() {
+            return Err(SessionError::Expired);
+        }
+        if let Some(token) = incoming_csrf {
+            if token != self.csrf {
+                return Err(SessionError::CsrfMismatch);
+            }
+        }
+        Ok(())
+    }
+}
+
+// ===============  Error Handling  ==================
+#[derive(thiserror::Error, Debug)]
+pub enum SessionError {
+    #[error("Session expired")]
+    Expired,
+    #[error("Invalid session signature")]
+    InvalidSignature,
+    #[error("CSRF token mismatch")]
+    CsrfMismatch,
+    #[error("Session not found")]
+    NotFound,
+    #[error("Store error: {0}")]
+    Store(String),
+}
+
+impl actix_web::ResponseError for SessionError {
+    fn status_code(&self) -> actix_web::http::StatusCode {
+        use actix_web::http::StatusCode::*;
+        match self {
+            SessionError::Expired | SessionError::NotFound => UNAUTHORIZED,
+            SessionError::CsrfMismatch => FORBIDDEN,
+            SessionError::InvalidSignature => UNAUTHORIZED,
+            SessionError::Store(_) => INTERNAL_SERVER_ERROR,
+        }
+    }
+}
+
+// ===============  Store Abstraction  ===============
+#[async_trait]
+pub trait SessionStore: Send + Sync + 'static {
+    async fn get(&self, id: &Uuid) -> Result<Option<SessionState>, SessionError>;
+    async fn insert(&self, state: SessionState) -> Result<(), SessionError>;
+    async fn remove(&self, id: &Uuid) -> Result<(), SessionError>;
+}
+
+/// Simple, concurrency-safe in-memory session store useful for unit tests.
+/// For distributed deployments compile with `--features redis-store`.
+#[derive(Default, Clone)]
+pub struct MemorySessionStore {
+    inner: Arc<RwLock<HashMap<Uuid, SessionState>>>,
+}
+
+#[async_trait]
+impl SessionStore for MemorySessionStore {
+    async fn get(&self, id: &Uuid) -> Result<Option<SessionState>, SessionError> {
+        Ok(self.inner.read().unwrap().get(id).cloned())
+    }
+
+    async fn insert(&self, state: SessionState) -> Result<(), SessionError> {
+        self.inner
+            .write()
+            .map_err(|e| SessionError::Store(e.to_string()))?
+            .insert(state.id, state);
+        Ok(())
+    }
+
+    async fn remove(&self, id: &Uuid) -> Result<(), SessionError> {
+        self.inner
+            .write()
+            .map_err(|e| SessionError::Store(e.to_string()))?
+            .remove(id);
+        Ok(())
+    }
+}
+
+#[cfg(all(feature = "redis-store", not(test)))]
+mod redis_store {
+    use super::*;
+    use deadpool_redis::{redis::AsyncCommands, Pool};
+
+    #[derive(Clone)]
+    pub struct RedisSessionStore {
+        pool: Pool,
+    }
+
+    impl RedisSessionStore {
+        pub fn new(pool: Pool) -> Self {
+            Self { pool }
+        }
+    }
+
+    #[async_trait]
+    impl SessionStore for RedisSessionStore {
+        async fn get(&self, id: &Uuid) -> Result<Option<SessionState>, SessionError> {
+            let mut conn = self.pool.get().await.map_err(|e| SessionError::Store(e.to_string()))?;
+            let bytes: Option<Vec<u8>> = conn.get(id.to_string()).await
+                .map_err(|e| SessionError::Store(e.to_string()))?;
+            Ok(bytes.map(|b| bincode::deserialize(&b).expect("deserialize")))
+        }
+
+        async fn insert(&self, state: SessionState) -> Result<(), SessionError> {
+            let ttl = (state.expires_at - OffsetDateTime::now_utc()).whole_seconds();
+            let mut conn = self.pool.get().await.map_err(|e| SessionError::Store(e.to_string()))?;
+            let bytes = bincode::serialize(&state).expect("serialize");
+            conn.set_ex(state.id.to_string(), bytes, ttl as usize)
+                .await
+                .map_err(|e| SessionError::Store(e.to_string()))?;
+            Ok(())
+        }
+
+        async fn remove(&self, id: &Uuid) -> Result<(), SessionError> {
+            let mut conn = self.pool.get().await.map_err(|e| SessionError::Store(e.to_string()))?;
+            conn.del::<_, ()>(id.to_string()).await
+                .map_err(|e| SessionError::Store(e.to_string()))?;
+            Ok(())
+        }
+    }
+}
+
+// ===============  Cookie Sign / Verify  =============
+#[derive(Clone)]
+struct CookieSigner {
+    key: Arc<[u8; 32]>,
+}
+
+impl CookieSigner {
+    fn new(key: [u8; 32]) -> Self {
+        Self { key: Arc::new(key) }
+    }
+
+    /// Encode & sign the session id.
+    fn sign(&self, session_id: &Uuid) -> String {
+        let mut mac = HmacSha256::new_from_slice(&self.key[..]).expect("HMAC");
+        mac.update(session_id.as_bytes());
+        let sig = mac.finalize().into_bytes();
+        base64::encode_config([session_id.as_bytes(), &sig[..]].concat(), base64::URL_SAFE_NO_PAD)
+    }
+
+    /// Decode, verify signature, and retrieve pure session id.
+    fn verify(&self, token: &str) -> Result<Uuid, SessionError> {
+        let bytes =
+            base64::decode_config(token, base64::URL_SAFE_NO_PAD).map_err(|_| SessionError::InvalidSignature)?;
+        if bytes.len() != 16 + 32 {
+            return Err(SessionError::InvalidSignature);
+        }
+        let (id_part, sig_part) = bytes.split_at(16);
+        let mut mac = HmacSha256::new_from_slice(&self.key[..]).expect("HMAC");
+        mac.update(id_part);
+        mac.verify_slice(sig_part).map_err(|_| SessionError::InvalidSignature)?;
+        Ok(Uuid::from_slice(id_part).expect("uuid"))
+    }
+}
+
+// ===============  AuthSession Extractor  ===========
+#[derive(Debug, Clone)]
+pub struct AuthSession(pub SessionState);
+
+impl std::ops::Deref for AuthSession {
+    type Target = SessionState;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl From<SessionState> for AuthSession {
+    fn from(s: SessionState) -> Self {
+        Self(s)
+    }
+}
+
+impl FromRequest for AuthSession {
+    type Error = Error;
+    type Future = Pin<Box<dyn Future<Output = Result<Self, Error>>>>;
+    type Config = ();
+
+    fn from_request(req: &HttpRequest, _: &mut actix_web::dev::Payload) -> Self::Future {
+        let store = req
+            .app_data::<web::Data<Arc<dyn SessionStore>>>()
+            .cloned()
+            .expect("SessionStore not configured");
+
+        let signer = req
+            .app_data::<web::Data<CookieSigner>>()
+            .cloned()
+            .expect("CookieSigner not configured");
+
+        let cookie_opt = req.cookie(SESSION_COOKIE).map(|c| c.value().to_owned());
+        let csrf_header = req
+            .headers()
+            .get(CSRF_HEADER)
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_owned);
+
+        Box::pin(async move {
+            let cookie = cookie_opt.ok_or_else(|| ErrorUnauthorized(SessionError::NotFound))?;
+            let session_id = signer.verify(&cookie).map_err(ErrorUnauthorized)?;
+
+            let state = store
+                .get(&session_id)
+                .await?
+                .ok_or_else(|| ErrorUnauthorized(SessionError::NotFound))?;
+
+            state.validate(csrf_header.as_deref()).map_err(ErrorForbidden)?;
+
+            Ok(AuthSession(state))
+        })
+    }
+}
+
+// ===============  Session Middleware  ==============
+pub struct SessionMiddleware<S> {
+    service: S,
+    store: Arc<dyn SessionStore>,
+    signer: CookieSigner,
+}
+
+impl<S, B> Service<ServiceRequest> for SessionMiddleware<S>
+where
+    S: Service<ServiceRequest, Response = ServiceResponse<B>, Error = Error> + 'static,
+    S::Future: 'static,
+{
+    type Response = ServiceResponse<B>;
+    type Error = Error;
+    type Future = S::Future;
+
+    forward_ready!(service);
+
+    fn call(&self, mut req: ServiceRequest) -> Self::Future {
+        req.extensions_mut().insert(self.store.clone());
+        req.extensions_mut().insert(self.signer.clone());
+        self.service.call(req)
+    }
+}
+
+pub struct SessionMiddlewareFactory {
+    store: Arc<dyn SessionStore>,
+    signer: CookieSigner,
+}
+
+impl SessionMiddlewareFactory {
+    pub fn new(store: Arc<dyn SessionStore>, secret_key: [u8; 32]) -> Self {
+        Self {
+            store,
+            signer: CookieSigner::new(secret_key),
+        }
+    }
+}
+
+impl<S, B> Transform<S, ServiceRequest> for SessionMiddlewareFactory
+where
+    S: Service<ServiceRequest, Response = ServiceResponse<B>, Error = Error> + 'static,
+    S::Future: 'static,
+{
+    type Response = ServiceResponse<B>;
+    type Error = Error;
+    type InitError = ();
+    type Transform = SessionMiddleware<S>;
+    type Future = Ready<Result<Self::Transform, Self::InitError>>;
+
+    fn new_transform(&self, service: S) -> Self::Future {
+        ok(SessionMiddleware {
+            service,
+            store: self.store.clone(),
+            signer: self.signer.clone(),
+        })
+    }
+}
+
+// ===============  HTTP Handlers  ===================
+#[derive(Deserialize)]
+pub struct LoginRequest {
+    pub username: String,
+    pub password: String,
+}
+
+#[derive(Serialize)]
+pub struct LoginResponse {
+    pub user_id: Uuid,
+    pub csrf_token: String,
+}
+
+#[actix_web::post("/login")]
+async fn login(
+    req: HttpRequest,
+    form: web::Json<LoginRequest>,
+    store: web::Data<Arc<dyn SessionStore>>,
+    signer: web::Data<CookieSigner>,
+) -> Result<HttpResponse, Error> {
+    // TODO: Replace with real authentication (hash + salt + Argon2).
+    if form.username != "admin" || form.password != "password" {
+        return Err(ErrorUnauthorized("Invalid credentials"));
+    }
+
+    let user_id = Uuid::new_v4();
+    let mut state = SessionState::new(user_id);
+    store.insert(state.clone()).await?;
+
+    // Sign & emit cookie.
+    let signed = signer.sign(&state.id);
+    let secure = req.connection_info().scheme() == "https";
+
+    let cookie = Cookie::build(SESSION_COOKIE, signed)
+        .path("/")
+        .max_age(CookieDuration::minutes(DEFAULT_TTL_MINUTES))
+        .http_only(true)
+        .same_site(SameSite::Strict)
+        .secure(secure)
+        .finish();
+
+    Ok(HttpResponse::Ok()
+        .append_header((header::SET_COOKIE, cookie.to_string()))
+        .json(LoginResponse {
+            user_id,
+            csrf_token: state.csrf.clone(),
+        }))
+}
+
+#[actix_web::post("/logout")]
+async fn logout(
+    req: HttpRequest,
+    store: web::Data<Arc<dyn SessionStore>>,
+    signer: web::Data<CookieSigner>,
+) -> Result<HttpResponse, Error> {
+    let cookie = req
+        .cookie(SESSION_COOKIE)
+        .ok_or_else(|| ErrorUnauthorized(SessionError::NotFound))?;
+
+    let id = signer.verify(cookie.value()).map_err(ErrorUnauthorized)?;
+    store.remove(&id).await?;
+
+    let clearing_cookie = Cookie::build(SESSION_COOKIE, "")
+        .path("/")
+        .max_age(CookieDuration::seconds(0))
+        .http_only(true)
+        .finish();
+
+    Ok(HttpResponse::Ok()
+        .append_header((header::SET_COOKIE, clearing_cookie.to_string()))
+        .json(serde_json::json!({ "status": "logged out" })))
+}
+
+// ===============  Configure Helper  =================
+pub fn configure_service(cfg: &mut web::ServiceConfig) {
+    cfg.service(login).service(logout);
+}
+
+// ===============  Wire-up Example  ==================
+/*
+use actix_web::{App, HttpServer};
+use std::env;
+
+#[actix_web::main]
+async fn main() -> std::io::Result<()> {
+    dotenv::dotenv().ok();
+    let secret = env::var("CC_SESSION_SECRET")
+        .expect("CC_SESSION_SECRET not set")
+        .as_bytes()
+        .try_into()
+        .expect("32-byte secret");
+
+    let store = MemorySessionStore::default(); // swap for RedisSessionStore in prod
+    let store_arc: Arc<dyn SessionStore> = Arc::new(store);
+
+    HttpServer::new(move || {
+        App::new()
+            .app_data(web::Data::from(store_arc.clone()))
+            .app_data(web::Data::new(CookieSigner::new(secret)))
+            .wrap(SessionMiddlewareFactory::new(
+                store_arc.clone(),
+                secret,
+            ))
+            .configure(configure_service)
+    })
+    .bind(("127.0.0.1", 8080))?
+    .run()
+    .await
+}
+*/
+```

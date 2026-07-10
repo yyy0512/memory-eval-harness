@@ -1,0 +1,373 @@
+```rust
+//! src/module_7.rs
+//!
+//! ChromaticCanvas Control Center – Secure Session Middleware
+//! ----------------------------------------------------------
+//! This module provides a production-grade Actix-Web middleware that
+//! offers encrypted + signed cookie-based session management.  It is
+//! opinionated toward HTTPS-only deployments and is intended to be
+//! mounted early in the middleware stack so that downstream services
+//! can rely on an authenticated `Session` object stored in the request
+//! extensions.
+//!
+//! Highlights
+//! ----------
+//! • Tamper-proof HMAC-SHA256 signatures  
+//! • Expiration & replay-protection with monotonic timestamps  
+//! • Strict Secure / SameSite cookie flags for SSL environments  
+//! • Ergonomic extractor for handlers (`SessionExtractor`)  
+//! • Transparent error propagation w/ `thiserror`
+//!
+//! ## Feature flags
+//! This module assumes the following dependencies are enabled in
+//! `Cargo.toml` (omitted here for brevity):
+//!   actix-web, async-trait, base64, chrono, futures, hmac, sha2,
+//!   rand, serde, serde_json, thiserror, uuid
+//!
+//! --------------------------------------------------------------------
+
+use std::{
+    future::{ready, Ready},
+    pin::Pin,
+    rc::Rc,
+    sync::Arc,
+    task::{Context, Poll},
+};
+
+use actix_web::{
+    body::EitherBody,
+    dev::{forward_ready, Service, ServiceRequest, ServiceResponse, Transform},
+    error::{ErrorForbidden, ErrorUnauthorized},
+    http::{header, HeaderValue},
+    Error, FromRequest, HttpMessage, HttpResponse,
+};
+use async_trait::async_trait;
+use base64::{
+    engine::general_purpose::URL_SAFE_NO_PAD as B64,
+    Engine as _,
+};
+use chrono::{DateTime, Duration, Utc};
+use futures::Future;
+use hmac::{Hmac, Mac};
+use rand::{rngs::OsRng, RngCore};
+use serde::{Deserialize, Serialize};
+use sha2::Sha256;
+use thiserror::Error;
+use uuid::Uuid;
+
+/// Alias for the chosen MAC algorithm.
+type HmacSha256 = Hmac<Sha256>;
+
+/// Publicly re-exported error type so downstream code can pattern-match.
+#[derive(Debug, Error)]
+pub enum SessionError {
+    #[error("missing session cookie")]
+    MissingCookie,
+    #[error("unable to decode session cookie")]
+    MalformedCookie,
+    #[error("HMAC signature mismatch")]
+    InvalidSignature,
+    #[error("expired session")]
+    Expired,
+    #[error("internal serialization error")]
+    Serialization(#[from] serde_json::Error),
+}
+
+/// Semi-private (crate) structure holding raw session data.  Feel free
+/// to extend with custom claims (tenant_id, scope, etc.).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Session {
+    pub session_id: Uuid,
+    pub user_id: Uuid,
+    issued_at: DateTime<Utc>,
+    expires_at: DateTime<Utc>,
+    /// Client IP at time of issuance.  Helps protect against
+    /// cross-device replay attacks.  (IPv4/IPv6 compatible)
+    ip: String,
+}
+
+impl Session {
+    const VERSION: u8 = 1;
+
+    pub fn is_expired(&self) -> bool {
+        Utc::now() >= self.expires_at
+    }
+}
+
+/// Configuration object to be shared between middleware instances.
+#[derive(Clone)]
+pub struct SessionConfig {
+    /// 32-byte (256-bit) secret key.  Rotate regularly!
+    secret_key: Arc<[u8; 32]>,
+    /// Name of the cookie carrying the session.
+    pub cookie_name: String,
+    /// TTL of the session in chrono `Duration`.
+    pub ttl: Duration,
+    /// Are we behind an SSL-terminating proxy?  If so, set Secure flag.
+    pub secure_only: bool,
+}
+
+impl SessionConfig {
+    pub fn new<S: Into<String>>(secret_key: [u8; 32], cookie_name: S) -> Self {
+        Self {
+            secret_key: Arc::new(secret_key),
+            cookie_name: cookie_name.into(),
+            ttl: Duration::hours(8),
+            secure_only: true,
+        }
+    }
+}
+
+/// Transform type required by Actix-Web.
+pub struct SessionMiddleware {
+    cfg: Rc<SessionConfig>,
+}
+
+impl SessionMiddleware {
+    pub fn builder(cfg: SessionConfig) -> Self {
+        Self { cfg: Rc::new(cfg) }
+    }
+
+    /// Internal: serialize + sign session, returning a URL-safe base64 blob.
+    fn encode(&self, session: &Session) -> Result<String, SessionError> {
+        let mut mac = HmacSha256::new_from_slice(&self.cfg.secret_key[..])
+            .expect("HMAC can take key of any size"); // infallible
+
+        let json = serde_json::to_vec(session)?;
+        mac.update(&json);
+        let sig = mac.finalize().into_bytes();
+
+        let mut payload = Vec::with_capacity(1 + json.len() + sig.len());
+        payload.push(Session::VERSION);
+        payload.extend_from_slice(&json);
+        payload.extend_from_slice(&sig);
+
+        Ok(B64.encode(payload))
+    }
+
+    /// Internal: parse + validate cookie value, returning a Session object.
+    fn decode(&self, raw: &str) -> Result<Session, SessionError> {
+        let bytes = B64
+            .decode(raw)
+            .map_err(|_| SessionError::MalformedCookie)?;
+
+        if bytes.is_empty() || bytes[0] != Session::VERSION {
+            return Err(SessionError::MalformedCookie);
+        }
+
+        // split bytes into data + signature
+        if bytes.len() < 33 {
+            // version (1) + min JSON (2) + sig(32) => sanity check
+            return Err(SessionError::MalformedCookie);
+        }
+        let (json, sig) = bytes[1..].split_at(bytes.len() - 1 - 32);
+
+        let mut mac = HmacSha256::new_from_slice(&self.cfg.secret_key[..])
+            .expect("HMAC can take key of any size");
+        mac.update(json);
+
+        mac.verify_slice(sig)
+            .map_err(|_| SessionError::InvalidSignature)?;
+
+        let session: Session = serde_json::from_slice(json)?;
+
+        if session.is_expired() {
+            return Err(SessionError::Expired);
+        }
+        Ok(session)
+    }
+}
+
+// ---------------------------------------------------------------------
+// Actix-Web Integration
+// ---------------------------------------------------------------------
+
+impl<S, B> Transform<S, ServiceRequest> for SessionMiddleware
+where
+    S: Service<ServiceRequest, Response = ServiceResponse<B>, Error = Error> + 'static,
+    B: 'static,
+{
+    type Response = ServiceResponse<EitherBody<B>>;
+    type Error = Error;
+    type InitError = ();
+    type Transform = SessionMiddlewareService<S>;
+    type Future = Ready<Result<Self::Transform, Self::InitError>>;
+
+    fn new_transform(&self, inner: S) -> Self::Future {
+        ready(Ok(SessionMiddlewareService {
+            inner: Rc::new(inner),
+            cfg: self.cfg.clone(),
+        }))
+    }
+}
+
+/// The actual service that wraps downstream handlers.
+pub struct SessionMiddlewareService<S> {
+    inner: Rc<S>,
+    cfg: Rc<SessionConfig>,
+}
+
+impl<S, B> Service<ServiceRequest> for SessionMiddlewareService<S>
+where
+    S: Service<ServiceRequest, Response = ServiceResponse<B>, Error = Error> + 'static,
+    B: 'static,
+{
+    type Response = ServiceResponse<EitherBody<B>>;
+    type Error = Error;
+    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>>>>;
+
+    forward_ready!(inner);
+
+    fn call(&self, mut req: ServiceRequest) -> Self::Future {
+        let cfg = self.cfg.clone();
+
+        // Attempt to extract session from the incoming cookie.
+        let session_result = req
+            .cookie(&cfg.cookie_name)
+            .map(|c| c.value().to_owned())
+            .ok_or(SessionError::MissingCookie)
+            .and_then(|raw| SessionMiddleware { cfg: cfg.clone() }.decode(&raw));
+
+        // Expose session (if valid) to downstream handlers via extensions.
+        match session_result {
+            Ok(session) => {
+                req.extensions_mut().insert(session);
+            }
+            Err(SessionError::MissingCookie | SessionError::Expired) => {
+                // No session: continue; downstream can decide to 401.
+            }
+            Err(e) => {
+                // Invalid HMAC or malformed cookie: consider the request forbidden.
+                return Box::pin(async move {
+                    Err::<ServiceResponse<EitherBody<B>>, _>(ErrorForbidden(e))
+                });
+            }
+        }
+
+        let cookie_name = cfg.cookie_name.clone();
+        let secure_only = cfg.secure_only;
+
+        let fut = self.inner.call(req);
+
+        Box::pin(async move {
+            let mut res = fut.await?;
+
+            // If a downstream handler stored a new session in extensions,
+            // encode & set it on the response.
+            if let Some(session) = res
+                .request()
+                .extensions()
+                .get::<Session>()
+                .cloned()
+                .filter(|s| !s.is_expired())
+            {
+                let value = SessionMiddleware { cfg }.encode(&session)?;
+                let mut cookie = actix_web::cookie::Cookie::build(cookie_name, value)
+                    .path("/")
+                    .http_only(true)
+                    .same_site(actix_web::cookie::SameSite::Lax)
+                    .secure(secure_only)
+                    .max_age(time::Duration::seconds(
+                        (session.expires_at - session.issued_at).num_seconds(),
+                    ))
+                    .finish();
+
+                // Actix automatically adds `Set-Cookie` when Cookie is appended.
+                res.response_mut().add_cookie(&cookie).ok();
+            }
+
+            Ok(res.map_into_left_body())
+        })
+    }
+}
+
+// ---------------------------------------------------------------------
+// Helper utilities for user code
+// ---------------------------------------------------------------------
+
+/// Issues a brand-new session for a given user_id and attaches it to
+/// request extensions so that [`SessionMiddleware`] can set the cookie.
+pub fn issue_session<S>(
+    req: &mut actix_web::HttpRequest,
+    cfg: &SessionConfig,
+    user_id: Uuid,
+) -> Session {
+    let now = Utc::now();
+    let expires_at = now + cfg.ttl;
+    let mut random = [0u8; 16];
+    OsRng.fill_bytes(&mut random);
+
+    let session = Session {
+        session_id: Uuid::from_bytes(random),
+        user_id,
+        issued_at: now,
+        expires_at,
+        ip: req
+            .connection_info()
+            .realip_remote_addr()
+            .unwrap_or("0.0.0.0")
+            .to_owned(),
+    };
+
+    req.extensions_mut().insert(session.clone());
+    session
+}
+
+// ---------------------------------------------------------------------
+// Extractor: enables ergonomic handler signatures
+// ---------------------------------------------------------------------
+
+pub struct SessionExtractor(pub Session);
+
+#[async_trait(?Send)]
+impl FromRequest for SessionExtractor {
+    type Error = Error;
+    type Future = Ready<Result<Self, Self::Error>>;
+    type Config = ();
+
+    fn from_request(req: &actix_web::HttpRequest, _: &mut actix_web::dev::Payload) -> Self::Future {
+        if let Some(session) = req.extensions().get::<Session>() {
+            return ready(Ok(SessionExtractor(session.clone())));
+        }
+        ready(Err(ErrorUnauthorized("unauthenticated")))
+    }
+}
+
+// ---------------------------------------------------------------------
+// Example usage (for reference only, not compiled here):
+// ---------------------------------------------------------------------
+//
+//  use actix_web::{web, App, HttpServer};
+//
+//  #[actix_web::main]
+//  async fn main() -> std::io::Result<()> {
+//      let cfg = SessionConfig::new(*b"32bytes_of_super_secret_key________", "cc_session");
+//
+//      HttpServer::new(move || {
+//          App::new()
+//              .wrap(SessionMiddleware::builder(cfg.clone()))
+//              .route("/login", web::post().to(login_handler))
+//              .route("/me", web::get().to(me_handler))
+//      })
+//      .bind_rustls("0.0.0.0:443", load_tls_config()?)?  // SSL enforced
+//      .run()
+//      .await
+//  }
+//
+//  async fn login_handler(
+//      req: actix_web::HttpRequest,
+//      cfg: web::Data<SessionConfig>,
+//  ) -> actix_web::Result<HttpResponse> {
+//      // … authenticate credentials …
+//      let user_id = Uuid::new_v4();
+//      issue_session(&mut req.clone(), &cfg, user_id);
+//      Ok(HttpResponse::Ok().finish())
+//  }
+//
+//  async fn me_handler(SessionExtractor(session): SessionExtractor) -> String {
+//      format!("Hello user {}", session.user_id)
+//  }
+//
+// ---------------------------------------------------------------------
+
+```

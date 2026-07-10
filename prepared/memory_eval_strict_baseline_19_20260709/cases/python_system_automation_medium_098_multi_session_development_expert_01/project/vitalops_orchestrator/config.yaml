@@ -1,0 +1,243 @@
+```yaml
+# ============================================================================
+#  VitalOps Orchestrator – System-Automation Platform
+#  Production Configuration
+# ----------------------------------------------------------------------------
+#  NOTE:
+#    • Secrets should be injected through *_env variables or secret-mounts.
+#    • All time units follow Prometheus/ISO-8601 where applicable.
+#    • This file is consumed at start-up by `vitalops_orchestrator.bootstrap`.
+# ============================================================================
+
+vitalops_orchestrator:
+  version: "1.4.0"
+  environment: "production"
+  hospital_id: "ST_MARYS_001"
+  timezone: "UTC"
+
+# ---------------------------------------------------------------------------
+# Runtime & Process Settings
+# ---------------------------------------------------------------------------
+runtime:
+  python: "3.11"
+  uvloop: true                 # Switch event-loop to ultra-fast uvloop
+  max_workers: 64              # Thread/ProcessPool cap for async blockers
+  graceful_shutdown_timeout: 30s
+
+# ---------------------------------------------------------------------------
+# Logging & Distributed Tracing
+# ---------------------------------------------------------------------------
+logging:
+  level: INFO
+  format: "[%(asctime)s] %(levelname)s %(name)s: %(message)s"
+  structured: true             # Ship JSON logs to ELK if true
+  handlers:
+    console:
+      class: logging.StreamHandler
+      level: INFO
+    rotating_file:
+      class: logging.handlers.TimedRotatingFileHandler
+      filename: /var/log/vitalops/orchestrator.log
+      when: midnight
+      backupCount: 14
+      level: INFO
+  tracing:
+    enabled: true
+    exporter: otlp
+    endpoint: "http://otel-collector.monitoring:4317"
+
+# ---------------------------------------------------------------------------
+# Messaging – Event Bus (RabbitMQ)
+# ---------------------------------------------------------------------------
+messaging:
+  broker: rabbitmq
+  connection:
+    host: "rabbitmq-cluster.messaging.svc.cluster.local"
+    port: 5672
+    virtual_host: "vitalops"
+    username: "orchestrator"
+    password_env: "RABBITMQ_PASSWORD"
+    heartbeat: 30
+  exchanges:
+    events: "vitalops.events"
+    commands: "vitalops.commands"
+  queues:
+    performance_metrics:
+      binding_key: "metrics.*"
+      durable: true
+    remediation_requests:
+      binding_key: "remediation.*"
+      durable: true
+  prefetch_count: 256
+  retry_policy:
+    max_attempts: 5
+    initial_interval_ms: 500
+    backoff_multiplier: 2.0
+
+# ---------------------------------------------------------------------------
+# Service-Mesh Sidecar (Envoy/Istio)
+# ---------------------------------------------------------------------------
+service_mesh:
+  sidecar_image: "envoyproxy/envoy:v1.28-latest"
+  tls:
+    mode: ISTIO_MUTUAL
+    trusted_ca: "/etc/pki/ca.crt"
+  traffic_policy:
+    outlier_detection:
+      consecutive_5xx_errors: 2
+      interval: 5s
+      base_ejection_time: 30s
+    connection_pool:
+      http1_max_pending_requests: 1000
+      http2_max_requests: 2048
+
+# ---------------------------------------------------------------------------
+# Metrics – Collection & Retention
+# ---------------------------------------------------------------------------
+metrics:
+  scrape_interval: 15s
+  push_gateway: "http://prometheus-pushgateway.monitoring:9091"
+  exporters:
+    - type: prometheus
+      port: 9100
+    - type: statsd
+      host: "statsd.monitoring.svc.cluster.local"
+      port: 8125
+  retention_days: 30
+
+# ---------------------------------------------------------------------------
+# Load-Balancing Rules
+# ---------------------------------------------------------------------------
+load_balancing:
+  strategy: weighted_round_robin
+  weight_sources:
+    - perf_score
+    - patient_safety_priority
+  thresholds:
+    cpu_util:
+      critical: 0.85
+      warning: 0.70
+    memory_util:
+      critical: 0.90
+      warning: 0.75
+  overcommit:
+    enabled: true
+    ratio: 1.2               # Allows 20 % CPU overcommit if safe
+
+# ---------------------------------------------------------------------------
+# Alerting & Notification Channels
+# ---------------------------------------------------------------------------
+alerting:
+  enable: true
+  channels:
+    pagerduty:
+      routing_key_env: "PAGERDUTY_ROUTING_KEY"
+      severity_map:
+        critical: critical
+        warning: error
+    slack:
+      webhook_url_env: "SLACK_WEBHOOK_URL"
+      mention: "@oncall-sre"
+  rules:
+    - id: pacs_latency_high
+      description: "PACS latency exceeds diagnostic threshold"
+      expr: "pacs_request_latency_seconds_p99 > 2"
+      for: 2m
+      severity: critical
+    - id: sepsis_service_degraded
+      description: "Sepsis-prediction ML service degraded"
+      expr: "sepsis_service_success_rate < 0.95"
+      for: 3m
+      severity: warning
+
+# ---------------------------------------------------------------------------
+# Backup & Recovery Workflows
+# ---------------------------------------------------------------------------
+backup_recovery:
+  schedule: "0 */6 * * *"   # Every six hours
+  retention:
+    snapshots: 28           # 7-day snapshot (6-hour interval)
+    full_backups: 7         # 7 weeks of Sunday fulls
+  storage:
+    type: s3
+    bucket: "vitalops-backups"
+    region: "us-east-1"
+    endpoint: "https://s3.amazonaws.com"
+    access_key_env: "BACKUP_S3_ACCESS_KEY"
+    secret_key_env: "BACKUP_S3_SECRET_KEY"
+  encryption:
+    enabled: true
+    kms_key_id: "arn:aws:kms:us-east-1:123456789012:key/abcd-efgh"
+  hooks:
+    pre_backup_script: "/opt/vitalops/scripts/pre_backup.sh"
+    post_backup_script: "/opt/vitalops/scripts/post_backup.sh"
+
+# ---------------------------------------------------------------------------
+# Deployment Automation – Container Roll-outs
+# ---------------------------------------------------------------------------
+deployment_automation:
+  container_registry:
+    url: "registry.hospital.local"
+    username_env: "REGISTRY_USER"
+    password_env: "REGISTRY_PASSWORD"
+  rollout:
+    strategy: canary
+    steps: 3
+    traffic_shift_percentages: [10, 30, 100]
+    pause_between_steps: 5m
+  health_checks:
+    http:
+      path: "/healthz"
+      expected_status: 200
+      initial_delay: 10s
+      timeout: 3s
+  rollback:
+    on_failure: true
+    monitor_window: 10m
+
+# ---------------------------------------------------------------------------
+# Policy Packs – Compliance, Throttling, etc.
+# ---------------------------------------------------------------------------
+policies:
+  compliance:
+    hipaa:
+      logging_required: true
+      phi_encryption: AES256
+      audit_retention_days: 365
+  throttling:
+    enabled: true
+    max_ops_per_minute: 3000
+    burst_capacity: 500
+
+# ---------------------------------------------------------------------------
+# Feature Flags for Gradual Releases
+# ---------------------------------------------------------------------------
+feature_flags:
+  enable_experimental_scheduler: false
+  enable_ml_based_predictive_scaling: true
+
+# ---------------------------------------------------------------------------
+# External Integrations
+# ---------------------------------------------------------------------------
+external_integrations:
+  emr_system:
+    endpoint: "https://emr-core.hospital.local/api/v2"
+    auth_token_env: "EMR_SYSTEM_TOKEN"
+  cmdb:
+    endpoint: "https://cmdb.hospital.local"
+    username_env: "CMDB_USER"
+    password_env: "CMDB_PASSWORD"
+
+# ---------------------------------------------------------------------------
+# Kubernetes Node Affinity Rules
+# ---------------------------------------------------------------------------
+node_affinity:
+  preferred:
+    - key: "node-role.kubernetes.io/compute"
+      operator: In
+      values: ["true"]
+  required_during_scheduling_ignored_during_execution:
+    - key: "hospital.zone"
+      operator: In
+      values: ["north-wing", "south-wing"]
+```

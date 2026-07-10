@@ -1,0 +1,185 @@
+#---------------------------------------------------------------------------
+# Doxyfile – ChronoFlow Nexus (API Microservice)
+#
+# This Doxygen configuration file was generated specifically for the
+# ChronoFlow Nexus project.  It is tuned for large-scale C++ code-bases that
+# expose both REST and GraphQL public interfaces, leverage layered
+# architecture, and require comprehensive, versioned API documentation.
+#
+# The settings below attempt to strike a balance between completeness,
+# performance, and readability.  They enable HTML, XML, and JSON outputs,
+# full source browsing, call‐graphs, and DOT/Graphviz diagrams.  In addition,
+# several custom aliases are defined to document REST endpoints, GraphQL
+# schema types, rate-limiting policies, cache hints, and other domain
+# specific concepts.
+#
+#-------------------------------------------------------------------------
+# NOTE: All paths are relative to the location of this Doxyfile unless a
+# full path is specified.  Variables may be overridden from the command
+# line or via CMake during CI/CD pipelines.
+#---------------------------------------------------------------------------
+
+#---------------------------------------------------------------------------
+# Project meta information
+#---------------------------------------------------------------------------
+
+PROJECT_NAME           = "ChronoFlow Nexus"
+PROJECT_BRIEF          = "High-performance time-tracking microservice with REST + GraphQL APIs"
+PROJECT_NUMBER         = "v2.3.0"
+PROJECT_LOGO           = docs/assets/logo/chronoflow_logo.svg
+
+#---------------------------------------------------------------------------
+# Build related configuration
+#---------------------------------------------------------------------------
+
+OUTPUT_DIRECTORY       = docs/build
+CREATE_SUBDIRS         = YES
+OUTPUT_LANGUAGE        = English
+EXTRACT_ALL            = YES
+EXTRACT_PRIVATE        = YES
+EXTRACT_STATIC         = YES
+EXTRACT_LOCAL_CLASSES  = YES
+EXTRACT_ANON_NSPACES   = YES
+FULL_PATH_NAMES        = NO
+INLINE_SOURCES         = YES
+SOURCE_BROWSER         = YES
+REFERENCED_BY_RELATION = YES
+REFERENCES_RELATION    = YES
+ALPHABETICAL_INDEX     = YES
+GENERATE_TODOLIST      = YES
+GENERATE_TESTLIST      = NO
+GENERATE_BUGLIST       = YES
+GENERATE_DEPRECATEDLIST= YES
+MSCGEN_LOOKUP_CACHE    = YES
+
+#---------------------------------------------------------------------------
+# Input
+#---------------------------------------------------------------------------
+
+INPUT                  = \
+    src \
+    include \
+    proto \
+    graphql \
+    openapi \
+    README.md \
+    CHANGELOG.md
+
+FILE_PATTERNS          = *.cpp \
+                         *.hpp \
+                         *.h \
+                         *.c \
+                         *.proto \
+                         *.graphql \
+                         *.gql \
+                         *.md
+
+RECURSIVE              = YES
+EXCLUDE_DIRS           = third_party \
+                         build \
+                         test \
+                         scripts
+
+#---------------------------------------------------------------------------
+# Preprocessor
+#---------------------------------------------------------------------------
+
+ENABLE_PREPROCESSING   = YES
+MACRO_EXPANSION        = YES
+EXPAND_ONLY_PREDEF     = NO
+PREDEFINED             = \
+    NDEBUG \
+    CFN_EXPORT= \
+    CFN_INTERNAL= \
+    CFN_DEPRECATED(msg)= \
+    CFN_LIB_VERSION="2.3.0"
+
+#---------------------------------------------------------------------------
+# Custom aliases for domain-specific semantics
+#---------------------------------------------------------------------------
+
+ALIASES                += \
+    "rest_get{1}=\xrefitem rest_get \"GET\" \"REST GET endpoint\" \parblock\textbf{GET} \1\endparblock" \
+    "rest_post{1}=\xrefitem rest_post \"POST\" \"REST POST endpoint\" \parblock\textbf{POST} \1\endparblock" \
+    "rest_put{1}=\xrefitem rest_put \"PUT\" \"REST PUT endpoint\" \parblock\textbf{PUT} \1\endparblock" \
+    "rest_delete{1}=\xrefitem rest_delete \"DELETE\" \"REST DELETE endpoint\" \parblock\textbf{DELETE} \1\endparblock" \
+    "graphql_type{1}=\xrefitem graphql_type \"GraphQL\" \"GraphQL Type\" \parblock\textbf{GraphQL Type} \1\endparblock" \
+    "graphql_query{1}=\xrefitem graphql_query \"GraphQL\" \"GraphQL Query\" \parblock\textbf{GraphQL Query} \1\endparblock" \
+    "graphql_mutation{1}=\xrefitem graphql_mutation \"GraphQL\" \"GraphQL Mutation\" \parblock\textbf{GraphQL Mutation} \1\endparblock" \
+    "rate_limit{1}=\xrefitem rate_limit \"RateLimit\" \"Rate Limit\" \parblock\textbf{Rate Limit} \1\endparblock" \
+    "cache_hint{1}=\xrefitem cache_hint \"Cache\" \"Cache Hint\" \parblock\textbf{Cache} \1\endparblock"
+
+#---------------------------------------------------------------------------
+# Diagrams
+#---------------------------------------------------------------------------
+
+HAVE_DOT               = YES
+DOT_MULTI_TARGETS      = YES
+CALL_GRAPH             = YES
+CALLER_GRAPH           = YES
+GRAPHICAL_HIERARCHY    = YES
+DOT_IMAGE_FORMAT       = svg
+INTERACTIVE_SVG        = YES
+DOT_PATH               = /usr/bin/dot
+DOT_FONTNAME           = "Helvetica"
+DOT_FONTSIZE           = 10
+
+#---------------------------------------------------------------------------
+# Output formats
+#---------------------------------------------------------------------------
+
+GENERATE_HTML          = YES
+HTML_OUTPUT            = html
+HTML_DYNAMIC_MENUS     = YES
+HTML_COLORSTYLE        = LIGHT
+HTML_EXTRA_STYLESHEET  = docs/assets/css/doxygen_extra.css
+HTML_FOOTER            = docs/assets/html/footer.html
+HTML_HEADER            = docs/assets/html/header.html
+
+GENERATE_LATEX         = NO
+
+GENERATE_XML           = YES
+XML_OUTPUT             = xml
+
+GENERATE_JSON          = YES
+JSON_OUTPUT            = json
+
+#---------------------------------------------------------------------------
+# Search engine
+#---------------------------------------------------------------------------
+
+SEARCHENGINE           = YES
+
+#---------------------------------------------------------------------------
+# Warning configuration
+#---------------------------------------------------------------------------
+
+QUIET                  = NO
+WARNINGS               = YES
+WARN_IF_UNDOCUMENTED   = YES
+WARN_IF_DOC_ERROR      = YES
+WARN_NO_PARAMDOC       = YES
+WARN_AS_ERROR          = NO
+WARN_LOGFILE           = docs/build/doxygen_warnings.log
+
+#---------------------------------------------------------------------------
+# Diagram filtering – exclude trivial getters/setters from call graphs
+#---------------------------------------------------------------------------
+
+EXCLUDE_SYMBOLS        = \
+    get* \
+    set* \
+    *_impl \
+    operator=
+
+#---------------------------------------------------------------------------
+# Misc
+#---------------------------------------------------------------------------
+
+GENERATE_TAGFILE       = docs/build/ChronoFlowNexus.tag
+MULTILINE_CPP_IS_BRIEF = YES
+TAB_SIZE               = 4
+
+#---------------------------------------------------------------------------
+# End of Doxyfile
+#---------------------------------------------------------------------------

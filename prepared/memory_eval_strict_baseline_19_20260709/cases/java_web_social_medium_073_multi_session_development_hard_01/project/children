@@ -1,0 +1,275 @@
+```java
+package com.edupulse.livelearninghub.web_social.children;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import javax.validation.ValidationException;
+import java.time.Instant;
+import java.util.Collections;
+import java.util.List;
+import java.util.Objects;
+import java.util.UUID;
+
+/**
+ * PulseChildrenService coordinates all business-logic that concerns the relationship
+ * between a parent Pulse and its children (threaded replies). Responsibilities include:
+ *
+ *  • Validation & sanitisation of user-supplied content
+ *  • Persistence orchestration (via PulseRepository)
+ *  • Domain-event emission (via DomainEventPublisher)
+ *  • Authorisation checks and soft-deletion semantics
+ *
+ * The class purposefully hides infrastructure details behind cohesive collaborators so
+ * that unit-tests can be exercised with in-memory fakes/mocks.
+ */
+public class PulseChildrenService {
+
+    private static final Logger log = LoggerFactory.getLogger(PulseChildrenService.class);
+
+    /* Collaborators are injected through the constructor (preferred for immutability) */
+    private final PulseRepository pulseRepository;
+    private final DomainEventPublisher eventPublisher;
+    private final ContentSanitiser contentSanitiser;
+    private final AuthorisationService authorisationService;
+
+    public PulseChildrenService(final PulseRepository pulseRepository,
+                                final DomainEventPublisher eventPublisher,
+                                final ContentSanitiser contentSanitiser,
+                                final AuthorisationService authorisationService) {
+        this.pulseRepository = Objects.requireNonNull(pulseRepository, "pulseRepository must not be null");
+        this.eventPublisher = Objects.requireNonNull(eventPublisher, "eventPublisher must not be null");
+        this.contentSanitiser = Objects.requireNonNull(contentSanitiser, "contentSanitiser must not be null");
+        this.authorisationService = Objects.requireNonNull(authorisationService, "authorisationService must not be null");
+    }
+
+    /**
+     * Creates (and persists) a new child pulse under the supplied parent pulse id.
+     * Emits a {@link ChildPulseCreatedEvent} asynchronously after successful persistence.
+     *
+     * @param parentPulseId unique identifier of the target parent pulse
+     * @param authorId      id of the user creating the child pulse
+     * @param rawContent    un-sanitised textual content authored by the user
+     * @return the persisted child {@link Pulse} model
+     *
+     * @throws PulseNotFoundException  if no parent pulse exists with the supplied id
+     * @throws ValidationException     if the content exceeds business constraints
+     * @throws AccessDeniedException   if the author is not allowed to reply
+     */
+    public Pulse createChildPulse(final UUID parentPulseId,
+                                  final UUID authorId,
+                                  final String rawContent) {
+
+        /* Guard clauses improve readability by failing fast */
+        if (rawContent == null || rawContent.isBlank()) {
+            throw new ValidationException("Pulse content must not be empty.");
+        }
+        if (rawContent.length() > 10_000) { // arbitrary upper limit
+            throw new ValidationException("Pulse content exceeds maximum length.");
+        }
+
+        /* Fetch & validate parent pulse existence */
+        final Pulse parent = pulseRepository.findById(parentPulseId)
+                .orElseThrow(() -> new PulseNotFoundException(parentPulseId));
+
+        /* Authorisation – e.g., blocked users cannot reply to certain pulses */
+        if (!authorisationService.mayReply(authorId, parent)) {
+            throw new AccessDeniedException("User is not allowed to reply to this pulse.");
+        }
+
+        /* Sanitise user supplied content (strip malicious markup, XSS, etc.) */
+        final String sanitised = contentSanitiser.sanitise(rawContent);
+
+        /* Construct the child pulse domain object */
+        final Pulse child = new Pulse(
+                UUID.randomUUID(),
+                parentPulseId,
+                authorId,
+                sanitised,
+                Instant.now(),
+                Pulse.Status.ACTIVE
+        );
+
+        /* Persist and obtain managed instance (with DB timestamps, etc.) */
+        final Pulse persisted = pulseRepository.save(child);
+
+        /* Publish domain event so the rest of the platform may react */
+        eventPublisher.publish(new ChildPulseCreatedEvent(persisted, parent));
+
+        log.info("User {} replied to pulse {} with child {}", authorId, parentPulseId, persisted.getId());
+        return persisted;
+    }
+
+    /**
+     * Retrieves a paginated list of children for a given pulse.
+     */
+    public List<Pulse> getChildren(final UUID parentPulseId, final int page, final int size) {
+        if (size <= 0 || size > 100) {
+            throw new ValidationException("Page size must be between 1 and 100.");
+        }
+        if (page < 0) {
+            throw new ValidationException("Page index must be >= 0.");
+        }
+
+        return pulseRepository.findChildren(parentPulseId, page, size)
+                .orElse(Collections.emptyList());
+    }
+
+    /**
+     * Performs a *soft-delete* of a child pulse (marks status DELETED). Business
+     * rules: only the original author or a moderator can delete.
+     */
+    public void deleteChildPulse(final UUID childPulseId, final UUID requesterId) {
+        final Pulse child = pulseRepository.findById(childPulseId)
+                .orElseThrow(() -> new PulseNotFoundException(childPulseId));
+
+        if (!authorisationService.mayDelete(requesterId, child)) {
+            throw new AccessDeniedException("User is not allowed to delete this pulse.");
+        }
+
+        child.setStatus(Pulse.Status.DELETED);
+        pulseRepository.save(child); // persist updated status
+
+        eventPublisher.publish(new ChildPulseDeletedEvent(child));
+        log.info("Pulse {} soft-deleted by user {}", childPulseId, requesterId);
+    }
+
+    /* ============================================================================
+       Below are minimalistic definitions for dependent abstractions and domain
+       objects. In the actual codebase they would live in their own packages/files.
+       ============================================================================ */
+
+    public interface PulseRepository {
+        Pulse save(Pulse pulse);
+
+        java.util.Optional<Pulse> findById(UUID pulseId);
+
+        java.util.Optional<List<Pulse>> findChildren(UUID parentPulseId, int page, int size);
+    }
+
+    public interface DomainEventPublisher {
+        void publish(DomainEvent event);
+    }
+
+    /** Marker interface for domain events. */
+    public interface DomainEvent { /* no op */ }
+
+    public interface ContentSanitiser {
+        String sanitise(String raw);
+    }
+
+    public interface AuthorisationService {
+        boolean mayReply(UUID userId, Pulse parent);
+
+        boolean mayDelete(UUID userId, Pulse pulse);
+    }
+
+    /** Domain model representing a single Pulse. */
+    public static class Pulse {
+
+        public enum Status { ACTIVE, DELETED, ARCHIVED }
+
+        private final UUID id;
+        private final UUID parentId;
+        private final UUID authorId;
+        private final Instant createdAt;
+        private String content;
+        private Status status;
+
+        public Pulse(UUID id,
+                     UUID parentId,
+                     UUID authorId,
+                     String content,
+                     Instant createdAt,
+                     Status status) {
+            this.id = id;
+            this.parentId = parentId;
+            this.authorId = authorId;
+            this.content = content;
+            this.createdAt = createdAt;
+            this.status = status;
+        }
+
+        public UUID getId()        { return id; }
+        public UUID getParentId()  { return parentId; }
+        public UUID getAuthorId()  { return authorId; }
+        public String getContent() { return content; }
+
+        public Instant getCreatedAt() {
+            return createdAt;
+        }
+
+        public Status getStatus()  { return status; }
+        public void setStatus(Status status) { this.status = status; }
+
+        /* equals/hashCode based on id for entity identity semantics */
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) return true;
+            if (!(o instanceof Pulse)) return false;
+            return id.equals(((Pulse) o).id);
+        }
+
+        @Override
+        public int hashCode() {
+            return id.hashCode();
+        }
+    }
+
+    /* ============================== Domain Events ============================== */
+
+    public static class ChildPulseCreatedEvent implements DomainEvent {
+        private final Pulse child;
+        private final Pulse parent;
+        private final Instant occurredAt = Instant.now();
+
+        public ChildPulseCreatedEvent(Pulse child, Pulse parent) {
+            this.child = child;
+            this.parent = parent;
+        }
+
+        public Pulse getChild() {
+            return child;
+        }
+
+        public Pulse getParent() {
+            return parent;
+        }
+
+        public Instant getOccurredAt() {
+            return occurredAt;
+        }
+    }
+
+    public static class ChildPulseDeletedEvent implements DomainEvent {
+        private final Pulse child;
+        private final Instant occurredAt = Instant.now();
+
+        public ChildPulseDeletedEvent(Pulse child) {
+            this.child = child;
+        }
+
+        public Pulse getChild() {
+            return child;
+        }
+
+        public Instant getOccurredAt() {
+            return occurredAt;
+        }
+    }
+
+    /* =========================== Custom Exceptions ============================ */
+
+    public static class PulseNotFoundException extends RuntimeException {
+        public PulseNotFoundException(UUID id) {
+            super("Unable to locate Pulse with id " + id);
+        }
+    }
+
+    public static class AccessDeniedException extends RuntimeException {
+        public AccessDeniedException(String message) {
+            super(message);
+        }
+    }
+}
+```

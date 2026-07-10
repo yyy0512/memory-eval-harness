@@ -1,9 +1,0 @@
-You are working in the repository at the current working directory. This is session 2 of a 3-session development task. The previous session has ended and conversation context is unavailable. Use the repository state and your persistent memory if available. Do not ask for previous conversation context. Complete only the requirements for this session. At the end, update memory with decisions and remaining work.
-
-This task is divided into three parts, intended to be completed sequentially across separate sessions.
-
-**Part 2: Core Logic Implementation**
-With the configuration updated, you will now modify the core image processing logic.
-1.  Locate the image resizing function within `src/core/io/image_io.c`.
-2.  Modify this function to no longer use a hardcoded interpolation value.
-3.  Instead, it should use the interpolation method specified in the configuration struct that you added in Part 1. You will likely need to pass the configuration object into this function or a parent function.

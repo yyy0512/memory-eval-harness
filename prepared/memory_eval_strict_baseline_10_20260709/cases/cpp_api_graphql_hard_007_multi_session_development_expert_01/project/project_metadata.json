@@ -1,0 +1,378 @@
+{
+  "specification": {
+    "unique_id": "cpp_api_graphql_hard_007",
+    "name": "PaletteFlux GraphQL Studio",
+    "description": "PaletteFlux GraphQL Studio is a creative-centric API platform that lets digital artists, game designers, and interactive storytellers programmatically compose, remix, and stream multilayer visual assets through a single GraphQL endpoint while exposing complementary REST views for legacy clients. Built on a rigorously applied Model-View-Controller pattern, the project treats each \u2018creative asset\u2019 (brush stroke, shader node, animation curve, sound layer) as a first-class model object, controlled by command/query services and rendered to multiple representations (JSON, binary texture atlases, GLSL snippets) depending on the requesting client. \n\nThe application demonstrates how an MVC core can power highly interactive, real-time creative workflows: controllers orchestrate command buses for mutating complex scene graphs, while query handlers gather materialized views optimized for pagination, response caching, and cross-version schema evolution. A unified GraphQL schema allows flexible, client-driven traversal through nested asset relationships, whereas curated REST endpoints serve well-defined, cache-friendly snapshots for CDN distribution. Monitoring hooks, authentication guards, and API-gateway patterns ensure production-grade robustness without sacrificing the free-form expressiveness required by artists and tool developers.",
+    "domain": "api_graphql",
+    "complexity": "hard",
+    "language": "cpp",
+    "architecture": "mvc",
+    "theme": "creative",
+    "target_file_count": 78,
+    "target_token_count": 461803,
+    "features": [
+      "monitoring",
+      "pagination",
+      "api_documentation",
+      "versioning",
+      "response_caching",
+      "rest_endpoints",
+      "authentication",
+      "graphql_schema",
+      "request_validation",
+      "logging"
+    ],
+    "architecture_patterns": [
+      "Service_Layer",
+      "Command_Query_Separation",
+      "REST_Architecture",
+      "API_Gateway",
+      "Microservices",
+      "GraphQL_Schema"
+    ],
+    "dependencies": [
+      "Pistache (HTTP REST server & routing)",
+      "graphqlcpp / graphqlservice (C++ GraphQL implementation)",
+      "nlohmann/json (JSON serialization)",
+      "jwt-cpp (JWT authentication)",
+      "Redis++ (response caching, pub/sub asset invalidation)",
+      "spdlog (structured logging)",
+      "Prometheus-cpp (metrics & monitoring)",
+      "SQLite or PostgreSQL (asset metadata persistence)",
+      "fmt (string formatting)",
+      "cpr or cpp-httplib (outgoing HTTP calls, API gateway)",
+      "OpenTelemetry-cpp (distributed tracing)",
+      "RapidJSON (high-performance parsing for binary view generation)"
+    ],
+    "seed": 822556
+  },
+  "generated_timestamp": 1754355474.987377,
+  "phase_1_complete": true,
+  "uniqueness_factors": {
+    "domain": "api_graphql",
+    "complexity": "hard",
+    "architecture": "mvc",
+    "theme": "creative",
+    "seed": 822556
+  },
+  "files": [
+    {
+      "path": "paletteflux_studio/README.md",
+      "type": "documentation"
+    },
+    {
+      "path": "paletteflux_studio/LICENSE",
+      "type": "source"
+    },
+    {
+      "path": "paletteflux_studio/.gitignore",
+      "type": "source"
+    },
+    {
+      "path": "paletteflux_studio/CMakeLists.txt",
+      "type": "source"
+    },
+    {
+      "path": "paletteflux_studio/docker-compose.yml",
+      "type": "documentation"
+    },
+    {
+      "path": "paletteflux_studio/Dockerfile",
+      "type": "documentation"
+    },
+    {
+      "path": "paletteflux_studio/config/development.toml",
+      "type": "config"
+    },
+    {
+      "path": "paletteflux_studio/config/production.toml",
+      "type": "config"
+    },
+    {
+      "path": "paletteflux_studio/config/testing.toml",
+      "type": "test"
+    },
+    {
+      "path": "paletteflux_studio/docs/README.md",
+      "type": "documentation"
+    },
+    {
+      "path": "paletteflux_studio/docs/api/graphql.md",
+      "type": "documentation"
+    },
+    {
+      "path": "paletteflux_studio/docs/api/rest_v1.md",
+      "type": "documentation"
+    },
+    {
+      "path": "paletteflux_studio/docs/api/authentication.md",
+      "type": "documentation"
+    },
+    {
+      "path": "paletteflux_studio/docs/api/asset_types.md",
+      "type": "documentation"
+    },
+    {
+      "path": "paletteflux_studio/docs/api/versioning.md",
+      "type": "documentation"
+    },
+    {
+      "path": "paletteflux_studio/docs/architecture/overview.md",
+      "type": "documentation"
+    },
+    {
+      "path": "paletteflux_studio/docs/architecture/adr/001-choice-of-cpp-web-framework.md",
+      "type": "documentation"
+    },
+    {
+      "path": "paletteflux_studio/docs/architecture/adr/002-cqrs-implementation-strategy.md",
+      "type": "documentation"
+    },
+    {
+      "path": "paletteflux_studio/docs/architecture/adr/003-database-schema-design.md",
+      "type": "documentation"
+    },
+    {
+      "path": "paletteflux_studio/docs/guides/setup.md",
+      "type": "documentation"
+    },
+    {
+      "path": "paletteflux_studio/docs/guides/deployment.md",
+      "type": "documentation"
+    },
+    {
+      "path": "paletteflux_studio/docs/guides/contributing.md",
+      "type": "documentation"
+    },
+    {
+      "path": "paletteflux_studio/scripts/setup_dev_env.sh",
+      "type": "source"
+    },
+    {
+      "path": "paletteflux_studio/scripts/run_tests.sh",
+      "type": "test"
+    },
+    {
+      "path": "paletteflux_studio/scripts/generate_docs.sh",
+      "type": "documentation"
+    },
+    {
+      "path": "paletteflux_studio/src/main.cpp",
+      "type": "source"
+    },
+    {
+      "path": "paletteflux_studio/src/CMakeLists.txt",
+      "type": "source"
+    },
+    {
+      "path": "paletteflux_studio/src/app/AppConfig.h",
+      "type": "config"
+    },
+    {
+      "path": "paletteflux_studio/src/app/AppConfig.cpp",
+      "type": "config"
+    },
+    {
+      "path": "paletteflux_studio/src/api/v1/rest/AssetController.h",
+      "type": "source"
+    },
+    {
+      "path": "paletteflux_studio/src/api/v1/rest/AssetController.cpp",
+      "type": "source"
+    },
+    {
+      "path": "paletteflux_studio/src/api/v1/rest/SceneController.h",
+      "type": "source"
+    },
+    {
+      "path": "paletteflux_studio/src/api/v1/rest/SceneController.cpp",
+      "type": "source"
+    },
+    {
+      "path": "paletteflux_studio/src/api/v1/graphql/GraphQLHandler.h",
+      "type": "source"
+    },
+    {
+      "path": "paletteflux_studio/src/api/v1/graphql/GraphQLHandler.cpp",
+      "type": "source"
+    },
+    {
+      "path": "paletteflux_studio/src/api/v1/graphql/Schema.h",
+      "type": "source"
+    },
+    {
+      "path": "paletteflux_studio/src/api/v1/graphql/Schema.cpp",
+      "type": "source"
+    },
+    {
+      "path": "paletteflux_studio/src/api/v1/graphql/types/AssetType.h",
+      "type": "source"
+    },
+    {
+      "path": "paletteflux_studio/src/api/v1/graphql/types/AssetType.cpp",
+      "type": "source"
+    },
+    {
+      "path": "paletteflux_studio/src/api/v1/graphql/types/SceneType.h",
+      "type": "source"
+    },
+    {
+      "path": "paletteflux_studio/src/api/v1/graphql/types/SceneType.cpp",
+      "type": "source"
+    },
+    {
+      "path": "paletteflux_studio/src/api/v1/graphql/types/UserType.h",
+      "type": "source"
+    },
+    {
+      "path": "paletteflux_studio/src/api/v1/graphql/types/UserType.cpp",
+      "type": "source"
+    },
+    {
+      "path": "paletteflux_studio/src/core/model/Asset.h",
+      "type": "source"
+    },
+    {
+      "path": "paletteflux_studio/src/core/model/SceneGraph.h",
+      "type": "source"
+    },
+    {
+      "path": "paletteflux_studio/src/core/model/User.h",
+      "type": "source"
+    },
+    {
+      "path": "paletteflux_studio/src/core/model/BrushStroke.h",
+      "type": "source"
+    },
+    {
+      "path": "paletteflux_studio/src/core/model/ShaderNode.h",
+      "type": "source"
+    },
+    {
+      "path": "paletteflux_studio/src/core/services/commands/CommandBus.h",
+      "type": "source"
+    },
+    {
+      "path": "paletteflux_studio/src/core/services/commands/CommandBus.cpp",
+      "type": "source"
+    },
+    {
+      "path": "paletteflux_studio/src/core/services/commands/CreateAssetCommand.h",
+      "type": "source"
+    },
+    {
+      "path": "paletteflux_studio/src/core/services/commands/CreateAssetCommandHandler.h",
+      "type": "source"
+    },
+    {
+      "path": "paletteflux_studio/src/core/services/commands/CreateAssetCommandHandler.cpp",
+      "type": "source"
+    },
+    {
+      "path": "paletteflux_studio/src/core/services/queries/AssetQueries.h",
+      "type": "source"
+    },
+    {
+      "path": "paletteflux_studio/src/core/services/queries/AssetQueries.cpp",
+      "type": "source"
+    },
+    {
+      "path": "paletteflux_studio/src/core/services/queries/SceneQueries.h",
+      "type": "source"
+    },
+    {
+      "path": "paletteflux_studio/src/core/services/queries/SceneQueries.cpp",
+      "type": "source"
+    },
+    {
+      "path": "paletteflux_studio/src/core/persistence/IAssetRepository.h",
+      "type": "source"
+    },
+    {
+      "path": "paletteflux_studio/src/core/persistence/AssetRepository.h",
+      "type": "source"
+    },
+    {
+      "path": "paletteflux_studio/src/core/persistence/AssetRepository.cpp",
+      "type": "source"
+    },
+    {
+      "path": "paletteflux_studio/src/core/persistence/ISceneRepository.h",
+      "type": "source"
+    },
+    {
+      "path": "paletteflux_studio/src/core/persistence/SceneRepository.h",
+      "type": "source"
+    },
+    {
+      "path": "paletteflux_studio/src/core/persistence/SceneRepository.cpp",
+      "type": "source"
+    },
+    {
+      "path": "paletteflux_studio/src/http/Server.h",
+      "type": "source"
+    },
+    {
+      "path": "paletteflux_studio/src/http/Server.cpp",
+      "type": "source"
+    },
+    {
+      "path": "paletteflux_studio/src/http/middleware/AuthMiddleware.h",
+      "type": "source"
+    },
+    {
+      "path": "paletteflux_studio/src/http/middleware/AuthMiddleware.cpp",
+      "type": "source"
+    },
+    {
+      "path": "paletteflux_studio/src/http/middleware/LoggingMiddleware.h",
+      "type": "source"
+    },
+    {
+      "path": "paletteflux_studio/src/http/middleware/LoggingMiddleware.cpp",
+      "type": "source"
+    },
+    {
+      "path": "paletteflux_studio/src/rendering/IRenderer.h",
+      "type": "source"
+    },
+    {
+      "path": "paletteflux_studio/src/rendering/JsonRenderer.h",
+      "type": "source"
+    },
+    {
+      "path": "paletteflux_studio/src/rendering/JsonRenderer.cpp",
+      "type": "source"
+    },
+    {
+      "path": "paletteflux_studio/src/rendering/TextureAtlasRenderer.h",
+      "type": "source"
+    },
+    {
+      "path": "paletteflux_studio/src/rendering/TextureAtlasRenderer.cpp",
+      "type": "source"
+    },
+    {
+      "path": "paletteflux_studio/src/utils/Logger.h",
+      "type": "source"
+    },
+    {
+      "path": "paletteflux_studio/src/utils/Logger.cpp",
+      "type": "source"
+    },
+    {
+      "path": "paletteflux_studio/src/utils/JwtUtils.h",
+      "type": "source"
+    },
+    {
+      "path": "paletteflux_studio/src/utils/JwtUtils.cpp",
+      "type": "source"
+    }
+  ],
+  "generated_stats": {
+    "files_count": 78,
+    "lines_count": 23232,
+    "generation_time": 1845.8137362003326,
+    "timestamp": 1754366857.972032
+  }
+}

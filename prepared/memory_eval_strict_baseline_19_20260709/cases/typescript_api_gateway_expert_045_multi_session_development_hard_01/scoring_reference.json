@@ -1,0 +1,346 @@
+{
+  "scenario_id": "typescript_api_gateway_expert_045_multi_session_development_hard_01",
+  "ground_truth": "The final solution should contain these key changes:\n\n1.  **New File (`src/rate_limiter.ts`):** A new module exporting a `RateLimiter` class. This class implements the token bucket algorithm, managing state (tokens, last update time) for various identifiers in an internal in-memory map.\n2.  **Configuration (`src/config.ts`):** This file is modified to include a new export or property, for example:\n    ```typescript\n    export const rateLimiterConfig = {\n      enabled: true,\n      defaultTier: 'free',\n      tiers: {\n        free: { tokensPerSecond: 2, bucketSize: 10 },\n        premium: { tokensPerSecond: 20, bucketSize: 50 }\n      }\n    };\n    ```\n3.  **Integration (e.g., `src/module_4.ts`):** The primary request handling module is modified to import and use the rate limiter. The logic is placed before the main request routing/proxying logic.\n    ```typescript\n    // Hypothetical code in src/module_4.ts\n    import { RateLimiter } from './rate_limiter';\n    import { config } from './config';\n\n    const limiter = new RateLimiter(config.rateLimiterConfig);\n\n    function handleIncomingRequest(req, res) {\n      const apiKey = req.headers['x-api-key'];\n      const userTier = getUserTier(apiKey); // Assumes some function to get a user's tier\n\n      if (!limiter.isAllowed(apiKey, userTier)) {\n        return res.status(429).json({ error: 'Too Many Requests' });\n      }\n      // ... existing request processing logic\n    }\n    ```\n4.  **Testing (`tests/test_main.ts`):** This file is appended with new tests that specifically target the rate-limiting feature. These tests will likely involve making multiple mock API calls in quick succession and asserting that the responses are correct (200 OK then 429 Too Many Requests).",
+  "expected_approach": "An expert developer would approach this incrementally:\n\n1.  **Session 1 (Discovery & Design):** \n    *   Start by searching the codebase for keywords like `http`, `server`, `request`, `response`, `route` to find the application's entry point and main request handler. Given the file list, `src/module_4.ts` or `src/module_76.ts` are likely candidates due to their larger size, suggesting more complex logic.\n    *   Analyze `src/config.ts` to understand the existing configuration schema and add a new, well-structured `rateLimiter` object.\n    *   Create `src/rate_limiter.ts` with a clear class structure, like `class RateLimiter { constructor(config) {} checkLimit(id): boolean {} }`, and related TypeScript interfaces for configuration and state, leaving method bodies empty.\n\n2.  **Session 2 (Implementation):**\n    *   Focus entirely on `src/rate_limiter.ts`. \n    *   Implement an in-memory Map, like `private buckets = new Map<string, { tokens: number, lastCheck: number }>();`, to store the state for each user/key.\n    *   The `checkLimit` method would calculate elapsed time since `lastCheck`, add new tokens to the bucket (up to `bucketSize`), and then check if at least one token is available to be consumed. It would then update the bucket state and return `true` or `false`.\n\n3.  **Session 3 (Integration & Testing):**\n    *   Identify the exact function or middleware chain in the request handler module (e.g., `src/module_4.ts`).\n    *   Import the `RateLimiter` and `config`. Instantiate the limiter. Add a code block early in the request handler: `if (!rateLimiter.checkLimit(apiKey)) { return res.status(429).send(...); }`.\n    *   In `tests/test_main.ts`, add a new `describe('Rate Limiting', ...)` block. Write `it(...)` blocks that simulate rapid requests in a loop to test the limit, use `jest.advanceTimersByTime()` or `setTimeout` to test token replenishment, and assert the expected HTTP status codes.",
+  "evaluation_criteria": [
+    "**Context Retention:** Agent must successfully use the artifacts and design from Session 1 in Sessions 2 and 3.",
+    "**Architectural Analysis (S1):** Correctly identifies a plausible primary request-handling module from the anonymized file list.",
+    "**Configuration Management (S1):** Implements a clean, extensible configuration schema in `src/config.ts`.",
+    "**Modular Implementation (S2):** Implements the token bucket algorithm correctly and contains the logic within the new `src/rate_limiter.ts` module.",
+    "**Successful Integration (S3):** Correctly modifies the request pipeline to enforce rate limits without breaking existing functionality.",
+    "**Test Quality (S3):** Writes effective tests that validate the core requirements of the rate limiter (throttling, token replenishment).",
+    "**Code Quality:** Produces clean, readable, and idiomatic TypeScript code.",
+    "**Correctness:** All existing tests pass, and the new feature works as specified."
+  ],
+  "memory_contracts": [
+    {
+      "id": "user_tomato_preference_marker",
+      "category": "synthetic_memory_user_preference",
+      "memory_type": "user",
+      "introduced_in_session": 1,
+      "workspace_effective_from_session": 2,
+      "description": "User preference: for future implementation work in this repository, place the exact marker TOMATO_USER_PREF_741 near newly added or meaningfully changed code, comments, or documentation so the user's TOMATO preference is visible across sessions.",
+      "expected_memory_fact": {
+        "required_keywords": [
+          "TOMATO_USER_PREF_741",
+          "user preference",
+          "future implementation work",
+          "newly added or meaningfully changed code"
+        ],
+        "required_regex": [
+          "TOMATO_USER_PREF_741"
+        ]
+      },
+      "checks": [
+        {
+          "id": "tomato_user_pref_marker_present",
+          "type": "require_regex",
+          "path_glob": "**/*",
+          "pattern": "TOMATO_USER_PREF_741",
+          "source": "synthetic_memory_contract",
+          "strength": "sentinel_marker",
+          "signal_kind": "language_neutral_marker",
+          "rationale": "Later-session workspace should preserve or reuse the exact user preference marker introduced in session 1."
+        }
+      ]
+    },
+    {
+      "id": "feedback_tomato_review_note",
+      "category": "synthetic_memory_feedback_continuity",
+      "memory_type": "feedback",
+      "introduced_in_session": 1,
+      "workspace_effective_from_session": 2,
+      "description": "Feedback to remember: future implementation changes should include the exact review note TOMATO_REVIEW_NOTE_742 near changed logic to show that compatibility and continuity were considered.",
+      "expected_memory_fact": {
+        "required_keywords": [
+          "TOMATO_REVIEW_NOTE_742",
+          "review note",
+          "compatibility",
+          "continuity"
+        ],
+        "required_regex": [
+          "TOMATO_REVIEW_NOTE_742"
+        ]
+      },
+      "checks": [
+        {
+          "id": "tomato_review_note_present",
+          "type": "require_regex",
+          "path_glob": "**/*",
+          "pattern": "TOMATO_REVIEW_NOTE_742",
+          "source": "synthetic_memory_contract",
+          "strength": "sentinel_marker",
+          "signal_kind": "language_neutral_marker",
+          "rationale": "Later-session workspace should carry forward the exact feedback marker introduced in session 1."
+        }
+      ]
+    },
+    {
+      "id": "project_tomato_bridge_token",
+      "category": "synthetic_memory_project_convention",
+      "memory_type": "project",
+      "introduced_in_session": 1,
+      "workspace_effective_from_session": 2,
+      "description": "Project memory: future helper, handler, adapter, or glue-code changes should include the exact project token TOMATO_PROJECT_BRIDGE_743 in a nearby name, comment, or note so cross-session project conventions remain visible.",
+      "expected_memory_fact": {
+        "required_keywords": [
+          "TOMATO_PROJECT_BRIDGE_743",
+          "project token",
+          "helper",
+          "handler",
+          "adapter"
+        ],
+        "required_regex": [
+          "TOMATO_PROJECT_BRIDGE_743"
+        ]
+      },
+      "checks": [
+        {
+          "id": "tomato_project_bridge_present",
+          "type": "require_regex",
+          "path_glob": "**/*",
+          "pattern": "TOMATO_PROJECT_BRIDGE_743",
+          "source": "synthetic_memory_contract",
+          "strength": "sentinel_marker",
+          "signal_kind": "language_neutral_marker",
+          "rationale": "Later-session workspace should preserve or reuse the exact project convention token introduced in session 1."
+        }
+      ]
+    },
+    {
+      "id": "reference_tomato_canon_pointer",
+      "category": "synthetic_memory_reference_pointer",
+      "memory_type": "reference",
+      "introduced_in_session": 1,
+      "workspace_effective_from_session": 2,
+      "description": "Reference memory: treat docs/TOMATO_REFERENCE_CANON_744.md as the canonical local reference pointer for future work, and cite the exact path in comments, documentation, or implementation notes when adding related changes.",
+      "expected_memory_fact": {
+        "required_keywords": [
+          "docs/TOMATO_REFERENCE_CANON_744.md",
+          "canonical local reference",
+          "future work",
+          "implementation notes"
+        ],
+        "required_regex": [
+          "docs/TOMATO_REFERENCE_CANON_744\\.md"
+        ]
+      },
+      "checks": [
+        {
+          "id": "tomato_reference_pointer_present",
+          "type": "require_regex",
+          "path_glob": "**/*",
+          "pattern": "docs/TOMATO_REFERENCE_CANON_744\\.md",
+          "source": "synthetic_memory_contract",
+          "strength": "sentinel_marker",
+          "signal_kind": "language_neutral_marker",
+          "rationale": "Later-session workspace should cite the exact reference artifact pointer introduced in session 1."
+        }
+      ]
+    },
+    {
+      "id": "experience_tomato_safe_path_lesson",
+      "category": "synthetic_memory_experience_lesson",
+      "memory_type": "experience",
+      "introduced_in_session": 1,
+      "workspace_effective_from_session": 2,
+      "description": "Experience memory: previous work learned not to use the literal LEGACY_TEMP_PATH in future changes; use the exact safer marker TOMATO_SAFE_PATH_745 instead whenever temporary path, fallback path, or compatibility-path behavior is mentioned.",
+      "expected_memory_fact": {
+        "required_keywords": [
+          "TOMATO_SAFE_PATH_745",
+          "LEGACY_TEMP_PATH",
+          "experience",
+          "temporary path",
+          "fallback path"
+        ],
+        "required_regex": [
+          "TOMATO_SAFE_PATH_745"
+        ],
+        "forbidden_keywords": []
+      },
+      "checks": [
+        {
+          "id": "tomato_safe_path_present",
+          "type": "require_regex",
+          "path_glob": "**/*",
+          "pattern": "TOMATO_SAFE_PATH_745",
+          "source": "synthetic_memory_contract",
+          "strength": "sentinel_marker",
+          "signal_kind": "language_neutral_marker",
+          "rationale": "Later-session workspace should use the exact safer experience marker introduced in session 1."
+        },
+        {
+          "id": "tomato_legacy_temp_path_absent",
+          "type": "forbid_regex",
+          "path_glob": "**/*",
+          "pattern": "LEGACY_TEMP_PATH",
+          "source": "synthetic_memory_contract",
+          "strength": "negative_sentinel",
+          "signal_kind": "language_neutral_marker",
+          "rationale": "Later-session workspace should avoid the deprecated experience marker from the session-1 lesson."
+        }
+      ]
+    }
+  ],
+  "expected_memory_facts": [
+    {
+      "id": "user_tomato_preference_marker",
+      "required_keywords": [
+        "TOMATO_USER_PREF_741",
+        "future implementation work",
+        "newly added or meaningfully changed code"
+      ],
+      "required_regex": [
+        "TOMATO_USER_PREF_741"
+      ]
+    },
+    {
+      "id": "feedback_tomato_review_note",
+      "required_keywords": [
+        "TOMATO_REVIEW_NOTE_742",
+        "review note",
+        "compatibility",
+        "continuity"
+      ],
+      "required_regex": [
+        "TOMATO_REVIEW_NOTE_742"
+      ]
+    },
+    {
+      "id": "project_tomato_bridge_token",
+      "required_keywords": [
+        "TOMATO_PROJECT_BRIDGE_743",
+        "project token",
+        "helper",
+        "handler",
+        "adapter"
+      ],
+      "required_regex": [
+        "TOMATO_PROJECT_BRIDGE_743"
+      ]
+    },
+    {
+      "id": "reference_tomato_canon_pointer",
+      "required_keywords": [
+        "docs/TOMATO_REFERENCE_CANON_744.md",
+        "canonical local reference",
+        "future work",
+        "implementation notes"
+      ],
+      "required_regex": [
+        "docs/TOMATO_REFERENCE_CANON_744\\.md"
+      ]
+    },
+    {
+      "id": "experience_tomato_safe_path_lesson",
+      "required_keywords": [
+        "TOMATO_SAFE_PATH_745",
+        "LEGACY_TEMP_PATH",
+        "experience",
+        "temporary path",
+        "fallback path"
+      ],
+      "required_regex": [
+        "TOMATO_SAFE_PATH_745"
+      ],
+      "forbidden_keywords": []
+    }
+  ],
+  "test_plan": {
+    "status": "configured",
+    "command": [
+      "npm",
+      "test"
+    ],
+    "working_dir": ".",
+    "source": "package_json_test_script",
+    "timeout_sec": 300,
+    "reason": null,
+    "test_like_file_count": 3,
+    "executor": "host",
+    "docker_image": "locobench-memory-eval:javascript",
+    "environment": {
+      "recommended_executor": "docker",
+      "network": "none"
+    },
+    "integrity": {
+      "status": "basic",
+      "original_test_files": [
+        "tests/test_main.ts",
+        "tests/test_utils.ts"
+      ]
+    }
+  },
+  "requirement_checks": [
+    {
+      "id": "rate_limit_config",
+      "type": "require_regex",
+      "path_glob": "src/config.ts",
+      "source": "overlay",
+      "strength": "explicit",
+      "signal_kind": "config_value",
+      "rationale": "config contains rate limit tiers.",
+      "pattern": "rate.*limit|tokensPerSecond|bucketSize"
+    },
+    {
+      "id": "rate_limiter_module",
+      "type": "file_exists",
+      "path_glob": "src/rate_limiter.ts",
+      "source": "overlay",
+      "strength": "explicit",
+      "signal_kind": "path",
+      "rationale": "rate limiter module exists."
+    },
+    {
+      "id": "token_bucket_logic",
+      "type": "require_regex",
+      "path_glob": "src/rate_limiter.ts",
+      "source": "overlay",
+      "strength": "explicit",
+      "signal_kind": "algorithm",
+      "rationale": "RateLimiter implements token bucket state/refill/consume.",
+      "pattern": "tokensPerSecond|bucketSize|refill|consume|RateLimiter"
+    },
+    {
+      "id": "gateway_returns_429",
+      "type": "require_regex",
+      "path_glob": "src/**/*.ts",
+      "source": "overlay",
+      "strength": "explicit",
+      "signal_kind": "runtime_integration",
+      "rationale": "gateway integrates RateLimiter and returns 429 when denied.",
+      "pattern": "429|Too Many Requests|RateLimiter"
+    },
+    {
+      "id": "rate_limiter_tests",
+      "type": "require_regex",
+      "path_glob": "tests/test_main.ts",
+      "source": "overlay",
+      "strength": "explicit",
+      "signal_kind": "test_coverage",
+      "rationale": "integration tests cover allowed, throttled, and replenished requests.",
+      "pattern": "429|bucket|replenish|RateLimiter|Too Many Requests"
+    }
+  ],
+  "requirement_check_plan": {
+    "status": "configured",
+    "source": "overlay",
+    "reason": null,
+    "check_count": 5,
+    "source_distribution": {
+      "overlay": 5
+    },
+    "strength_distribution": {
+      "explicit": 5
+    },
+    "signal_kind_distribution": {
+      "algorithm": 1,
+      "config_value": 1,
+      "path": 1,
+      "runtime_integration": 1,
+      "test_coverage": 1
+    },
+    "rejection_reason_distribution": {},
+    "rejected_terms": []
+  }
+}

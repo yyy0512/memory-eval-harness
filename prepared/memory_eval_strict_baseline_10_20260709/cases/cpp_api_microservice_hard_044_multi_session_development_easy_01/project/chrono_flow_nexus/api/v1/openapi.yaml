@@ -1,0 +1,527 @@
+```yaml
+# =====================================================================
+#  ChronoFlow Nexus – Versioned REST + GraphQL API
+#  File: chrono_flow_nexus/api/v1/openapi.yaml
+#
+#  NOTE:
+#  •  This OpenAPI document is used by the C++ transport/interface layer
+#     (see: src/transport/rest/OASRouter.cpp) to auto-register the routes
+#     and generate compile-time request/response validators.
+#  •  Whenever you touch this file, re-run `make swagger-codegen` so that
+#     client/ server stubs stay in sync.
+# =====================================================================
+
+openapi: 3.1.0
+
+info:
+  title: ChronoFlow Nexus – Productivity Insights API
+  version: "1.0.0"
+  description: |
+    ChronoFlow Nexus exposes time-tracking, task analytics and deep-work
+    metrics over an HTTP/JSON interface.  
+    The API is **hypermedia-friendly**, **cache-aware**, and strictly
+    versioned to guarantee long-term stability for enterprise clients.
+
+    Key characteristics:
+      • REST & GraphQL dual-surface  
+      • Built-in pagination, adaptive rate-limiting (RFC 6585 §4.3)  
+      • Structured error format (RFC 9457 / Problem+JSON)  
+      • JWT / OAuth 2.1 bearer authentication  
+
+    For GraphQL operations, refer to `/v1/graphql` or
+    `api/v1/schema.graphql`.
+
+  contact:
+    name: ChronoFlow Engineering
+    email: devrel@chronoflow.io
+  termsOfService: https://chronoflow.io/terms
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+tags:
+  - name: Time Entries
+    description: Raw time-tracking signals emitted by desktop, mobile and server agents
+  - name: Tasks
+    description: Canonical task objects (imported from project management tools)
+  - name: Metrics
+    description: Aggregated productivity KPIs & analytics
+  - name: GraphQL
+    description: Flexible, typed API surface for power users
+
+servers:
+  - url: https://api.chronoflow.io/v1
+    description: Production
+  - url: https://staging.api.chronoflow.io/v1
+    description: Staging
+
+security:
+  - bearerAuth: [ ]
+
+paths:
+  /time-entries:
+    get:
+      tags: [Time Entries]
+      summary: List time entries
+      description: |
+        Returns a paginated collection of time-entry records ordered by
+        `startedAt` descending (newest first).
+      operationId: listTimeEntries
+      parameters:
+        - $ref: '#/components/parameters/PageCursor'
+        - $ref: '#/components/parameters/PageSize'
+        - in: query
+          name: userId
+          schema:
+            type: string
+            format: uuid
+          description: Filter by the owning user
+        - in: query
+          name: since
+          schema:
+            type: string
+            format: date-time
+          description: Return entries **starting** on/after this ISO-8601 timestamp
+      responses:
+        '200':
+          description: Success – paginated list follows
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TimeEntryCollection'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '500': { $ref: '#/components/responses/ServerError' }
+      x-codegen-request-body-name: body
+
+    post:
+      tags: [Time Entries]
+      summary: Create time entry
+      operationId: createTimeEntry
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TimeEntryCreate'
+      responses:
+        '201':
+          description: Created
+          headers:
+            Location:
+              description: Absolute URL of the newly created resource
+              schema:
+                type: string
+                format: uri
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TimeEntry'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '409':
+          description: Conflict – duplicate entry
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '500': { $ref: '#/components/responses/ServerError' }
+
+  /time-entries/{entryId}:
+    parameters:
+      - name: entryId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: Time-entry identifier
+    get:
+      tags: [Time Entries]
+      summary: Fetch a single time entry
+      operationId: getTimeEntry
+      responses:
+        '200':
+          description: Fetched
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TimeEntry' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+    patch:
+      tags: [Time Entries]
+      summary: Update fields of an existing time entry
+      operationId: updateTimeEntry
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TimeEntryUpdate' }
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TimeEntry' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Edit conflict
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
+    delete:
+      tags: [Time Entries]
+      summary: Delete a time entry
+      operationId: deleteTimeEntry
+      responses:
+        '204': { description: No Content }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /tasks:
+    get:
+      tags: [Tasks]
+      summary: List tasks
+      operationId: listTasks
+      parameters:
+        - $ref: '#/components/parameters/PageCursor'
+        - $ref: '#/components/parameters/PageSize'
+        - in: query
+          name: status
+          schema:
+            type: string
+            enum: [TODO, IN_PROGRESS, DONE, ARCHIVED]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TaskCollection' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /metrics/flow:
+    get:
+      tags: [Metrics]
+      summary: Fetch team flow metrics
+      operationId: getFlowMetrics
+      parameters:
+        - in: query
+          name: teamId
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - in: query
+          name: interval
+          schema:
+            type: string
+            enum: [DAILY, WEEKLY, MONTHLY]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FlowMetrics' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /graphql:
+    post:
+      tags: [GraphQL]
+      summary: GraphQL endpoint
+      description: |
+        Fully-featured GraphQL endpoint using the Apollo Server C++ runtime.
+        Clients must supply a valid `application/json` payload conforming to
+        the GraphQL specification.
+      operationId: graphqlEndpoint
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [query]
+              properties:
+                query:
+                  type: string
+                variables:
+                  type: object
+                  additionalProperties: true
+                operationName:
+                  type: string
+      responses:
+        '200':
+          description: Successful GraphQL response
+          content:
+            application/json:
+              schema:
+                type: object
+                description: GraphQL response envelope
+                properties:
+                  data: {}
+                  errors:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/GraphQLError'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+# ────────────────────────────────────────────────────────────────────
+#  COMPONENTS
+# ────────────────────────────────────────────────────────────────────
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        Standard JWT access token issued by ChronoFlow Identity or any
+        OpenID-Connect compliant IDP federated with the workspace.
+
+  parameters:
+    PageCursor:
+      name: page[cursor]
+      in: query
+      description: Opaque cursor for forward pagination
+      schema:
+        type: string
+    PageSize:
+      name: page[size]
+      in: query
+      description: Max results per page (defaults to 50)
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 200
+
+  responses:
+    BadRequest:
+      description: Client sent an invalid request
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    Unauthorized:
+      description: Missing or invalid credentials
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    NotFound:
+      description: The requested resource was not found
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    RateLimited:
+      description: Too many requests – back off and retry later
+      headers:
+        Retry-After:
+          description: Seconds until the client may retry
+          schema:
+            type: integer
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    ServerError:
+      description: Unexpected server error
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+
+  schemas:
+    # ------- Common --------------------------------------------------
+    Problem:
+      type: object
+      description: RFC 9457 Problem Details
+      required: [type, title, status]
+      properties:
+        type:
+          type: string
+          format: uri
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+        instance:
+          type: string
+          format: uri
+
+    Paginated:
+      type: object
+      description: Generic cursor-based pagination envelope
+      required: [data, pageInfo]
+      properties:
+        data:
+          type: array
+          items: {}
+        pageInfo:
+          type: object
+          required: [endCursor, hasNextPage]
+          properties:
+            endCursor:
+              type: string
+            hasNextPage:
+              type: boolean
+
+    # ------- Time Entries -------------------------------------------
+    TimeEntry:
+      type: object
+      description: Atomic record representing a contiguous work interval
+      required:
+        - id
+        - userId
+        - startedAt
+        - endedAt
+        - source
+      properties:
+        id:
+          type: string
+          format: uuid
+        userId:
+          type: string
+          format: uuid
+        taskId:
+          type: string
+          format: uuid
+          nullable: true
+        startedAt:
+          type: string
+          format: date-time
+        endedAt:
+          type: string
+          format: date-time
+        durationMinutes:
+          type: integer
+          minimum: 1
+        source:
+          type: string
+          enum: [DESKTOP_AGENT, MOBILE_APP, API_IMPORT]
+        tags:
+          type: array
+          items:
+            type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    TimeEntryCreate:
+      allOf:
+        - $ref: '#/components/schemas/TimeEntry'
+        - type: object
+          required: [userId, startedAt, endedAt, source]
+          properties:
+            id: { readOnly: true }
+            createdAt: { readOnly: true }
+            updatedAt: { readOnly: true }
+
+    TimeEntryUpdate:
+      type: object
+      description: Patch document – supply only the fields you wish to change
+      properties:
+        taskId: { type: string, format: uuid, nullable: true }
+        tags:
+          type: array
+          items: { type: string }
+        endedAt: { type: string, format: date-time }
+
+    TimeEntryCollection:
+      allOf:
+        - $ref: '#/components/schemas/Paginated'
+        - type: object
+          properties:
+            data:
+              type: array
+              items: { $ref: '#/components/schemas/TimeEntry' }
+
+    # ------- Tasks ---------------------------------------------------
+    Task:
+      type: object
+      description: Canonical task synced from external tools or created natively
+      required:
+        - id
+        - title
+        - createdAt
+        - status
+      properties:
+        id: { type: string, format: uuid }
+        externalId: { type: string, nullable: true }
+        title: { type: string }
+        description: { type: string, nullable: true }
+        status:
+          type: string
+          enum: [TODO, IN_PROGRESS, DONE, ARCHIVED]
+        assigneeId: { type: string, format: uuid, nullable: true }
+        estimateMinutes: { type: integer, nullable: true }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    TaskCollection:
+      allOf:
+        - $ref: '#/components/schemas/Paginated'
+        - type: object
+          properties:
+            data:
+              type: array
+              items: { $ref: '#/components/schemas/Task' }
+
+    # ------- Metrics -------------------------------------------------
+    FlowMetrics:
+      type: object
+      description: Aggregated deep-work metrics for a team/timeframe
+      required: [teamId, interval, samples]
+      properties:
+        teamId:
+          type: string
+          format: uuid
+        interval:
+          type: string
+          enum: [DAILY, WEEKLY, MONTHLY]
+        generatedAt:
+          type: string
+          format: date-time
+        samples:
+          type: array
+          items:
+            type: object
+            required: [startAt, endAt, flowPercentage]
+            properties:
+              startAt: { type: string, format: date-time }
+              endAt: { type: string, format: date-time }
+              flowPercentage:
+                type: number
+                minimum: 0
+                maximum: 1
+              avgContextSwitches: { type: integer, minimum: 0 }
+
+    # ------- GraphQL -------------------------------------------------
+    GraphQLError:
+      type: object
+      required: [message]
+      properties:
+        message: { type: string }
+        locations:
+          type: array
+          items:
+            type: object
+            properties:
+              line: { type: integer }
+              column: { type: integer }
+        path:
+          type: array
+          items: { type: string }
+        extensions:
+          type: object
+          additionalProperties: true
+```

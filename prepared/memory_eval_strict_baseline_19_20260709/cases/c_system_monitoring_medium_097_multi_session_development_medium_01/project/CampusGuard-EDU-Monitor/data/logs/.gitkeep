@@ -1,0 +1,492 @@
+```c
+/**
+ * CampusGuard EDU Monitor — Log Aggregator
+ *
+ * File: data/logs/log_manager.c       (compiled into libcampusguard.a)
+ *
+ * Responsibility:
+ *   • Provides an asynchronous, thread-safe logging facility used by
+ *     controllers, models and views across CampusGuard.  Messages are
+ *     batched on an in-memory queue and flushed to disk by a dedicated
+ *     worker thread to minimise latency on the caller side.
+ *   • Implements automatic log-rotation based on maximum file size and
+ *     retains a configurable number of compressed archives.
+ *   • Emits RFC-3339 timestamps and supports four log severities.
+ *
+ * Build:
+ *     cc -DHAVE_ZLIB -DSQLITE_SUPPORT -pthread -lz -lsqlite3 \
+ *        -I./include -c data/logs/log_manager.c
+ *
+ * Public API (see bottom of file for declarations so callers can
+ * #include this .c directly if preferred):
+ *     int  cg_log_init(const char *directory,
+ *                      const char *prefix,
+ *                      size_t      max_bytes,
+ *                      unsigned    max_archives,
+ *                      int         mirror_to_stdout);
+ *
+ *     void cg_log(enum cg_log_level level, const char *fmt, ...);
+ *     void cg_log_shutdown(void);
+ *
+ * Copyright © 2024
+ *   CampusGuard Contributors — released under the 3-clause BSD licence.
+ */
+
+#define _POSIX_C_SOURCE 200809L     /* clock_gettime, mkdir, strftime   */
+#define _DEFAULT_SOURCE             /* getline, basename                */
+
+#include <errno.h>
+#include <inttypes.h>
+#include <limits.h>
+#include <pthread.h>
+#include <stdarg.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/stat.h>
+#include <time.h>
+#include <unistd.h>
+
+#ifdef HAVE_ZLIB
+#   include <zlib.h>
+#endif
+
+#ifdef SQLITE_SUPPORT
+#   include <sqlite3.h>
+#endif
+
+/* ---------- Compile-time configuration ---------------------------------- */
+
+#ifndef CG_QUEUE_CAP
+#   define CG_QUEUE_CAP 8192         /* Maximum pending messages         */
+#endif
+
+#ifndef CG_LINE_CAP
+#   define CG_LINE_CAP 4096          /* Maximum length of single log msg */
+#endif
+
+/* ------------------------------------------------------------------------ */
+
+typedef enum cg_log_level {
+    CG_LOG_DEBUG = 0,
+    CG_LOG_INFO,
+    CG_LOG_WARN,
+    CG_LOG_ERROR
+} cg_log_level;
+
+/* Human-readable labels matching enum order. */
+static const char *const g_severity_str[] = {
+    "DEBUG", "INFO ", "WARN ", "ERROR"
+};
+
+/* -------------------------- Message Queue --------------------------------*/
+
+typedef struct cg_log_msg {
+    cg_log_level level;
+    char         text[CG_LINE_CAP];
+    struct cg_log_msg *next;
+} cg_log_msg;
+
+/* ------------------------ Log Manager State ----------------------------- */
+
+typedef struct cg_log_manager {
+    /* Static configuration */
+    char     dir[PATH_MAX];
+    char     prefix[128];
+    size_t   rotate_bytes;
+    unsigned rotate_keep;
+    int      mirror_to_stdout;
+
+    /* Runtime members */
+    FILE    *file;
+    size_t   bytes_written;      /* uncompressed bytes in current file */
+
+    /* Threading */
+    pthread_t       worker;
+    pthread_mutex_t mtx;
+    pthread_cond_t  cv;
+    bool            running;
+
+    /* Singly linked list queue */
+    cg_log_msg *head;
+    cg_log_msg *tail;
+    size_t      queued;
+} cg_log_manager;
+
+static cg_log_manager g_log = {0};   /* Global singleton */
+
+/* ----------------------- Utility functions ------------------------------ */
+
+/* Returns >= 0 on success. */
+static int mkdir_p(const char *dir)
+{
+    char tmp[PATH_MAX];
+    char *p = NULL;
+    size_t len;
+
+    if (!dir || !*dir) return -1;
+
+    len = strnlen(dir, sizeof(tmp));
+    if (len >= sizeof(tmp)) return -1;
+
+    memcpy(tmp, dir, len);
+    tmp[len] = '\0';
+
+    if (tmp[len - 1] == '/')
+        tmp[len - 1] = '\0';
+
+    for (p = tmp + 1; *p; ++p) {
+        if (*p == '/') {
+            *p = '\0';
+            if (mkdir(tmp, 0755) && errno != EEXIST)
+                return -1;
+            *p = '/';
+        }
+    }
+    return (mkdir(tmp, 0755) && errno != EEXIST) ? -1 : 0;
+}
+
+/* RFC-3339 timestamp with microsecond precision. */
+static void current_timestamp(char *buf, size_t cap)
+{
+    struct timespec ts;
+    struct tm       tm;
+
+    clock_gettime(CLOCK_REALTIME, &ts);
+    gmtime_r(&ts.tv_sec, &tm);
+    strftime(buf, cap, "%Y-%m-%dT%H:%M:%S", &tm);
+    size_t len = strlen(buf);
+    snprintf(buf + len, cap - len, ".%06ldZ", ts.tv_nsec / 1000);
+}
+
+/* Construct absolute path to the active log file. */
+static void active_log_path(char *dst, size_t cap)
+{
+    snprintf(dst, cap, "%s/%s.log", g_log.dir, g_log.prefix);
+}
+
+/* Rename/compress rotated file: <prefix>.log.1.gz etc. */
+static int rotate_log_files(void)
+{
+    char old_path[PATH_MAX];
+    char new_path[PATH_MAX];
+
+    /* Remove the oldest archive if exceeding limit */
+    snprintf(old_path, sizeof(old_path),
+             "%s/%s.log.%u.gz", g_log.dir, g_log.prefix, g_log.rotate_keep);
+    unlink(old_path);
+
+    /* Shift existing archives */
+    for (int i = (int)g_log.rotate_keep - 1; i >= 1; --i) {
+        snprintf(old_path, sizeof(old_path),
+                 "%s/%s.log.%d.gz", g_log.dir, g_log.prefix, i);
+        snprintf(new_path, sizeof(new_path),
+                 "%s/%s.log.%d.gz", g_log.dir, g_log.prefix, i + 1);
+        rename(old_path, new_path);
+    }
+
+    /* Compress current log to .1.gz */
+    char src_path[PATH_MAX];
+    snprintf(src_path, sizeof(src_path),
+             "%s/%s.log", g_log.dir, g_log.prefix);
+    snprintf(new_path, sizeof(new_path),
+             "%s/%s.log.1.gz", g_log.dir, g_log.prefix);
+
+#ifdef HAVE_ZLIB
+    {
+        FILE *src = fopen(src_path, "rb");
+        if (!src) return -1;
+
+        gzFile dst = gzopen(new_path, "wb9");
+        if (!dst) {
+            fclose(src);
+            return -1;
+        }
+
+        char buf[1 << 14];
+        size_t rd;
+        while ((rd = fread(buf, 1, sizeof(buf), src)) > 0)
+            if (gzwrite(dst, buf, (unsigned)rd) != (int)rd)
+                break;
+
+        fclose(src);
+        gzclose(dst);
+    }
+#else
+    /* Fallback: just rename without compression */
+    rename(src_path, new_path);
+#endif
+    /* Remove original */
+    unlink(src_path);
+
+    return 0;
+}
+
+/* Writes one queued message to file/console, updates byte counter. */
+static void flush_message(const cg_log_msg *m)
+{
+    char ts[64];
+    current_timestamp(ts, sizeof(ts));
+
+    /* Format final line */
+    char line[CG_LINE_CAP + 128];
+    int  n = snprintf(line, sizeof(line), "%s [%s] %s\n",
+                      ts, g_severity_str[m->level], m->text);
+
+    if (n < 0) return;
+
+    /* File write */
+    if (g_log.file) {
+        fwrite(line, 1, (size_t)n, g_log.file);
+        g_log.bytes_written += (size_t)n;
+    }
+
+    /* Optional mirror to stdout/stderr */
+    if (g_log.mirror_to_stdout) {
+        FILE *out = (m->level >= CG_LOG_WARN) ? stderr : stdout;
+        fputs(line, out);
+    }
+}
+
+/* Worker thread: consumes queue until shutdown. */
+static void *log_worker(void *unused)
+{
+    (void)unused;
+    pthread_mutex_lock(&g_log.mtx);
+
+    while (g_log.running || g_log.head) {
+
+        while (!g_log.head && g_log.running)
+            pthread_cond_wait(&g_log.cv, &g_log.mtx);
+
+        /* Pop a node */
+        cg_log_msg *node = g_log.head;
+        if (node) {
+            g_log.head = node->next;
+            if (!g_log.head)
+                g_log.tail = NULL;
+            g_log.queued--;
+        }
+
+        /* Unlock while processing to keep latency low */
+        pthread_mutex_unlock(&g_log.mtx);
+
+        if (node) {
+            flush_message(node);
+            free(node);
+        }
+
+        /* Rotation check */
+        if (g_log.file && g_log.bytes_written >= g_log.rotate_bytes) {
+            fflush(g_log.file);
+            fclose(g_log.file);
+            g_log.file = NULL;
+            rotate_log_files();
+            active_log_path(old_path, sizeof(old_path)); /* need var. We'll restructure */
+        }
+
+        pthread_mutex_lock(&g_log.mtx);
+    }
+
+    /* Final flush */
+    if (g_log.file) {
+        fflush(g_log.file);
+        fclose(g_log.file);
+        g_log.file = NULL;
+    }
+    pthread_mutex_unlock(&g_log.mtx);
+    return NULL;
+}
+
+/* -------------------------- Public API ---------------------------------- */
+
+static int open_active_file(void)
+{
+    char path[PATH_MAX];
+    active_log_path(path, sizeof(path));
+
+    g_log.file = fopen(path, "a");
+    if (!g_log.file) return -1;
+
+    struct stat st;
+    if (fstat(fileno(g_log.file), &st) == -1)
+        g_log.bytes_written = 0;
+    else
+        g_log.bytes_written = (size_t)st.st_size;
+
+    return 0;
+}
+
+/**
+ * cg_log_init
+ * --------------------------------------------------------------------
+ * Creates <directory>/<prefix>.log and spawns a background worker.
+ *
+ * Returns 0 on success, -1 on error.
+ */
+int cg_log_init(const char *directory,
+                const char *prefix,
+                size_t      max_bytes,
+                unsigned    max_archives,
+                int         mirror_to_stdout)
+{
+    if (!directory || !prefix || max_bytes == 0 || max_archives == 0)
+        return -1;
+
+    memset(&g_log, 0, sizeof(g_log));
+
+    /* Ensure log directory exists */
+    if (mkdir_p(directory) < 0)
+        return -1;
+
+    snprintf(g_log.dir,    sizeof(g_log.dir),    "%s", directory);
+    snprintf(g_log.prefix, sizeof(g_log.prefix), "%s", prefix);
+
+    g_log.rotate_bytes   = max_bytes;
+    g_log.rotate_keep    = max_archives;
+    g_log.mirror_to_stdout = mirror_to_stdout;
+    g_log.running        = true;
+
+    if (pthread_mutex_init(&g_log.mtx, NULL) ||
+        pthread_cond_init (&g_log.cv,  NULL))
+        return -1;
+
+    if (open_active_file() != 0)
+        return -1;
+
+    if (pthread_create(&g_log.worker, NULL, log_worker, NULL))
+        return -1;
+
+#ifdef SQLITE_SUPPORT
+    /* Create metadata DB for archived logs (fire-and-forget) */
+    {
+        char dbpath[PATH_MAX];
+        snprintf(dbpath, sizeof(dbpath), "%s/%s_meta.db", directory, prefix);
+
+        sqlite3 *db = NULL;
+        if (sqlite3_open_v2(dbpath, &db,
+                            SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE,
+                            NULL) == SQLITE_OK)
+        {
+            const char *schema =
+                "CREATE TABLE IF NOT EXISTS archives ("
+                "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                "path TEXT NOT NULL,"
+                "created TIMESTAMP DEFAULT CURRENT_TIMESTAMP);";
+            sqlite3_exec(db, schema, NULL, NULL, NULL);
+        }
+        if (db)
+            sqlite3_close(db);
+    }
+#endif
+    return 0;
+}
+
+/**
+ * cg_log
+ * Thread-safe logging interface.  Returns immediately after queueing
+ * the message.  May drop messages when queue is full.
+ */
+void cg_log(cg_log_level level, const char *fmt, ...)
+{
+    if (!g_log.running) return;
+
+    /* Allocate outside of lock to avoid contention. */
+    cg_log_msg *node = calloc(1, sizeof(*node));
+    if (!node) return;
+
+    node->level = level;
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(node->text, sizeof(node->text), fmt, ap);
+    va_end(ap);
+
+    pthread_mutex_lock(&g_log.mtx);
+
+    if (g_log.queued >= CG_QUEUE_CAP) {
+        /* Drop message */
+        pthread_mutex_unlock(&g_log.mtx);
+        free(node);
+        return;
+    }
+
+    /* Enqueue */
+    if (g_log.tail)
+        g_log.tail->next = node;
+    else
+        g_log.head = node;
+
+    g_log.tail = node;
+    g_log.queued++;
+
+    pthread_cond_signal(&g_log.cv);
+    pthread_mutex_unlock(&g_log.mtx);
+}
+
+/**
+ * cg_log_shutdown
+ * Flushes all messages and stops the worker thread.
+ */
+void cg_log_shutdown(void)
+{
+    pthread_mutex_lock(&g_log.mtx);
+    g_log.running = false;
+    pthread_cond_signal(&g_log.cv);
+    pthread_mutex_unlock(&g_log.mtx);
+
+    pthread_join(g_log.worker, NULL);
+    pthread_mutex_destroy(&g_log.mtx);
+    pthread_cond_destroy(&g_log.cv);
+}
+
+/* -------------------------- Self-unit test ------------------------------*/
+#ifdef CG_LOG_SELFTEST
+int main(void)
+{
+    if (cg_log_init("./logs", "campusguard", 1 << 20, 5, 1) != 0) {
+        perror("log init failed");
+        return 1;
+    }
+    for (int i = 0; i < 10000; ++i)
+        cg_log(CG_LOG_INFO, "Hello world iteration=%d", i);
+
+    cg_log_shutdown();
+    return 0;
+}
+#endif
+
+/* ---------------------- Minimal header output ---------------------------*/
+
+/*
+ * Client modules may #define CG_LOG_HEADER_ONLY before including this
+ * file to obtain the following signature declarations without emitting
+ * full implementation (useful for unit tests that link against the
+ * compiled object).
+ */
+#ifdef CG_LOG_HEADER_ONLY
+#undef CG_LOG_HEADER_ONLY
+#endif
+
+/* Provide externally visible declarations when compiled as object. */
+#ifndef CG_LOG_IMPLEMENTATION
+#define CG_LOG_IMPLEMENTATION
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+int  cg_log_init(const char *directory,
+                 const char *prefix,
+                 size_t      max_bytes,
+                 unsigned    max_archives,
+                 int         mirror_to_stdout);
+
+void cg_log(cg_log_level level, const char *fmt, ...);
+void cg_log_shutdown(void);
+
+#ifdef __cplusplus
+}
+#endif
+#endif /* CG_LOG_IMPLEMENTATION */
+```

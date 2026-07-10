@@ -1,0 +1,554 @@
+/*
+ * RetinaGuard Vision Suite
+ * -------------------------------------------------------------
+ * File: data/db/retinaguard.db                (C source module)
+ *
+ * Purpose:
+ *   Lightweight data-access layer for RetinaGuard’s on-device
+ *   SQLite database.  The module owns the schema definition,
+ *   connection lifecycle and a handful of convenience helpers
+ *   used by higher-level pipeline stages (image ingestion,
+ *   model inference, longitudinal tracking, etc.).
+ *
+ *   Because the application runs in resource-constrained rural
+ *   clinics without permanent IT staff, the database has to be
+ *   fully self-healing: the code will create the file on first
+ *   use, migrate the schema when necessary and surface user-
+ *   friendly diagnostics when corruption or I/O problems are
+ *   detected.
+ *
+ * Build:
+ *   cc -Wall -Wextra -pedantic -std=c11 -lsqlite3 -o retinaguard_db.o -c retinaguard.db
+ *
+ * NOTE:
+ *   Even though the file carries a “.db” suffix to emphasise its
+ *   tight coupling with the underlying database, it is a regular
+ *   C translation unit and should be compiled as such.
+ */
+
+#include <sqlite3.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdbool.h>
+#include <string.h>
+#include <time.h>
+
+/* -------------------------------------------------------------------------- */
+/* Public interface                                                           */
+/* -------------------------------------------------------------------------- */
+
+typedef struct rg_db
+{
+    sqlite3 *conn;          /* Live SQLite connection handle                 */
+    int      schema_rev;    /* Current schema version loaded from PRAGMA     */
+} rg_db;
+
+/*
+ * Open or create the RetinaGuard database at |path|.  If the on-disk
+ * schema does not match the implementation’s expected version, automatic
+ * migration will be attempted.  Returns NULL on failure (error printed).
+ */
+rg_db *rg_db_open(const char *path);
+
+/*
+ * Gracefully close the connection and free the handle (safe on NULL).
+ */
+void   rg_db_close(rg_db *db);
+
+/* -------------------------------------------------------------------------- */
+/* Data manipulation helpers                                                  */
+/* -------------------------------------------------------------------------- */
+
+/*
+ * Register a newly ingested fundus image.  Duplicate |image_id| entries
+ * are ignored (idempotent).  Returns true on success.
+ */
+bool rg_db_register_image(rg_db            *db,
+                          const char       *image_id,
+                          const char       *clinic_id,
+                          const char       *patient_id,
+                          const char       *capture_ts_iso8601,
+                          const char       *file_path,
+                          int               width_px,
+                          int               height_px);
+
+/*
+ * Persist inference result for an existing image.  Upserts on
+ * (image_id, model_id) so we can re-run models without ballooning rows.
+ */
+bool rg_db_record_inference(rg_db      *db,
+                            const char *image_id,
+                            const char *model_name,
+                            const char *model_version,
+                            const char *run_ts_iso8601,
+                            double      dr_score,      /* 0-1 risk score   */
+                            const char *dr_grade);     /* string/enum      */
+
+/*
+ * Fetch the most recent inference for |image_id|.  The caller provides
+ * pointers for out parameters.  Any pointer may be NULL when not needed.
+ * Returns true when a result was found.
+ */
+bool rg_db_latest_inference(const rg_db *db,
+                            const char  *image_id,
+                            char        *model_name_out,
+                            size_t       model_name_cap,
+                            char        *model_version_out,
+                            size_t       model_version_cap,
+                            double      *dr_score_out,
+                            char        *dr_grade_out,
+                            size_t       dr_grade_cap,
+                            char        *run_ts_out,
+                            size_t       run_ts_cap);
+
+/* -------------------------------------------------------------------------- */
+/* Implementation                                                             */
+/* -------------------------------------------------------------------------- */
+
+/* Expected schema version of this compilation unit */
+#define RG_DB_SCHEMA_REV  2
+
+/* Internal helpers */
+static bool rg_db_exec(rg_db *db, const char *sql);
+static bool rg_db_schema_exists(rg_db *db);
+static bool rg_db_install_schema(rg_db *db);
+static bool rg_db_migrate_schema(rg_db *db, int from_ver);
+static void rg_db_log_sqlite_error(const char *ctx, sqlite3 *conn);
+
+/* -------------------------------------------------------------------------- */
+
+rg_db *rg_db_open(const char *path)
+{
+    if (!path) {
+        fprintf(stderr, "[rg_db] ERROR: NULL path provided to rg_db_open\n");
+        return NULL;
+    }
+
+    rg_db *db = calloc(1, sizeof(*db));
+    if (!db) {
+        perror("[rg_db] calloc");
+        return NULL;
+    }
+
+    int rc = sqlite3_open_v2(path,
+                             &db->conn,
+                             SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE |
+                             SQLITE_OPEN_FULLMUTEX,
+                             NULL);
+    if (rc != SQLITE_OK) {
+        fprintf(stderr, "[rg_db] ERROR: cannot open DB '%s': %s\n",
+                path, sqlite3_errmsg(db->conn));
+        sqlite3_close(db->conn);
+        free(db);
+        return NULL;
+    }
+
+    /* Enforce foreign keys and WAL for better concurrency/resilience */
+    (void)rg_db_exec(db, "PRAGMA foreign_keys = ON;");
+    (void)rg_db_exec(db, "PRAGMA journal_mode  = WAL;");
+
+    /* Determine whether schema exists and act accordingly */
+    if (!rg_db_schema_exists(db)) {
+        if (!rg_db_install_schema(db)) {
+            rg_db_close(db);
+            return NULL;
+        }
+    } else {
+        /* Check version and migrate if needed */
+        sqlite3_stmt *stmt = NULL;
+        if (sqlite3_prepare_v2(db->conn,
+                               "PRAGMA user_version;",
+                               -1, &stmt, NULL) != SQLITE_OK) {
+            rg_db_log_sqlite_error("retrieve user_version", db->conn);
+            rg_db_close(db);
+            return NULL;
+        }
+        int from_ver = 0;
+        if (sqlite3_step(stmt) == SQLITE_ROW)
+            from_ver = sqlite3_column_int(stmt, 0);
+        sqlite3_finalize(stmt);
+
+        db->schema_rev = from_ver;
+        if (from_ver != RG_DB_SCHEMA_REV) {
+            if (!rg_db_migrate_schema(db, from_ver)) {
+                rg_db_close(db);
+                return NULL;
+            }
+            db->schema_rev = RG_DB_SCHEMA_REV;
+        }
+    }
+
+    return db;
+}
+
+void rg_db_close(rg_db *db)
+{
+    if (!db) return;
+    if (db->conn)
+        sqlite3_close_v2(db->conn);
+    free(db);
+}
+
+/* -------------------------------------------------------------------------- */
+/* Schema management                                                          */
+/* -------------------------------------------------------------------------- */
+
+static bool rg_db_schema_exists(rg_db *db)
+{
+    const char *sql =
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='images';";
+    sqlite3_stmt *stmt = NULL;
+    bool exists = false;
+
+    if (sqlite3_prepare_v2(db->conn, sql, -1, &stmt, NULL) != SQLITE_OK) {
+        rg_db_log_sqlite_error("schema_exists prepare", db->conn);
+        return false;
+    }
+    if (sqlite3_step(stmt) == SQLITE_ROW)
+        exists = true;
+    sqlite3_finalize(stmt);
+    return exists;
+}
+
+static bool rg_db_install_schema(rg_db *db)
+{
+    const char *sql =
+        "BEGIN;"
+        "CREATE TABLE clinics ("
+        "  clinic_id TEXT PRIMARY KEY,"
+        "  name      TEXT,"
+        "  address   TEXT"
+        ");"
+
+        "CREATE TABLE patients ("
+        "  patient_id TEXT PRIMARY KEY,"
+        "  clinic_id  TEXT NOT NULL,"
+        "  birth_date TEXT,"
+        "  sex        TEXT,"
+        "  FOREIGN KEY(clinic_id) REFERENCES clinics(clinic_id)"
+        ");"
+
+        "CREATE TABLE images ("
+        "  image_id   TEXT PRIMARY KEY,"
+        "  patient_id TEXT NOT NULL,"
+        "  clinic_id  TEXT NOT NULL,"
+        "  capture_ts TEXT NOT NULL,"
+        "  file_path  TEXT NOT NULL,"
+        "  width_px   INTEGER NOT NULL,"
+        "  height_px  INTEGER NOT NULL,"
+        "  hash_md5   TEXT,"
+        "  FOREIGN KEY(patient_id) REFERENCES patients(patient_id)"
+        ");"
+
+        "CREATE TABLE models ("
+        "  model_id    INTEGER PRIMARY KEY AUTOINCREMENT,"
+        "  name        TEXT NOT NULL,"
+        "  version     TEXT NOT NULL,"
+        "  UNIQUE(name, version)"
+        ");"
+
+        "CREATE TABLE inferences ("
+        "  image_id   TEXT NOT NULL,"
+        "  model_id   INTEGER NOT NULL,"
+        "  run_ts     TEXT NOT NULL,"
+        "  dr_score   REAL NOT NULL,"
+        "  dr_grade   TEXT NOT NULL,"
+        "  PRIMARY KEY(image_id, model_id),"
+        "  FOREIGN KEY(image_id) REFERENCES images(image_id)"
+        "               ON DELETE CASCADE,"
+        "  FOREIGN KEY(model_id) REFERENCES models(model_id)"
+        ");"
+
+        /* For quick longitudinal queries */
+        "CREATE INDEX idx_inf_patient ON inferences(image_id);"
+
+        /* Store schema revision */
+        "PRAGMA user_version = " STRINGIFY(RG_DB_SCHEMA_REV) ";"
+        "COMMIT;";
+
+    if (!rg_db_exec(db, sql)) {
+        fprintf(stderr, "[rg_db] ERROR: failed to install schema\n");
+        return false;
+    }
+
+    db->schema_rev = RG_DB_SCHEMA_REV;
+    return true;
+}
+
+/*
+ * Simple example migration path.  In production you would handle each
+ * from_ver individually to guarantee forward portability.
+ */
+static bool rg_db_migrate_schema(rg_db *db, int from_ver)
+{
+    if (from_ver == 0) {
+        /* Example migration: add hash_md5 to images table */
+        const char *sql =
+            "BEGIN;"
+            "ALTER TABLE images ADD COLUMN hash_md5 TEXT;"
+            "PRAGMA user_version = 1;"
+            "COMMIT;";
+        if (!rg_db_exec(db, sql))
+            return false;
+        from_ver = 1;
+    }
+
+    if (from_ver == 1) {
+        /* Example: introduce models table (already present in v2 schema) */
+        const char *sql =
+            "BEGIN;"
+            "CREATE TABLE IF NOT EXISTS models ("
+            "  model_id  INTEGER PRIMARY KEY AUTOINCREMENT,"
+            "  name      TEXT NOT NULL,"
+            "  version   TEXT NOT NULL,"
+            "  UNIQUE(name, version)"
+            ");"
+            "ALTER TABLE inferences RENAME TO __inf_old;"
+            "CREATE TABLE inferences ("
+            "  image_id TEXT NOT NULL,"
+            "  model_id INTEGER NOT NULL,"
+            "  run_ts   TEXT NOT NULL,"
+            "  dr_score REAL NOT NULL,"
+            "  dr_grade TEXT NOT NULL,"
+            "  PRIMARY KEY(image_id, model_id)"
+            ");"
+            "INSERT INTO inferences(image_id, model_id, run_ts, dr_score, dr_grade) "
+            "  SELECT image_id, 1, run_ts, dr_score, dr_grade FROM __inf_old;"
+            "DROP TABLE __inf_old;"
+            "PRAGMA user_version = 2;"
+            "COMMIT;";
+        if (!rg_db_exec(db, sql))
+            return false;
+        from_ver = 2;
+    }
+
+    if (from_ver != RG_DB_SCHEMA_REV) {
+        fprintf(stderr,
+                "[rg_db] ERROR: Migration path from schema %d to %d not implemented\n",
+                from_ver, RG_DB_SCHEMA_REV);
+        return false;
+    }
+    return true;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Public data-manipulation helpers                                           */
+/* -------------------------------------------------------------------------- */
+
+bool rg_db_register_image(rg_db            *db,
+                          const char       *image_id,
+                          const char       *clinic_id,
+                          const char       *patient_id,
+                          const char       *capture_ts_iso8601,
+                          const char       *file_path,
+                          int               width_px,
+                          int               height_px)
+{
+    if (!db || !image_id || !patient_id || !capture_ts_iso8601 || !file_path)
+        return false;
+
+    const char *sql =
+        "INSERT OR IGNORE INTO images ("
+        "  image_id, patient_id, clinic_id, capture_ts, file_path, "
+        "  width_px, height_px"
+        ") VALUES (?, ?, ?, ?, ?, ?, ?);";
+
+    sqlite3_stmt *stmt = NULL;
+    if (sqlite3_prepare_v2(db->conn, sql, -1, &stmt, NULL) != SQLITE_OK) {
+        rg_db_log_sqlite_error("register_image prepare", db->conn);
+        return false;
+    }
+
+    sqlite3_bind_text(stmt, 1, image_id,            -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 2, patient_id,          -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 3, clinic_id,           -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 4, capture_ts_iso8601,  -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 5, file_path,           -1, SQLITE_STATIC);
+    sqlite3_bind_int (stmt, 6, width_px);
+    sqlite3_bind_int (stmt, 7, height_px);
+
+    bool ok = (sqlite3_step(stmt) == SQLITE_DONE);
+    if (!ok)
+        rg_db_log_sqlite_error("register_image exec", db->conn);
+
+    sqlite3_finalize(stmt);
+    return ok;
+}
+
+static int rg_db_ensure_model_id(rg_db *db,
+                                 const char *name,
+                                 const char *version,
+                                 int *model_id_out)
+{
+    const char *sel_sql = "SELECT model_id FROM models WHERE name = ? AND version = ?;";
+    sqlite3_stmt *stmt = NULL;
+
+    if (sqlite3_prepare_v2(db->conn, sel_sql, -1, &stmt, NULL) != SQLITE_OK) {
+        rg_db_log_sqlite_error("ensure_model_id select prepare", db->conn);
+        return SQLITE_ERROR;
+    }
+
+    sqlite3_bind_text(stmt, 1, name,    -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 2, version, -1, SQLITE_STATIC);
+
+    int rc = sqlite3_step(stmt);
+    if (rc == SQLITE_ROW) {
+        *model_id_out = sqlite3_column_int(stmt, 0);
+        sqlite3_finalize(stmt);
+        return SQLITE_OK;
+    }
+    sqlite3_finalize(stmt);
+
+    /* Insert new model record */
+    const char *ins_sql =
+        "INSERT INTO models (name, version) VALUES (?, ?);";
+    if (sqlite3_prepare_v2(db->conn, ins_sql, -1, &stmt, NULL) != SQLITE_OK) {
+        rg_db_log_sqlite_error("ensure_model_id insert prepare", db->conn);
+        return SQLITE_ERROR;
+    }
+
+    sqlite3_bind_text(stmt, 1, name,    -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 2, version, -1, SQLITE_STATIC);
+
+    if (sqlite3_step(stmt) != SQLITE_DONE) {
+        rg_db_log_sqlite_error("ensure_model_id insert exec", db->conn);
+        sqlite3_finalize(stmt);
+        return SQLITE_ERROR;
+    }
+    *model_id_out = (int)sqlite3_last_insert_rowid(db->conn);
+    sqlite3_finalize(stmt);
+    return SQLITE_OK;
+}
+
+bool rg_db_record_inference(rg_db      *db,
+                            const char *image_id,
+                            const char *model_name,
+                            const char *model_version,
+                            const char *run_ts_iso8601,
+                            double      dr_score,
+                            const char *dr_grade)
+{
+    if (!db || !image_id || !model_name || !model_version ||
+        !run_ts_iso8601 || !dr_grade)
+        return false;
+
+    int model_id = 0;
+    if (rg_db_ensure_model_id(db, model_name, model_version, &model_id) != SQLITE_OK)
+        return false;
+
+    const char *sql =
+        "INSERT OR REPLACE INTO inferences ("
+        "  image_id, model_id, run_ts, dr_score, dr_grade"
+        ") VALUES (?, ?, ?, ?, ?);";
+
+    sqlite3_stmt *stmt = NULL;
+    if (sqlite3_prepare_v2(db->conn, sql, -1, &stmt, NULL) != SQLITE_OK) {
+        rg_db_log_sqlite_error("record_inference prepare", db->conn);
+        return false;
+    }
+
+    sqlite3_bind_text(stmt, 1, image_id,          -1, SQLITE_STATIC);
+    sqlite3_bind_int (stmt, 2, model_id);
+    sqlite3_bind_text(stmt, 3, run_ts_iso8601,   -1, SQLITE_STATIC);
+    sqlite3_bind_double(stmt, 4, dr_score);
+    sqlite3_bind_text(stmt, 5, dr_grade,          -1, SQLITE_STATIC);
+
+    bool ok = (sqlite3_step(stmt) == SQLITE_DONE);
+    if (!ok)
+        rg_db_log_sqlite_error("record_inference exec", db->conn);
+
+    sqlite3_finalize(stmt);
+    return ok;
+}
+
+bool rg_db_latest_inference(const rg_db *db,
+                            const char  *image_id,
+                            char        *model_name_out,
+                            size_t       model_name_cap,
+                            char        *model_version_out,
+                            size_t       model_version_cap,
+                            double      *dr_score_out,
+                            char        *dr_grade_out,
+                            size_t       dr_grade_cap,
+                            char        *run_ts_out,
+                            size_t       run_ts_cap)
+{
+    if (!db || !image_id) return false;
+
+    const char *sql =
+        "SELECT m.name, m.version, i.dr_score, i.dr_grade, i.run_ts "
+        "FROM inferences i "
+        "JOIN models m ON m.model_id = i.model_id "
+        "WHERE i.image_id = ? "
+        "ORDER BY i.run_ts DESC "
+        "LIMIT 1;";
+
+    sqlite3_stmt *stmt = NULL;
+    if (sqlite3_prepare_v2(db->conn, sql, -1, &stmt, NULL) != SQLITE_OK) {
+        rg_db_log_sqlite_error("latest_inference prepare", db->conn);
+        return false;
+    }
+    sqlite3_bind_text(stmt, 1, image_id, -1, SQLITE_STATIC);
+
+    bool found = false;
+    if (sqlite3_step(stmt) == SQLITE_ROW) {
+        found = true;
+        if (model_name_out && model_name_cap)
+            snprintf(model_name_out, model_name_cap, "%s",
+                     (const char *)sqlite3_column_text(stmt, 0));
+        if (model_version_out && model_version_cap)
+            snprintf(model_version_out, model_version_cap, "%s",
+                     (const char *)sqlite3_column_text(stmt, 1));
+        if (dr_score_out)
+            *dr_score_out = sqlite3_column_double(stmt, 2);
+        if (dr_grade_out && dr_grade_cap)
+            snprintf(dr_grade_out, dr_grade_cap, "%s",
+                     (const char *)sqlite3_column_text(stmt, 3));
+        if (run_ts_out && run_ts_cap)
+            snprintf(run_ts_out, run_ts_cap, "%s",
+                     (const char *)sqlite3_column_text(stmt, 4));
+    }
+
+    sqlite3_finalize(stmt);
+    return found;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Internal helpers                                                           */
+/* -------------------------------------------------------------------------- */
+
+static bool rg_db_exec(rg_db *db, const char *sql)
+{
+    char *err_msg = NULL;
+    int rc = sqlite3_exec(db->conn, sql, NULL, NULL, &err_msg);
+    if (rc != SQLITE_OK) {
+        fprintf(stderr, "[rg_db] SQL error: %s\n", err_msg ? err_msg : "unknown");
+        sqlite3_free(err_msg);
+        return false;
+    }
+    return true;
+}
+
+static void rg_db_log_sqlite_error(const char *ctx, sqlite3 *conn)
+{
+    fprintf(stderr, "[rg_db] ERROR during %s: %s (code %d)\n",
+            ctx,
+            sqlite3_errmsg(conn),
+            sqlite3_errcode(conn));
+}
+
+/* -------------------------------------------------------------------------- */
+/* Utility: ISO-8601 timestamp generator                                      */
+/* -------------------------------------------------------------------------- */
+
+void rg_db_now_iso8601(char buf[static 25])
+{
+    time_t     t  = time(NULL);
+    struct tm  tm;
+    gmtime_r(&t, &tm);
+    strftime(buf, 25, "%Y-%m-%dT%H:%M:%SZ", &tm);
+}
+
+/* -------------------------------------------------------------------------- */
+/* End of file                                                                */
+/* -------------------------------------------------------------------------- */

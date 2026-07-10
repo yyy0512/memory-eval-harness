@@ -1,0 +1,412 @@
+```rust
+//! src/module_24.rs
+//!
+//! Session management and secure-cookie middleware for ChromaticCanvas Control
+//! Center’s REST API.  This module provides a high-level façade around the
+//! underlying key–value store (Redis in production, in-mem fallback for local
+//! tests) and exposes a Tower / Axum compatible middleware layer that
+//! transparently hydrates and validates the user session on every request.
+//!
+//! Design goals
+//! ------------
+//! 1. Strong typing  – session payloads are strongly typed and versioned.
+//! 2. Security       – HttpOnly, SameSite=Lax, Secure (TLS only) cookies.
+//! 3. Ergonomics     – simple `Session::<T>::get()` and `Session::<T>::set()`.
+//! 4. Extensibility  – a `SessionStore` trait that can be backed by Redis,
+//!    Postgres (JSONB), or even DynamoDB without touching call-sites.
+//!
+//! NOTE: This module purposefully contains **no** routing code; routes register
+//! the middleware via `middleware::from_fn(session_layer)`.
+
+use std::{
+    fmt,
+    sync::Arc,
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
+
+use async_trait::async_trait;
+use axum::{
+    body::Body,
+    extract::Request,
+    http::{header, HeaderMap, HeaderValue, Response, StatusCode},
+    middleware::Next,
+    response::{IntoResponse},
+    Extension, Json,
+};
+use chrono::{DateTime, Utc};
+use rand::{distributions::Alphanumeric, Rng};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use thiserror::Error;
+use uuid::Uuid;
+
+#[cfg(feature = "redis_store")]
+use deadpool_redis::{Config as RedisConfig, Connection, Pool as RedisPool};
+
+/// A typed handle that gets attached to `Extension` so downstream handlers can
+/// easily access the session without touching cookies or headers directly.
+#[derive(Clone, Debug)]
+pub struct SessionHandle {
+    inner: Arc<Session>,
+}
+
+/// Immutable snapshot of a logged-in user’s session.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Session {
+    pub session_id: Uuid,
+    pub user_id: Uuid,
+    pub issued_at: DateTime<Utc>,
+    pub expires_at: DateTime<Utc>,
+}
+
+impl Session {
+    /// Check if the session is expired (server-side check, *not* cookie TTL).
+    pub fn is_expired(&self) -> bool {
+        Utc::now() > self.expires_at
+    }
+}
+
+/// Primary error type returned by session subsystem.
+#[derive(Error, Debug)]
+pub enum SessionError {
+    #[error("no session cookie present")]
+    MissingCookie,
+    #[error("session not found or has expired")]
+    NotFound,
+    #[error("session store backend failure: {0}")]
+    StoreBackend(#[from] anyhow::Error),
+    #[error("serialization error: {0}")]
+    Serde(#[from] serde_json::Error),
+}
+
+impl IntoResponse for SessionError {
+    fn into_response(self) -> Response<Body> {
+        let status = match &self {
+            SessionError::MissingCookie | SessionError::NotFound => StatusCode::UNAUTHORIZED,
+            SessionError::StoreBackend(_) | SessionError::Serde(_) => {
+                StatusCode::INTERNAL_SERVER_ERROR
+            }
+        };
+        (status, Json(json!({ "error": self.to_string() }))).into_response()
+    }
+}
+
+/// Abstract session store: Redis (prod), HashMap (tests/dev), etc.
+#[async_trait]
+pub trait SessionStore: Send + Sync + 'static {
+    async fn put(&self, key: &str, value: &str, ttl: Duration) -> Result<(), anyhow::Error>;
+    async fn get(&self, key: &str) -> Result<Option<String>, anyhow::Error>;
+    async fn del(&self, key: &str) -> Result<(), anyhow::Error>;
+}
+
+/// In-memory, non-persistent store – feature supplied automatically for tests.
+#[cfg(feature = "memory_store")]
+pub mod memory_store {
+    use super::*;
+    use dashmap::DashMap;
+
+    #[derive(Default, Clone)]
+    pub struct MemorySessionStore {
+        map: Arc<DashMap<String, (String, SystemTime)>>,
+    }
+
+    #[async_trait]
+    impl SessionStore for MemorySessionStore {
+        async fn put(&self, key: &str, value: &str, ttl: Duration) -> Result<(), anyhow::Error> {
+            let expires_at = SystemTime::now() + ttl;
+            self.map.insert(key.to_owned(), (value.to_owned(), expires_at));
+            Ok(())
+        }
+
+        async fn get(&self, key: &str) -> Result<Option<String>, anyhow::Error> {
+            if let Some((val, expiry)) = self.map.get(key).map(|r| r.value().clone()) {
+                if SystemTime::now() > expiry {
+                    self.map.remove(key);
+                    return Ok(None);
+                }
+                return Ok(Some(val));
+            }
+            Ok(None)
+        }
+
+        async fn del(&self, key: &str) -> Result<(), anyhow::Error> {
+            self.map.remove(key);
+            Ok(())
+        }
+    }
+}
+
+/// Redis-backed store – enabled via "redis_store" Cargo feature.
+#[cfg(feature = "redis_store")]
+pub mod redis_store {
+    use super::*;
+    use bytes::Bytes;
+    use deadpool_redis::redis::AsyncCommands;
+
+    #[derive(Clone)]
+    pub struct RedisSessionStore {
+        pool: RedisPool,
+    }
+
+    impl RedisSessionStore {
+        pub fn new(pool: RedisPool) -> Self {
+            Self { pool }
+        }
+    }
+
+    #[async_trait]
+    impl SessionStore for RedisSessionStore {
+        async fn put(&self, key: &str, value: &str, ttl: Duration) -> Result<(), anyhow::Error> {
+            let mut conn = self.pool.get().await?;
+            let _: () = conn
+                .set_ex::<&str, &str, ()>(key, value, ttl.as_secs() as usize)
+                .await?;
+            Ok(())
+        }
+
+        async fn get(&self, key: &str) -> Result<Option<String>, anyhow::Error> {
+            let mut conn = self.pool.get().await?;
+            let result: Option<String> = conn.get(key).await?;
+            Ok(result)
+        }
+
+        async fn del(&self, key: &str) -> Result<(), anyhow::Error> {
+            let mut conn = self.pool.get().await?;
+            let _: () = conn.del(key).await?;
+            Ok(())
+        }
+    }
+}
+
+/// Global application state that is injected via `Extension`.
+#[derive(Clone)]
+pub struct AppState<S>
+where
+    S: SessionStore,
+{
+    pub session_store: Arc<S>,
+    /// Additional shared services (db pool, logger, etc.) redacted for brevity.
+}
+
+impl<S> fmt::Debug for AppState<S>
+where
+    S: SessionStore,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("AppState").finish_non_exhaustive()
+    }
+}
+
+/// Cookie name; kept stable as this is part of the public contract.
+pub const SESSION_COOKIE: &str = "cc-auth";
+
+/// Duration before a session expires (server-side).
+const SESSION_TTL: Duration = Duration::from_secs(60 * 60 * 8); // 8 hours
+
+/// Middleware entry point: validates cookie and injects `SessionHandle`.
+pub async fn session_layer<S>(
+    Extension(state): Extension<AppState<S>>,
+    mut req: Request<Body>,
+    next: Next<Body>,
+) -> Result<Response<Body>, SessionError>
+where
+    S: SessionStore,
+{
+    // Extract cookie header.
+    let cookie_header = req
+        .headers()
+        .get(header::COOKIE)
+        .ok_or(SessionError::MissingCookie)?
+        .to_str()
+        .map_err(|_| SessionError::MissingCookie)?;
+
+    let jar = cookie::CookieJar::new();
+    let cookie = cookie::Cookie::parse_encoded(cookie_header.to_string())
+        .map_err(|_| SessionError::MissingCookie)?;
+    if cookie.name() != SESSION_COOKIE {
+        return Err(SessionError::MissingCookie);
+    }
+
+    let session_key = cookie.value();
+    let raw = state
+        .session_store
+        .get(session_key)
+        .await?
+        .ok_or(SessionError::NotFound)?;
+    let session: Session = serde_json::from_str(&raw)?;
+    if session.is_expired() {
+        state.session_store.del(session_key).await?;
+        return Err(SessionError::NotFound);
+    }
+
+    // Inject into request extensions.
+    req.extensions_mut()
+        .insert(SessionHandle { inner: Arc::new(session) });
+
+    let mut res = next.run(req).await;
+
+    // Refresh TTL on each successful call (sliding window).
+    state
+        .session_store
+        .put(session_key, &raw, SESSION_TTL)
+        .await
+        .map_err(SessionError::StoreBackend)?;
+
+    Ok(res)
+}
+
+/// Utility: create a new session and set cookie in the HTTP response.
+///
+/// Returns both the `Session` and an Axum `HeaderMap` that caller must attach
+/// to its response (this avoids coupling with specific handler return types).
+pub async fn issue_session<S>(
+    store: &S,
+    user_id: Uuid,
+) -> Result<(Session, HeaderMap), SessionError>
+where
+    S: SessionStore,
+{
+    let session_id = Uuid::new_v4();
+    let issued_at = Utc::now();
+    let expires_at = issued_at + chrono::Duration::from_std(SESSION_TTL).unwrap();
+    let session = Session {
+        session_id,
+        user_id,
+        issued_at,
+        expires_at,
+    };
+
+    // Persist in store.
+    let key = session_key(&session);
+    let serialized = serde_json::to_string(&session)?;
+    store
+        .put(&key, &serialized, SESSION_TTL)
+        .await
+        .map_err(SessionError::StoreBackend)?;
+
+    // Build secure cookie headers.
+    let mut cookie = cookie::Cookie::new(SESSION_COOKIE, key.clone());
+    cookie.set_path("/");
+    cookie.set_http_only(true);
+    cookie.set_same_site(cookie::SameSite::Lax);
+    cookie.set_secure(true);
+    cookie.set_expires(cookie::Expiration::DateTime(
+        cookie::time::OffsetDateTime::from_unix_timestamp(expires_at.timestamp()).unwrap(),
+    ));
+
+    let mut headers = HeaderMap::new();
+    headers.append(
+        header::SET_COOKIE,
+        HeaderValue::from_str(&cookie.to_string()).unwrap(),
+    );
+
+    Ok((session, headers))
+}
+
+/// Destroys the session server-side and invalidates the client cookie.
+pub async fn revoke_session<S>(
+    store: &S,
+    session: &Session,
+) -> Result<HeaderMap, SessionError>
+where
+    S: SessionStore,
+{
+    store
+        .del(&session_key(session))
+        .await
+        .map_err(SessionError::StoreBackend)?;
+
+    // Instruct browser to delete cookie.
+    let mut cookie = cookie::Cookie::named(SESSION_COOKIE);
+    cookie.set_max_age(cookie::time::Duration::seconds(0));
+    cookie.set_path("/");
+    cookie.set_http_only(true);
+    cookie.set_same_site(cookie::SameSite::Lax);
+    cookie.set_secure(true);
+
+    let mut headers = HeaderMap::new();
+    headers.append(
+        header::SET_COOKIE,
+        HeaderValue::from_str(&cookie.to_string()).unwrap(),
+    );
+    Ok(headers)
+}
+
+/// Non-cryptographic session key generator (UUID + random salt).
+fn session_key(session: &Session) -> String {
+    // 16-char salt markedly reduces key-guessing attacks but is not a substitute
+    // for proper crypto; for stronger guarantees, switch to HMAC-SHA256.
+    let salt: String = rand::thread_rng()
+        .sample_iter(&Alphanumeric)
+        .take(16)
+        .map(char::from)
+        .collect();
+    format!("{}-{}", session.session_id, salt)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Example DTOs & helper extractors (used by login / logout endpoints).
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+pub struct LoginRequest {
+    pub email: String,
+    pub password: String,
+}
+
+#[derive(Serialize)]
+pub struct LoginResponse {
+    pub session_id: Uuid,
+    pub user_id: Uuid,
+    pub expires_at: DateTime<Utc>,
+}
+
+/// Example login handler showcasing session issuance.
+///
+/// ````
+/// use axum::{routing::post, Router};
+///
+/// let router = Router::new()
+///     .route("/auth/login", post(login_handler))
+///     .layer(middleware::from_fn(session_layer)); // global session middleware
+/// `````
+pub async fn login_handler<S>(
+    Extension(state): Extension<AppState<S>>,
+    Json(payload): Json<LoginRequest>,
+) -> Result<impl IntoResponse, SessionError>
+where
+    S: SessionStore,
+{
+    // 1. Validate credentials (pseudo-code).
+    // let user_id = sqlx::query!("SELECT id FROM users WHERE email = $1", payload.email)
+    //     .fetch_one(&state.db)
+    //     .await?
+    //     .id;
+    //
+    // A real implementation would hash & verify the password, handle throttling, etc.
+    let user_id = Uuid::new_v4(); // placeholder
+
+    let (session, headers) = issue_session(&state.session_store, user_id).await?;
+    let body = Json(LoginResponse {
+        session_id: session.session_id,
+        user_id: session.user_id,
+        expires_at: session.expires_at,
+    });
+
+    Ok((headers, body))
+}
+
+/// Example logout handler.
+///
+/// Requires the session middleware, which injects `SessionHandle` that we use
+/// to find the correct server record to delete.
+pub async fn logout_handler<S>(
+    Extension(state): Extension<AppState<S>>,
+    Extension(handle): Extension<SessionHandle>,
+) -> Result<impl IntoResponse, SessionError>
+where
+    S: SessionStore,
+{
+    let headers = revoke_session(&state.session_store, &handle.inner).await?;
+    Ok((headers, StatusCode::NO_CONTENT))
+}
+```

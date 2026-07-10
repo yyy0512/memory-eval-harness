@@ -1,0 +1,13 @@
+You are working in the repository at the current working directory. This is session 4 of a 4-session development task. The previous session has ended and conversation context is unavailable. Use the repository state to continue the task. Do not ask for previous conversation context. Complete only the requirements for this session.
+
+You will implement the 'Weekly Guild Challenges' feature over four sessions. Follow the instructions for each session precisely.
+
+**Session 4: Bug Fixing, Integration, and Testing**
+*Goal: Address an edge case, add social sharing, and ensure the feature is robust through testing.*
+1. **Bug Fix:** A product manager noted a potential issue: if a user's progress is tied to them being in the guild, what happens if they leave? Modify your `update_challenge_progress` logic to ensure it only accepts contributions from active members of the guild. Add a new method `handle_user_leave_guild(user_id)` to the `GuildService` that gracefully handles any necessary cleanup or progress recalculation (for simplicity, you can decide that their past contributions remain).
+2. **Social Sharing:** The social sharing functionality is in `src/module_15.py`. When a guild completes a challenge, use a function from this module to generate a shareable message like "Our guild just conquered the Weekly Challenge in QuestSmith! #QuestSmith".
+3. **Testing:** Create a new test file, `tests/test_guilds.py`. Write unit tests for the `GuildService`. Your tests must cover:
+    - Correctly updating challenge progress.
+    - Correctly identifying when a challenge is complete.
+    - The social sharing trigger on challenge completion.
+    - The bug fix: ensure a non-guild member's contribution is rejected.

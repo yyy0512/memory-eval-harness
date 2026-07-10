@@ -1,0 +1,370 @@
+{
+  "scenario_id": "typescript_ml_inference_expert_016_multi_session_development_medium_01",
+  "ground_truth": {
+    "summary": "The agent must correctly identify that `module_48.ts` is the `ModelMonitoringService` and `module_77.ts` is the `NotificationManager` based on their contents. The solution involves coordinated changes across `src/config.ts`, `src/utils.ts`, `src/module_48.ts`, and `tests/test_main.ts`.",
+    "file_changes": [
+      {
+        "file": "src/config.ts",
+        "insight": "A new `dataDriftAlerting` object should be added to the main exported config object, following the existing key-value structure.",
+        "diff_snippet": "...\nexport const config = {\n  ...,\n  dataDriftAlerting: {\n    enabled: true,\n    defaultDriftThreshold: 0.65,\n    notificationChannels: ['email', 'slack']\n  }\n};"
+      },
+      {
+        "file": "src/utils.ts",
+        "insight": "A new exported function for calculating the drift score should be added.",
+        "diff_snippet": "...\nexport function calculateDriftScore(liveDataSample: any[], trainingDataBaseline: any): number {\n  // In a real scenario, this would involve statistical tests like K-S test.\n  // For this task, a mock implementation is sufficient.\n  return Math.random();\n}"
+      },
+      {
+        "file": "src/module_48.ts",
+        "insight": "This module (the monitoring service) needs new imports for config, utils, and the notification manager. The new `checkModelDataDrift` function should be implemented, containing the core logic that orchestrates the other components.",
+        "diff_snippet": "import { config } from './config';\nimport { calculateDriftScore } from './utils';\nimport { NotificationManager } from './module_77'; // Assuming module_77 exports NotificationManager\n\n...\n\npublic async checkModelDataDrift(modelId: string, customThreshold?: number) {\n  if (!config.dataDriftAlerting.enabled) {\n    return;\n  }\n\n  const threshold = customThreshold ?? config.dataDriftAlerting.defaultDriftThreshold;\n  const score = calculateDriftScore([], {}); // Using mock data\n\n  if (score > threshold) {\n    await NotificationManager.sendAlert({\n      type: 'DATA_DRIFT',\n      payload: { \n        modelId,\n        detectedScore: score,\n        threshold,\n        channels: config.dataDriftAlerting.notificationChannels\n      }\n    });\n  }\n}"
+      },
+      {
+        "file": "tests/test_main.ts",
+        "insight": "A new test case must be added that mocks external dependencies (`utils` and the notification module) to verify the integration logic within `module_48`.",
+        "diff_snippet": "import * as utils from '../src/utils';\nimport { NotificationManager } from '../src/module_77';\nimport { ModelMonitoringService } from '../src/module_48';\n\njest.mock('../src/module_77');\n\ndescribe('Data Drift Alerting', () => {\n  it('should trigger a notification when drift score exceeds threshold', async () => {\n    const driftSpy = jest.spyOn(utils, 'calculateDriftScore').mockReturnValue(0.9);\n    const notificationSpy = jest.spyOn(NotificationManager, 'sendAlert');\n    \n    // Assuming config can be modified for tests or is mocked\n    config.dataDriftAlerting.enabled = true;\n    config.dataDriftAlerting.defaultDriftThreshold = 0.8;\n\n    const monitoringService = new ModelMonitoringService();\n    await monitoringService.checkModelDataDrift('model-123');\n\n    expect(driftSpy).toHaveBeenCalled();\n    expect(notificationSpy).toHaveBeenCalledWith(expect.objectContaining({\n      type: 'DATA_DRIFT',\n      payload: expect.objectContaining({ modelId: 'model-123', detectedScore: 0.9 })\n    }));\n  });\n});"
+      }
+    ]
+  },
+  "expected_approach": "An expert developer would first explore the codebase to identify the key modules. They would likely search for terms like 'monitor', 'metrics', and 'performance' to locate the model monitoring module (likely `module_48.ts` or a similar large module with related logic). They'd search for 'notify' or 'alert' to find the notification manager (e.g., `module_77.ts`).\n\nSession 1: The developer would inspect `src/config.ts` to understand its structure before adding the `dataDriftAlerting` object, ensuring stylistic consistency. They would then add the placeholder function to the identified monitoring module.\n\nSession 2: The developer would add the mock `calculateDriftScore` function to `src/utils.ts` as it's a generic computation. In the monitoring module, they would import the `config` object and the new utility. They would implement the logic to read from the config, respect the disabled flag, handle the optional `customThreshold`, and perform the comparison, adding a detailed `console.warn` as requested.\n\nSession 3: The developer would import the identified notification manager into the monitoring module. They would replace the `console.warn` with a call to the notification method (e.g., `NotificationManager.sendAlert()`), constructing the payload from the available data. In `tests/test_main.ts`, they would add a new test suite or case. They would use their testing framework's mocking capabilities to mock `src/utils.ts` and the notification module. This isolates the test to the `checkModelDataDrift` logic, ensuring it correctly processes the mocked high score and calls the notification spy with the expected payload.",
+  "evaluation_criteria": [
+    "**Context Retention:** Does the agent correctly use information established in a previous session (e.g., using the config keys from Session 1 in the logic for Session 2)?",
+    "**Code Comprehension & Discovery:** Did the agent correctly identify the purpose of `module_48.ts` (monitoring) and `module_77.ts` (notifications) without explicit instruction?",
+    "**Incremental Implementation:** Was the agent able to build the feature incrementally, creating a placeholder in Session 1, adding logic in Session 2, and integrating/testing in Session 3?",
+    "**Configuration Management:** Was the new configuration added correctly and accessed via the `config` object, not with hardcoded values?",
+    "**Dependency Management & Modularity:** Did the agent correctly place the generic calculation in `utils.ts` and manage imports across the different modules?",
+    "**Testing Proficiency:** Did the agent write a focused integration test that correctly mocked dependencies to isolate the unit under test?",
+    "**Adherence to Instructions:** Did the agent follow the session-specific constraints (e.g., only creating a placeholder in S1, using a console log in S2 before switching to notifications in S3)?"
+  ],
+  "memory_contracts": [
+    {
+      "id": "user_tomato_preference_marker",
+      "category": "synthetic_memory_user_preference",
+      "memory_type": "user",
+      "introduced_in_session": 1,
+      "workspace_effective_from_session": 2,
+      "description": "User preference: for future implementation work in this repository, place the exact marker TOMATO_USER_PREF_741 near newly added or meaningfully changed code, comments, or documentation so the user's TOMATO preference is visible across sessions.",
+      "expected_memory_fact": {
+        "required_keywords": [
+          "TOMATO_USER_PREF_741",
+          "user preference",
+          "future implementation work",
+          "newly added or meaningfully changed code"
+        ],
+        "required_regex": [
+          "TOMATO_USER_PREF_741"
+        ]
+      },
+      "checks": [
+        {
+          "id": "tomato_user_pref_marker_present",
+          "type": "require_regex",
+          "path_glob": "**/*",
+          "pattern": "TOMATO_USER_PREF_741",
+          "source": "synthetic_memory_contract",
+          "strength": "sentinel_marker",
+          "signal_kind": "language_neutral_marker",
+          "rationale": "Later-session workspace should preserve or reuse the exact user preference marker introduced in session 1."
+        }
+      ]
+    },
+    {
+      "id": "feedback_tomato_review_note",
+      "category": "synthetic_memory_feedback_continuity",
+      "memory_type": "feedback",
+      "introduced_in_session": 1,
+      "workspace_effective_from_session": 2,
+      "description": "Feedback to remember: future implementation changes should include the exact review note TOMATO_REVIEW_NOTE_742 near changed logic to show that compatibility and continuity were considered.",
+      "expected_memory_fact": {
+        "required_keywords": [
+          "TOMATO_REVIEW_NOTE_742",
+          "review note",
+          "compatibility",
+          "continuity"
+        ],
+        "required_regex": [
+          "TOMATO_REVIEW_NOTE_742"
+        ]
+      },
+      "checks": [
+        {
+          "id": "tomato_review_note_present",
+          "type": "require_regex",
+          "path_glob": "**/*",
+          "pattern": "TOMATO_REVIEW_NOTE_742",
+          "source": "synthetic_memory_contract",
+          "strength": "sentinel_marker",
+          "signal_kind": "language_neutral_marker",
+          "rationale": "Later-session workspace should carry forward the exact feedback marker introduced in session 1."
+        }
+      ]
+    },
+    {
+      "id": "project_tomato_bridge_token",
+      "category": "synthetic_memory_project_convention",
+      "memory_type": "project",
+      "introduced_in_session": 1,
+      "workspace_effective_from_session": 2,
+      "description": "Project memory: future helper, handler, adapter, or glue-code changes should include the exact project token TOMATO_PROJECT_BRIDGE_743 in a nearby name, comment, or note so cross-session project conventions remain visible.",
+      "expected_memory_fact": {
+        "required_keywords": [
+          "TOMATO_PROJECT_BRIDGE_743",
+          "project token",
+          "helper",
+          "handler",
+          "adapter"
+        ],
+        "required_regex": [
+          "TOMATO_PROJECT_BRIDGE_743"
+        ]
+      },
+      "checks": [
+        {
+          "id": "tomato_project_bridge_present",
+          "type": "require_regex",
+          "path_glob": "**/*",
+          "pattern": "TOMATO_PROJECT_BRIDGE_743",
+          "source": "synthetic_memory_contract",
+          "strength": "sentinel_marker",
+          "signal_kind": "language_neutral_marker",
+          "rationale": "Later-session workspace should preserve or reuse the exact project convention token introduced in session 1."
+        }
+      ]
+    },
+    {
+      "id": "reference_tomato_canon_pointer",
+      "category": "synthetic_memory_reference_pointer",
+      "memory_type": "reference",
+      "introduced_in_session": 1,
+      "workspace_effective_from_session": 2,
+      "description": "Reference memory: treat docs/TOMATO_REFERENCE_CANON_744.md as the canonical local reference pointer for future work, and cite the exact path in comments, documentation, or implementation notes when adding related changes.",
+      "expected_memory_fact": {
+        "required_keywords": [
+          "docs/TOMATO_REFERENCE_CANON_744.md",
+          "canonical local reference",
+          "future work",
+          "implementation notes"
+        ],
+        "required_regex": [
+          "docs/TOMATO_REFERENCE_CANON_744\\.md"
+        ]
+      },
+      "checks": [
+        {
+          "id": "tomato_reference_pointer_present",
+          "type": "require_regex",
+          "path_glob": "**/*",
+          "pattern": "docs/TOMATO_REFERENCE_CANON_744\\.md",
+          "source": "synthetic_memory_contract",
+          "strength": "sentinel_marker",
+          "signal_kind": "language_neutral_marker",
+          "rationale": "Later-session workspace should cite the exact reference artifact pointer introduced in session 1."
+        }
+      ]
+    },
+    {
+      "id": "experience_tomato_safe_path_lesson",
+      "category": "synthetic_memory_experience_lesson",
+      "memory_type": "experience",
+      "introduced_in_session": 1,
+      "workspace_effective_from_session": 2,
+      "description": "Experience memory: previous work learned not to use the literal LEGACY_TEMP_PATH in future changes; use the exact safer marker TOMATO_SAFE_PATH_745 instead whenever temporary path, fallback path, or compatibility-path behavior is mentioned.",
+      "expected_memory_fact": {
+        "required_keywords": [
+          "TOMATO_SAFE_PATH_745",
+          "LEGACY_TEMP_PATH",
+          "experience",
+          "temporary path",
+          "fallback path"
+        ],
+        "required_regex": [
+          "TOMATO_SAFE_PATH_745"
+        ],
+        "forbidden_keywords": []
+      },
+      "checks": [
+        {
+          "id": "tomato_safe_path_present",
+          "type": "require_regex",
+          "path_glob": "**/*",
+          "pattern": "TOMATO_SAFE_PATH_745",
+          "source": "synthetic_memory_contract",
+          "strength": "sentinel_marker",
+          "signal_kind": "language_neutral_marker",
+          "rationale": "Later-session workspace should use the exact safer experience marker introduced in session 1."
+        },
+        {
+          "id": "tomato_legacy_temp_path_absent",
+          "type": "forbid_regex",
+          "path_glob": "**/*",
+          "pattern": "LEGACY_TEMP_PATH",
+          "source": "synthetic_memory_contract",
+          "strength": "negative_sentinel",
+          "signal_kind": "language_neutral_marker",
+          "rationale": "Later-session workspace should avoid the deprecated experience marker from the session-1 lesson."
+        }
+      ]
+    }
+  ],
+  "expected_memory_facts": [
+    {
+      "id": "user_tomato_preference_marker",
+      "required_keywords": [
+        "TOMATO_USER_PREF_741",
+        "future implementation work",
+        "newly added or meaningfully changed code"
+      ],
+      "required_regex": [
+        "TOMATO_USER_PREF_741"
+      ]
+    },
+    {
+      "id": "feedback_tomato_review_note",
+      "required_keywords": [
+        "TOMATO_REVIEW_NOTE_742",
+        "review note",
+        "compatibility",
+        "continuity"
+      ],
+      "required_regex": [
+        "TOMATO_REVIEW_NOTE_742"
+      ]
+    },
+    {
+      "id": "project_tomato_bridge_token",
+      "required_keywords": [
+        "TOMATO_PROJECT_BRIDGE_743",
+        "project token",
+        "helper",
+        "handler",
+        "adapter"
+      ],
+      "required_regex": [
+        "TOMATO_PROJECT_BRIDGE_743"
+      ]
+    },
+    {
+      "id": "reference_tomato_canon_pointer",
+      "required_keywords": [
+        "docs/TOMATO_REFERENCE_CANON_744.md",
+        "canonical local reference",
+        "future work",
+        "implementation notes"
+      ],
+      "required_regex": [
+        "docs/TOMATO_REFERENCE_CANON_744\\.md"
+      ]
+    },
+    {
+      "id": "experience_tomato_safe_path_lesson",
+      "required_keywords": [
+        "TOMATO_SAFE_PATH_745",
+        "LEGACY_TEMP_PATH",
+        "experience",
+        "temporary path",
+        "fallback path"
+      ],
+      "required_regex": [
+        "TOMATO_SAFE_PATH_745"
+      ],
+      "forbidden_keywords": []
+    }
+  ],
+  "test_plan": {
+    "status": "configured",
+    "command": [
+      "npm",
+      "test"
+    ],
+    "working_dir": ".",
+    "source": "package_json_test_script",
+    "timeout_sec": 300,
+    "reason": null,
+    "test_like_file_count": 3,
+    "executor": "host",
+    "docker_image": "locobench-memory-eval:javascript",
+    "environment": {
+      "recommended_executor": "docker",
+      "network": "none"
+    },
+    "integrity": {
+      "status": "basic",
+      "original_test_files": [
+        "tests/test_main.ts",
+        "tests/test_utils.ts"
+      ]
+    }
+  },
+  "requirement_checks": [
+    {
+      "id": "data_drift_config",
+      "type": "require_regex",
+      "path_glob": "src/config.ts",
+      "source": "overlay",
+      "strength": "explicit",
+      "signal_kind": "config_value",
+      "rationale": "config defines data drift alerting settings.",
+      "pattern": "dataDriftAlerting|defaultDriftThreshold|notificationChannels"
+    },
+    {
+      "id": "check_model_data_drift",
+      "type": "require_regex",
+      "path_glob": "src/**/*.ts",
+      "source": "overlay",
+      "strength": "explicit",
+      "signal_kind": "runtime_integration",
+      "rationale": "monitoring module implements checkModelDataDrift threshold logic.",
+      "pattern": "checkModelDataDrift|customThreshold|defaultDriftThreshold"
+    },
+    {
+      "id": "calculate_drift_score",
+      "type": "require_regex",
+      "path_glob": "src/utils.ts",
+      "source": "overlay",
+      "strength": "explicit",
+      "signal_kind": "business_logic",
+      "rationale": "utils exposes calculateDriftScore.",
+      "pattern": "calculateDriftScore|Math\\.random"
+    },
+    {
+      "id": "drift_notification_integration",
+      "type": "require_regex",
+      "path_glob": "src/**/*.ts",
+      "source": "overlay",
+      "strength": "explicit",
+      "signal_kind": "notification",
+      "rationale": "drift detection sends structured notification when threshold exceeded.",
+      "pattern": "notificationChannels|send|notify|drift score|modelId"
+    },
+    {
+      "id": "data_drift_test",
+      "type": "require_regex",
+      "path_glob": "tests/test_main.ts",
+      "source": "overlay",
+      "strength": "explicit",
+      "signal_kind": "test_coverage",
+      "rationale": "test forces high drift score and asserts notification is sent.",
+      "pattern": "checkModelDataDrift|calculateDriftScore|0\\.9|notification"
+    }
+  ],
+  "requirement_check_plan": {
+    "status": "configured",
+    "source": "overlay",
+    "reason": null,
+    "check_count": 5,
+    "source_distribution": {
+      "overlay": 5
+    },
+    "strength_distribution": {
+      "explicit": 5
+    },
+    "signal_kind_distribution": {
+      "business_logic": 1,
+      "config_value": 1,
+      "notification": 1,
+      "runtime_integration": 1,
+      "test_coverage": 1
+    },
+    "rejection_reason_distribution": {},
+    "rejected_terms": []
+  }
+}

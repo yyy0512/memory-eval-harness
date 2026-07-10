@@ -1,0 +1,261 @@
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+    VitalPulse CloudCare ‒ Auth Authorizer Service
+    ------------------------------------------------
+    This module provides a custom JWT/FHIR-based authorizer for AWS API Gateway.
+    It validates OAuth 2.0 / SMART-on-FHIR tokens, enforces fine-grained
+    permissions, and augments requests with patient-scoped claims.
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="
+           http://maven.apache.org/POM/4.0.0
+           http://maven.apache.org/xsd/maven-4.0.0.xsd">
+
+    <modelVersion>4.0.0</modelVersion>
+
+    <!-- Inherit company-wide dependency / plugin management -->
+    <parent>
+        <groupId>com.vitalpulse.cloudcare</groupId>
+        <artifactId>cloudcare-parent</artifactId>
+        <version>1.8.3</version>
+        <relativePath>../../pom.xml</relativePath>
+    </parent>
+
+    <artifactId>auth-authorizer</artifactId>
+    <name>CloudCare :: Auth Authorizer</name>
+    <description>AWS Lambda authorizer for validating SMART-on-FHIR / OAuth 2.0 access tokens.</description>
+    <packaging>jar</packaging>
+    <version>1.8.3</version>
+
+    <!--  Java 17 is our company-wide LTS baseline -->
+    <properties>
+        <maven.compiler.source>17</maven.compiler.source>
+        <maven.compiler.target>17</maven.compiler.target>
+
+        <!-- Centralized version pins -->
+        <jackson.version>2.17.0</jackson.version>
+        <aws.sdk.version>1.12.673</aws.sdk.version>
+        <auth0.jwt.version>4.4.0</auth0.jwt.version>
+        <log4j.version>2.22.0</log4j.version>
+        <junit.jupiter.version>5.10.2</junit.jupiter.version>
+    </properties>
+
+    <!-- Production dependencies -->
+    <dependencies>
+
+        <!-- AWS Lambda runtime interfaces -->
+        <dependency>
+            <groupId>com.amazonaws</groupId>
+            <artifactId>aws-lambda-java-core</artifactId>
+            <version>1.2.3</version>
+        </dependency>
+
+        <dependency>
+            <groupId>com.amazonaws</groupId>
+            <artifactId>aws-lambda-java-events</artifactId>
+            <version>3.11.2</version>
+        </dependency>
+
+        <!-- AWS SDK (DynamoDB for token introspection cache) -->
+        <dependency>
+            <groupId>com.amazonaws</groupId>
+            <artifactId>aws-java-sdk-dynamodb</artifactId>
+            <version>${aws.sdk.version}</version>
+        </dependency>
+
+        <!-- Auth0 JWT for signature validation -->
+        <dependency>
+            <groupId>com.auth0</groupId>
+            <artifactId>java-jwt</artifactId>
+            <version>${auth0.jwt.version}</version>
+        </dependency>
+
+        <!-- Jackson for JSON parsing -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+            <version>${jackson.version}</version>
+        </dependency>
+
+        <!-- Bean Validation for structured error responses -->
+        <dependency>
+            <groupId>org.hibernate.validator</groupId>
+            <artifactId>hibernate-validator</artifactId>
+            <version>8.0.1.Final</version>
+        </dependency>
+
+        <!-- Logging -->
+        <dependency>
+            <groupId>org.apache.logging.log4j</groupId>
+            <artifactId>log4j-api</artifactId>
+            <version>${log4j.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.logging.log4j</groupId>
+            <artifactId>log4j-core</artifactId>
+            <version>${log4j.version}</version>
+        </dependency>
+
+        <!-- ========================================================================= -->
+        <!--                       TEST DEPENDENCIES                                   -->
+        <!-- ========================================================================= -->
+
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter-api</artifactId>
+            <version>${junit.jupiter.version}</version>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter-params</artifactId>
+            <version>${junit.jupiter.version}</version>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter-engine</artifactId>
+            <version>${junit.jupiter.version}</version>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.mockito</groupId>
+            <artifactId>mockito-core</artifactId>
+            <version>5.12.0</version>
+            <scope>test</scope>
+        </dependency>
+
+        <!-- Local AWS Lambda test harness -->
+        <dependency>
+            <groupId>com.amazonaws</groupId>
+            <artifactId>aws-lambda-java-tests</artifactId>
+            <version>1.1.2</version>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <!-- Build section for fat-JAR + static analysis + reproducibility -->
+    <build>
+        <plugins>
+
+            <!-- Compile with preview features disabled for reproducibility -->
+            <plugin>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>3.12.1</version>
+                <configuration>
+                    <release>17</release>
+                    <parameters>true</parameters>
+                </configuration>
+            </plugin>
+
+            <!-- Shade: merge dependencies into single Lambda artefact -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-shade-plugin</artifactId>
+                <version>3.5.1</version>
+                <executions>
+                    <execution>
+                        <phase>package</phase>
+                        <goals><goal>shade</goal></goals>
+                        <configuration>
+                            <createDependencyReducedPom>false</createDependencyReducedPom>
+                            <minimizeJar>true</minimizeJar>
+                            <relocations>
+                                <!-- Relocate heavy libraries to avoid AWS classpath clashes -->
+                                <relocation>
+                                    <pattern>com.fasterxml.jackson</pattern>
+                                    <shadedPattern>shaded.com.fasterxml.jackson</shadedPattern>
+                                </relocation>
+                            </relocations>
+                            <transformers>
+                                <!-- Keep Log4j plugin metadata -->
+                                <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
+                                    <mainClass>com.vitalpulse.cloudcare.auth.authorizer.LambdaHandler</mainClass>
+                                </transformer>
+                                <transformer implementation="org.apache.maven.plugins.shade.resource.AppendingTransformer">
+                                    <resource>META-INF/services/com.fasterxml.jackson.core.JsonFactory</resource>
+                                </transformer>
+                            </transformers>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <!-- Checkstyle for code quality -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-checkstyle-plugin</artifactId>
+                <version>3.3.0</version>
+                <configuration>
+                    <configLocation>${project.basedir}/../../build-config/checkstyle.xml</configLocation>
+                    <encoding>UTF-8</encoding>
+                    <consoleOutput>true</consoleOutput>
+                    <failsOnError>true</failsOnError>
+                </configuration>
+                <executions>
+                    <execution>
+                        <phase>validate</phase>
+                        <goals><goal>check</goal></goals>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <!-- SpotBugs for static analysis -->
+            <plugin>
+                <groupId>com.github.spotbugs</groupId>
+                <artifactId>spotbugs-maven-plugin</artifactId>
+                <version>4.8.3.1</version>
+                <configuration>
+                    <effort>Max</effort>
+                    <threshold>Low</threshold>
+                    <xmlOutput>true</xmlOutput>
+                </configuration>
+                <executions>
+                    <execution>
+                        <phase>verify</phase>
+                        <goals><goal>spotbugs</goal></goals>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <!-- Reproducible Builds: strip timestamps for deterministic JARs -->
+            <plugin>
+                <groupId>io.github.zlika</groupId>
+                <artifactId>reproducible-build-maven-plugin</artifactId>
+                <version>0.15</version>
+                <executions>
+                    <execution>
+                        <goals><goal>strip-jar</goal></goals>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+
+    <!-- Profile for localstack / offline development -->
+    <profiles>
+        <profile>
+            <id>local</id>
+            <activation><property><name>env</name><value>local</value></property></activation>
+            <dependencies>
+                <!-- Use AWS SDK stubs when running locally -->
+                <dependency>
+                    <groupId>org.localstack</groupId>
+                    <artifactId>localstack-utils</artifactId>
+                    <version>0.9.13</version>
+                    <scope>test</scope>
+                </dependency>
+            </dependencies>
+            <properties>
+                <aws.region>us-east-1</aws.region>
+                <aws.endpointOverride>http://localhost:4566</aws.endpointOverride>
+            </properties>
+        </profile>
+    </profiles>
+</project>
+```

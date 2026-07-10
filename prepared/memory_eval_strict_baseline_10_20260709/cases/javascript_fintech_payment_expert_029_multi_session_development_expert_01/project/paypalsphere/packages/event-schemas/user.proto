@@ -1,0 +1,196 @@
+syntax = "proto3";
+
+package paypalsphere.events.user;
+
+// -----------------------------------------------------------------------------
+// Global options
+// -----------------------------------------------------------------------------
+option optimize_for         = SPEED;  // Fast runtime serialization
+option java_multiple_files  = true;
+option java_package         = "com.paypalsphere.events.user";
+option java_outer_classname = "UserEventsProto";
+option go_package           = "github.com/paypalsphere/event-schemas/user;userpb";
+option csharp_namespace     = "PayPalSphere.Events.User";
+option objc_class_prefix    = "PPSU";
+option php_namespace        = "PayPalSphere\\Events\\User";
+
+// -----------------------------------------------------------------------------
+// Imports
+// -----------------------------------------------------------------------------
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/any.proto";
+
+// -----------------------------------------------------------------------------
+// Enumerations
+// -----------------------------------------------------------------------------
+
+// Granular risk bands used by the Risk service
+enum RiskLevel {
+  RISK_LEVEL_UNSPECIFIED = 0;
+  RISK_LEVEL_LOW         = 1;
+  RISK_LEVEL_MEDIUM      = 2;
+  RISK_LEVEL_HIGH        = 3;
+  RISK_LEVEL_SEVERE      = 4; // e.g. confirmed fraud or sanctioned entity
+}
+
+// Canonical KYC result emitted by the KYC bounded-context
+enum KYCResult {
+  KYC_RESULT_UNSPECIFIED = 0;
+  KYC_RESULT_PASSED      = 1;
+  KYC_RESULT_FAILED      = 2;
+  KYC_RESULT_REVIEW      = 3; // manual review required
+}
+
+// Reasons why Compliance may freeze an account
+enum ComplianceHoldReason {
+  COMPLIANCE_HOLD_REASON_UNSPECIFIED = 0;
+  COMPLIANCE_HOLD_REASON_CHARGEBACK   = 1;
+  COMPLIANCE_HOLD_REASON_LEGAL_REQUEST = 2;
+  COMPLIANCE_HOLD_REASON_SANCTIONS_MATCH = 3;
+  COMPLIANCE_HOLD_REASON_OTHER          = 99;
+}
+
+// -----------------------------------------------------------------------------
+// Common / Shared Messages
+// -----------------------------------------------------------------------------
+
+// Standard event metadata envelope used across PayPalsphere
+message EventMetadata {
+  string                       event_id       = 1; // ULID/UUID v7 – unique per event
+  string                       stream_id      = 2; // Aggregate root identifier, i.e. user_id
+  uint32                       stream_version = 3; // Version (optimistic concurrency)
+  google.protobuf.Timestamp    occurred_at    = 4; // Server-side timestamp (UTC)
+  string                       principal_id   = 5; // Actor who caused the event (system-or-user)
+  string                       correlation_id = 6; // Correlates with preceding command
+  string                       causation_id   = 7; // Parent event that caused this event
+  map<string, string>          tags           = 8; // Arbitrary key-value pairs for routing/filtering
+}
+
+// Field-level encryption wrapper. The ciphertext is opaque to consumers without key access.
+message EncryptedField {
+  bytes   ciphertext = 1; // Encrypted payload (AEAD)
+  string  key_id     = 2; // KMS / HSM key identifier
+  string  algorithm  = 3; // e.g. "AES/GCM/NoPadding"
+}
+
+// -----------------------------------------------------------------------------
+// Event: UserRegistered
+// -----------------------------------------------------------------------------
+message UserRegistered {
+  string          user_id       = 1;
+  string          display_name  = 2;
+  EncryptedField  email         = 3; // PII encrypted
+  EncryptedField  phone_number  = 4; // Optional, encrypted
+  google.protobuf.Timestamp registered_at = 5;
+}
+
+// -----------------------------------------------------------------------------
+// Event: UserEmailVerified
+// -----------------------------------------------------------------------------
+message UserEmailVerified {
+  string user_id  = 1;
+  google.protobuf.Timestamp verified_at = 2;
+}
+
+// -----------------------------------------------------------------------------
+// Event: KYCInitiated
+// -----------------------------------------------------------------------------
+message KYCInitiated {
+  string user_id          = 1;
+  string kyc_case_id      = 2;
+  google.protobuf.Timestamp initiated_at = 3;
+}
+
+// -----------------------------------------------------------------------------
+// Event: KYCCompleted
+// -----------------------------------------------------------------------------
+message KYCCompleted {
+  string      user_id      = 1;
+  string      kyc_case_id  = 2;
+  KYCResult   result       = 3;
+  string      vendor_case_ref = 4; // Third-party vendor reference
+  google.protobuf.Timestamp completed_at = 5;
+  google.protobuf.Any       attachments  = 6; // Optional KYC docs (encrypted—stored externally)
+}
+
+// -----------------------------------------------------------------------------
+// Event: KYCFailed
+// -----------------------------------------------------------------------------
+message KYCFailed {
+  string      user_id      = 1;
+  string      kyc_case_id  = 2;
+  string      reason       = 3; // Failure reason code or description
+  google.protobuf.Timestamp failed_at = 4;
+}
+
+// -----------------------------------------------------------------------------
+// Event: RiskScoreAssigned
+// -----------------------------------------------------------------------------
+message RiskScoreAssigned {
+  string      user_id     = 1;
+  uint32      score       = 2; // Normalised 0-1000
+  RiskLevel   level       = 3;
+  string      model_version = 4; // Risk model fingerprint
+  google.protobuf.Timestamp scored_at = 5;
+}
+
+// -----------------------------------------------------------------------------
+// Event: ComplianceHoldPlaced
+// -----------------------------------------------------------------------------
+message ComplianceHoldPlaced {
+  string                 user_id = 1;
+  ComplianceHoldReason   reason  = 2;
+  string                 narrative = 3; // Free-form details for compliance officer
+  google.protobuf.Timestamp placed_at = 4;
+}
+
+// -----------------------------------------------------------------------------
+// Event: ComplianceHoldReleased
+// -----------------------------------------------------------------------------
+message ComplianceHoldReleased {
+  string                 user_id   = 1;
+  ComplianceHoldReason   reason    = 2;
+  google.protobuf.Timestamp released_at = 3;
+}
+
+// -----------------------------------------------------------------------------
+// Event: AccountDisabled
+// -----------------------------------------------------------------------------
+message AccountDisabled {
+  string user_id  = 1;
+  string disabled_by = 2; // "SYSTEM" | "USER" | admin id
+  string reason   = 3;
+  google.protobuf.Timestamp disabled_at = 4;
+}
+
+// -----------------------------------------------------------------------------
+// Event: AccountReenabled
+// -----------------------------------------------------------------------------
+message AccountReenabled {
+  string user_id  = 1;
+  string reenabled_by = 2;
+  google.protobuf.Timestamp reenabled_at = 3;
+}
+
+// -----------------------------------------------------------------------------
+// Aggregate "envelope" for the user domain stream. Each event is carried in the
+// `payload` one-of so consumers can pattern-match without dealing with multiple
+// topics/queues. The metadata is included verbatim to simplify CDC, replay, and
+// audit-trail pipelines.
+// -----------------------------------------------------------------------------
+message UserDomainEvent {
+  EventMetadata metadata = 1;
+
+  oneof payload {
+    UserRegistered            user_registered             = 2;
+    UserEmailVerified         user_email_verified         = 3;
+    KYCInitiated              kyc_initiated               = 4;
+    KYCCompleted              kyc_completed               = 5;
+    KYCFailed                 kyc_failed                  = 6;
+    RiskScoreAssigned         risk_score_assigned         = 7;
+    ComplianceHoldPlaced      compliance_hold_placed      = 8;
+    ComplianceHoldReleased    compliance_hold_released    = 9;
+    AccountDisabled           account_disabled            = 10;
+    AccountReenabled          account_reenabled           = 11;
+  }
+}

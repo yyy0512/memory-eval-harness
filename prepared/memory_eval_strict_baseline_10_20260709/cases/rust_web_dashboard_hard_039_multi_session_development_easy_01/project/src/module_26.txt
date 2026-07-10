@@ -1,0 +1,402 @@
+```rust
+//! src/module_26.rs
+//!
+//! ChromaticCanvas – Session Management & Secure Cookie Middleware
+//! ---------------------------------------------------------------
+//! This module contains a reusable, production-grade session layer that plugs
+//! into ChromaticCanvas’s Axum-based service stack.  The middleware takes care
+//! of the following concerns:
+//!
+//! • Secure, signed, tamper-proof cookies (HMAC-SHA-256)  
+//! • Pluggable backend (Redis in this implementation)  
+//! • Automatic session renewal & expiration handling  
+//! • Ergonomic extractor giving handlers mutable access to the session map  
+//! • Zero-cost no-op when the dashboard runs in stateless / API-token mode  
+//!
+//! Dependencies declared in `Cargo.toml` (for reference):
+//! ---------------------------------------
+//! axum               = { version = "0.7",  features = ["macros"] }
+//! async-trait        = "0.1"
+//! chrono             = { version = "0.4", features = ["serde"] }
+//! cookie             = "0.18"
+//! hmac               = "0.12"
+//! sha2               = "0.10"
+//! redis              = { version = "0.24", features = ["aio", "tokio-comp"] }
+//! serde              = { version = "1.0",  features = ["derive"] }
+//! serde_json         = "1.0"
+//! thiserror          = "1.0"
+//! tokio              = { version = "1",   features = ["full"] }
+//! tower              = "0.4"
+//! uuid               = { version = "1",   features = ["serde", "v4"] }
+
+use async_trait::async_trait;
+use axum::{
+    body::Body,
+    extract::State,
+    http::{Request, Response, StatusCode},
+    middleware::Next,
+    response::IntoResponse,
+};
+use chrono::{DateTime, Duration, Utc};
+use cookie::{Cookie, CookieJar, Key};
+use hmac::{Hmac, Mac};
+use redis::AsyncCommands;
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use sha2::Sha256;
+use std::{
+    collections::HashMap,
+    sync::Arc,
+};
+use thiserror::Error;
+use tower::{Layer, Service};
+use uuid::Uuid;
+
+const SESSION_COOKIE: &str = "chromatic_session";
+const SESSION_TTL_SECONDS: i64 = 60 * 60 * 4; // 4 hours
+const HMAC_PERSONALIZATION: &[u8] = b"ChromaticCanvas.SessionCookieSigningKey";
+
+/// Public API – a smart-pointer handed to route handlers.
+///
+/// Example:
+/// ```
+/// async fn dashboard(mut session: Session) -> impl IntoResponse {
+///     let visits = session.get::<u64>("visits").unwrap_or(0) + 1;
+///     session.insert("visits", visits);
+///     format!("Visit #{visits}")
+/// }
+/// ```
+#[derive(Clone)]
+pub struct Session {
+    inner: Arc<parking_lot::RwLock<SessionInner>>,
+    changed: Arc<parking_lot::AtomicBool>,
+}
+
+impl Session {
+    pub fn id(&self) -> Uuid {
+        self.inner.read().id
+    }
+
+    pub fn expires_at(&self) -> DateTime<Utc> {
+        self.inner.read().expires_at
+    }
+
+    pub fn get<T: serde::de::DeserializeOwned>(&self, key: &str) -> Option<T> {
+        self.inner
+            .read()
+            .data
+            .get(key)?
+            .clone()
+            .try_into()
+            .ok()
+    }
+
+    pub fn insert<T: Serialize>(&mut self, key: impl Into<String>, value: T) {
+        if let Ok(json) = serde_json::to_value(value) {
+            self.inner.write().data.insert(key.into(), json);
+            self.changed.store(true, std::sync::atomic::Ordering::Release);
+        }
+    }
+
+    pub fn remove(&mut self, key: &str) {
+        self.inner.write().data.remove(key);
+        self.changed.store(true, std::sync::atomic::Ordering::Release);
+    }
+
+    pub fn clear(&mut self) {
+        self.inner.write().data.clear();
+        self.changed.store(true, std::sync::atomic::Ordering::Release);
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct SessionInner {
+    id:        Uuid,
+    created_at: DateTime<Utc>,
+    expires_at: DateTime<Utc>,
+    data:      HashMap<String, Value>,
+}
+
+/* ------------------------------------------------------------------------- *\
+ *                        Backend-agnostic session store
+\* ------------------------------------------------------------------------- */
+
+#[async_trait]
+pub trait SessionStore: Send + Sync + 'static {
+    async fn load(&self, id: &Uuid) -> Result<Option<SessionInner>, SessionError>;
+    async fn save(&self, session: &SessionInner) -> Result<(), SessionError>;
+    async fn delete(&self, id: &Uuid) -> Result<(), SessionError>;
+}
+
+/// Redis implementation – chosen for performance & cluster support.
+pub struct RedisSessionStore {
+    client: redis::Client,
+}
+
+impl RedisSessionStore {
+    pub fn new(client: redis::Client) -> Self {
+        Self { client }
+    }
+
+    fn key(id: &Uuid) -> String {
+        format!("canvas:sessions:{id}")
+    }
+}
+
+#[async_trait]
+impl SessionStore for RedisSessionStore {
+    async fn load(&self, id: &Uuid) -> Result<Option<SessionInner>, SessionError> {
+        let mut conn = self.client.get_async_connection().await?;
+        let raw: Option<String> = conn.get(Self::key(id)).await?;
+        Ok(match raw {
+            Some(json) => Some(serde_json::from_str(&json)?),
+            None => None,
+        })
+    }
+
+    async fn save(&self, session: &SessionInner) -> Result<(), SessionError> {
+        let mut conn = self.client.get_async_connection().await?;
+        let payload = serde_json::to_string(session)?;
+        let ttl = (session.expires_at - Utc::now()).num_seconds();
+        conn.set_ex(Self::key(&session.id), payload, ttl as usize).await?;
+        Ok(())
+    }
+
+    async fn delete(&self, id: &Uuid) -> Result<(), SessionError> {
+        let mut conn = self.client.get_async_connection().await?;
+        let _: () = conn.del(Self::key(id)).await?;
+        Ok(())
+    }
+}
+
+/* ------------------------------------------------------------------------- *\
+ *                       Tower layer & request lifecycle
+\* ------------------------------------------------------------------------- */
+
+#[derive(Clone)]
+pub struct SessionLayer<L> {
+    store: Arc<dyn SessionStore>,
+    key:   Key,
+    inner: L,
+}
+
+impl<L> SessionLayer<L> {
+    pub fn new(inner: L, store: Arc<dyn SessionStore>, master_key: &[u8]) -> Self {
+        let key = Key::derive(master_key, HMAC_PERSONALIZATION);
+        Self { store, key, inner }
+    }
+}
+
+impl<S, L> Layer<S> for SessionLayer<L>
+where
+    L: Layer<S> + Clone,
+{
+    type Service = SessionService<L::Service>;
+
+    fn layer(&self, inner: S) -> Self::Service {
+        SessionService {
+            store:  Arc::clone(&self.store),
+            key:    self.key.clone(),
+            inner:  self.inner.layer(inner),
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct SessionService<I> {
+    store: Arc<dyn SessionStore>,
+    key:   Key,
+    inner: I,
+}
+
+impl<I, ReqBody> Service<Request<ReqBody>> for SessionService<I>
+where
+    I: Service<Request<ReqBody>, Response = Response<Body>> + Clone + Send + 'static,
+    I::Future: Send + 'static,
+    ReqBody: Send + 'static,
+{
+    type Response = Response<Body>;
+    type Error = I::Error;
+    type Future = futures::future::BoxFuture<'static, Result<Self::Response, Self::Error>>;
+
+    fn poll_ready(
+        &mut self,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), Self::Error>> {
+        self.inner.poll_ready(cx)
+    }
+
+    fn call(&mut self, mut req: Request<ReqBody>) -> Self::Future {
+        let store = Arc::clone(&self.store);
+        let key = self.key.clone();
+        let mut inner = self.inner.clone();
+
+        Box::pin(async move {
+            // 1. Retrieve jar, verification handled by cookie crate using Key
+            let jar = CookieJar::from_headers(req.headers());
+            let signed = jar.signed(&key);
+
+            // 2. Load or create new session
+            let (session_inner, is_new) = match signed.get(SESSION_COOKIE) {
+                Some(cookie) => {
+                    let id = Uuid::parse_str(cookie.value()).unwrap_or_else(|_| Uuid::new_v4());
+                    match store.load(&id).await {
+                        Ok(Some(inner)) if inner.expires_at > Utc::now() => (inner, false),
+                        _ => (fresh_session_inner(), true),
+                    }
+                }
+                None => (fresh_session_inner(), true),
+            };
+
+            let changed_flag = Arc::new(parking_lot::AtomicBool::new(is_new));
+            let session = Session {
+                inner: Arc::new(parking_lot::RwLock::new(session_inner)),
+                changed: changed_flag.clone(),
+            };
+
+            // 3. Inject into request extensions
+            req.extensions_mut().insert(session.clone());
+
+            // 4. Run downstream service
+            let mut res = inner.call(req).await?;
+
+            // 5. Persist if mutated
+            if changed_flag.load(std::sync::atomic::Ordering::Acquire) {
+                let inner = session.inner.read().clone();
+                store.save(&inner).await.map_err(|e| {
+                    tracing::error!("Failed to persist session: {e}");
+                    // Proceed without crashing the request path
+                    ()
+                }).ok();
+
+                // 6. Refresh cookie
+                let cookie = Cookie::build(SESSION_COOKIE, inner.id.to_string())
+                    .path("/")
+                    .http_only(true)
+                    .secure(true) // forces HTTPS
+                    .max_age(cookie::time::Duration::seconds(SESSION_TTL_SECONDS))
+                    .same_site(cookie::SameSite::Lax)
+                    .finish();
+                let jar = CookieJar::new().signed(&key).add(cookie);
+                for cookie in jar.delta() {
+                    res.headers_mut().append(
+                        axum::http::header::SET_COOKIE,
+                        cookie.to_string().parse().unwrap(),
+                    );
+                }
+            }
+
+            Ok(res)
+        })
+    }
+}
+
+fn fresh_session_inner() -> SessionInner {
+    let now = Utc::now();
+    SessionInner {
+        id: Uuid::new_v4(),
+        created_at: now,
+        expires_at: now + Duration::seconds(SESSION_TTL_SECONDS),
+        data: HashMap::new(),
+    }
+}
+
+/* ------------------------------------------------------------------------- *\
+ *                            Error handling
+\* ------------------------------------------------------------------------- */
+
+#[derive(Debug, Error)]
+pub enum SessionError {
+    #[error("Redis error: {0}")]
+    Redis(#[from] redis::RedisError),
+    #[error("Serialization error: {0}")]
+    Serde(#[from] serde_json::Error),
+    #[error("Unknown session error")]
+    Unknown,
+}
+
+impl IntoResponse for SessionError {
+    fn into_response(self) -> axum::response::Response {
+        tracing::error!("Session failure: {self}");
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Session storage error".to_owned(),
+        )
+            .into_response()
+    }
+}
+
+/* ------------------------------------------------------------------------- *\
+ *                        Convenience Axum extractor
+\* ------------------------------------------------------------------------- */
+
+#[axum::async_trait]
+impl<S> axum::extract::FromRequest<S> for Session
+where
+    S: Send + Sync,
+{
+    type Rejection = (StatusCode, &'static str);
+
+    async fn from_request(
+        req: Request<Body>,
+        _state: &S,
+    ) -> Result<Self, Self::Rejection> {
+        req.extensions()
+            .get::<Session>()
+            .cloned()
+            .ok_or((StatusCode::INTERNAL_SERVER_ERROR, "Session not initialized"))
+    }
+}
+
+/* ------------------------------------------------------------------------- *\
+ *                               Integration
+\* ------------------------------------------------------------------------- */
+/// Helper function to create the layer and wire it to the router.
+///
+/// # Example
+/// ```no_run
+/// use axum::{Router, routing::get};
+/// use chromatic_canvas::session::{add_session_layer, RedisSessionStore};
+/// use redis::Client;
+///
+/// #[tokio::main]
+/// async fn main() -> anyhow::Result<()> {
+///     tracing_subscriber::fmt::init();
+///
+///     let store = RedisSessionStore::new(Client::open("redis://127.0.0.1/")?);
+///     let router = Router::new()
+///         .route("/dashboard", get(handler))
+///         .layer(add_session_layer(store, b"8e54601b-…")); // 64-byte random key
+///
+///     axum::Server::bind(&"0.0.0.0:3000".parse()?)
+///         .serve(router.into_make_service())
+///         .await?;
+///     Ok(())
+/// }
+///
+/// async fn handler(mut session: Session) -> impl IntoResponse {
+///     let cnt: u64 = session.get("counter").unwrap_or(0) + 1;
+///     session.insert("counter", cnt);
+///     format!("Counter = {cnt}")
+/// }
+/// ```
+pub fn add_session_layer<S>(
+    store: S,
+    master_key: &[u8],
+) -> impl Layer<
+    axum::Router
+> + Clone
+where
+    S: SessionStore,
+{
+    // Built-in tower::Layer combinator; we wrap identity layer so caller can
+    // compose with CORS, logging, etc. in any order.
+    tower::layer::layer_fn(move |service| {
+        SessionLayer::new(
+            service,
+            Arc::new(store.clone()),
+            master_key,
+        )
+    })
+}
+```

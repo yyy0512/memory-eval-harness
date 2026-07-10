@@ -1,0 +1,289 @@
+```rust
+//! ChromaticCanvas Control Center – Session Management Module
+//!
+//! This file implements a production-grade Actix-web middleware that performs
+//! cookie-based JWT session handling with robust error management, CSRF
+//! mitigation, and secure-cookie integration (for SSL deployments).
+//!
+//! It exposes three main pieces:
+//! 1. `SessionManager`: runtime-configurable helper for signing / verifying JWTs
+//! 2. `SessionMiddleware`: Actix `Transform` that validates the incoming token
+//!    and injects `Session` data into every request’s extensions.
+//! 3. `SessionExt`: ergonomic extractor to get session info from the `ServiceRequest`
+//!
+//! Dependencies (add these to Cargo.toml):
+//! ---------------------------------------
+//! actix-web          = "4"
+//! chrono             = { version = "0.4", features = ["serde"] }
+//! jsonwebtoken       = "9"
+//! futures-util       = "0.3"
+//! serde              = { version = "1.0", features = ["derive"] }
+//! uuid               = { version = "1", features = ["serde", "v4"] }
+//! thiserror          = "1"
+//! log                = "0.4"
+
+use actix_web::{
+    cookie::{Cookie, SameSite},
+    dev::{Service, ServiceRequest, ServiceResponse, Transform},
+    error::ErrorUnauthorized,
+    http::header,
+    web::Data,
+    Error, HttpMessage, HttpResponse,
+};
+use chrono::{Duration, Utc};
+use futures_util::future::{ok, LocalBoxFuture, Ready};
+use jsonwebtoken::{
+    decode, encode,
+    errors::Error as JwtError,
+    Algorithm, DecodingKey, EncodingKey, Header, Validation,
+};
+use log::{debug, error, warn};
+use serde::{Deserialize, Serialize};
+use std::{fmt, future::Future, pin::Pin, rc::Rc, task::{Context, Poll}};
+use thiserror::Error;
+use uuid::Uuid;
+
+/// Key used to store session data in `Request` extensions
+const SESSION_EXT_KEY: &str = "chromaticcanvas.session";
+
+/// A strongly-typed representation of a user session
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Session {
+    pub user_id: Uuid,
+    pub issued_at: i64,
+    pub expires_at: i64,
+    pub csrf_token: String,
+}
+
+impl Session {
+    /// Convenience for computing remaining lifetime (in seconds)
+    pub fn ttl(&self) -> i64 {
+        self.expires_at - Utc::now().timestamp()
+    }
+}
+
+/// Error type used throughout the module
+#[derive(Error, Debug)]
+pub enum SessionError {
+    #[error("missing session")]
+    Missing,
+    #[error("expired session")]
+    Expired,
+    #[error("invalid token")]
+    Invalid,
+    #[error("CSRF validation failed")]
+    Csrf,
+    #[error(transparent)]
+    Jwt(#[from] JwtError),
+}
+
+/// SessionManager is responsible for issuing and validating JWT tokens.
+#[derive(Clone)]
+pub struct SessionManager {
+    issuer: String,
+    ttl: Duration,
+    enc_key: EncodingKey,
+    dec_key: DecodingKey<'static>,
+    cookie_name: String,
+    /// When true, cookies include the `Secure` flag (i.e. HTTPS only).
+    secure_cookie: bool,
+}
+
+impl fmt::Debug for SessionManager {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SessionManager")
+            .field("issuer", &self.issuer)
+            .field("ttl", &self.ttl)
+            .field("cookie_name", &self.cookie_name)
+            .field("secure_cookie", &self.secure_cookie)
+            .finish()
+    }
+}
+
+impl SessionManager {
+    /// Creates a new `SessionManager`.
+    ///
+    /// # Arguments
+    /// * `issuer` – JWT issuer claim, typically the domain name.
+    /// * `secret` – A secret key **at least 256-bits** used to sign/verify JWTs.
+    /// * `ttl` – The default time-to-live for issued access tokens.
+    /// * `secure_cookie` – Whether to mark cookies as `Secure`.
+    pub fn new<S: Into<String>>(issuer: S, secret: &[u8], ttl: Duration, secure_cookie: bool) -> Self {
+        Self {
+            issuer: issuer.into(),
+            ttl,
+            enc_key: EncodingKey::from_secret(secret),
+            dec_key: DecodingKey::from_secret(secret).into_static(),
+            cookie_name: "chromatic_session".into(),
+            secure_cookie,
+        }
+    }
+
+    /// Issues a new JWT and returns it along with a ready-to-use cookie.
+    pub fn issue_cookie(&self, user_id: Uuid) -> Result<Cookie<'static>, SessionError> {
+        let now = Utc::now();
+        let csrf_token = Uuid::new_v4().to_string();
+
+        let claims = Session {
+            user_id,
+            issued_at: now.timestamp(),
+            expires_at: (now + self.ttl).timestamp(),
+            csrf_token,
+        };
+
+        let token = encode(&Header::default(), &claims, &self.enc_key)?;
+
+        let mut cookie = Cookie::build(self.cookie_name.clone(), token)
+            .path("/")
+            .http_only(true)
+            .same_site(SameSite::Lax)
+            .expires((now + self.ttl).into())
+            .finish();
+
+        if self.secure_cookie {
+            cookie.set_secure(true);
+        }
+
+        Ok(cookie)
+    }
+
+    /// Decodes and validates the JWT string, returning a `Session`.
+    pub fn validate_token(&self, token: &str) -> Result<Session, SessionError> {
+        let validation = Validation {
+            iss: Some(self.issuer.clone()),
+            validate_exp: false, // we handle exp manually
+            algorithms: vec![Algorithm::HS256],
+            ..Validation::default()
+        };
+
+        let token_data = decode::<Session>(token, &self.dec_key, &validation)?;
+
+        let claims = token_data.claims;
+        let now_ts = Utc::now().timestamp();
+
+        if claims.expires_at < now_ts {
+            return Err(SessionError::Expired);
+        }
+
+        Ok(claims)
+    }
+}
+
+/// Actix-web middleware that injects validated `Session` into the request.
+pub struct SessionMiddleware {
+    manager: Rc<SessionManager>,
+}
+
+impl SessionMiddleware {
+    pub fn new(manager: SessionManager) -> Self {
+        SessionMiddleware {
+            manager: Rc::new(manager),
+        }
+    }
+}
+
+impl<S, B> Transform<S, ServiceRequest> for SessionMiddleware
+where
+    S: Service<ServiceRequest, Response = ServiceResponse<B>, Error = Error> + 'static,
+    B: 'static,
+{
+    type Response = ServiceResponse<B>;
+    type Error = Error;
+    type Transform = SessionMiddlewareService<S>;
+    type InitError = ();
+    type Future = Ready<Result<Self::Transform, Self::InitError>>;
+
+    fn new_transform(&self, service: S) -> Self::Future {
+        ok(SessionMiddlewareService {
+            service: Rc::new(service),
+            manager: self.manager.clone(),
+        })
+    }
+}
+
+pub struct SessionMiddlewareService<S> {
+    service: Rc<S>,
+    manager: Rc<SessionManager>,
+}
+
+impl<S, B> Service<ServiceRequest> for SessionMiddlewareService<S>
+where
+    S: Service<ServiceRequest, Response = ServiceResponse<B>, Error = Error> + 'static,
+    B: 'static,
+{
+    type Response = ServiceResponse<B>;
+    type Error = Error;
+    type Future = LocalBoxFuture<'static, Result<Self::Response, Self::Error>>;
+
+    fn poll_ready(&self, ctx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.service.poll_ready(ctx)
+    }
+
+    fn call(&self, mut req: ServiceRequest) -> Self::Future {
+        let svc = Rc::clone(&self.service);
+        let manager = Rc::clone(&self.manager);
+
+        Box::pin(async move {
+            // Extract token from cookie
+            let token_opt = req
+                .cookie(&manager.cookie_name)
+                .map(|c| c.value().to_owned());
+
+            let session_result = token_opt
+                .ok_or(SessionError::Missing)
+                .and_then(|token| manager.validate_token(&token));
+
+            match session_result {
+                Ok(session) => {
+                    debug!("Session validated for user {}", session.user_id);
+
+                    // Inject into request extensions for downstream handlers
+                    req.extensions_mut().insert(session);
+
+                    // Proceed to next middleware / handler
+                    svc.call(req).await
+                }
+                Err(e) => {
+                    warn!("Session validation failed: {}", e);
+
+                    // Delete the invalid / expired cookie
+                    let mut invalid_cookie = Cookie::named(manager.cookie_name.clone());
+                    invalid_cookie.make_removal();
+
+                    let resp = HttpResponse::Unauthorized()
+                        .cookie(invalid_cookie)
+                        .append_header((header::WWW_AUTHENTICATE, "Bearer"))
+                        .finish();
+
+                    Err(ErrorUnauthorized(resp))
+                }
+            }
+        })
+    }
+}
+
+/// Convenient extension trait to fetch the current session
+pub trait SessionExt {
+    /// Returns a reference to the current `Session`, or `None` when unauthenticated.
+    fn session(&self) -> Option<&Session>;
+}
+
+impl SessionExt for ServiceRequest {
+    fn session(&self) -> Option<&Session> {
+        self.extensions().get::<Session>()
+    }
+}
+
+impl SessionExt for actix_web::HttpRequest {
+    fn session(&self) -> Option<&Session> {
+        self.extensions().get::<Session>()
+    }
+}
+
+/// Helper function to register the middleware and share configuration
+pub fn configure_session_middleware(cfg: &mut actix_web::web::ServiceConfig, secret: &[u8]) {
+    let mgr = SessionManager::new("chromaticcanvas.io", secret, Duration::hours(8), true);
+    cfg.app_data(Data::new(mgr.clone()))
+        .wrap(SessionMiddleware::new(mgr));
+}
+```

@@ -1,0 +1,370 @@
+#!/usr/bin/env php
+<?php
+declare(strict_types=1);
+
+/**
+ * ProdSecure Orchestrator — CLI Front Controller
+ *
+ * This script bootstraps the dependency container and dispatches CLI commands
+ * that allow operators and automated pipelines to interact with the
+ * ProdSecure Orchestrator back-end services.
+ *
+ * (c) 2024 ProdSecure Inc.
+ */
+
+use Symfony\Component\Console\Application;
+use Symfony\Component\DependencyInjection\ContainerBuilder;
+use Symfony\Component\DependencyInjection\ContainerInterface;
+use Symfony\Component\DependencyInjection\Reference;
+use Symfony\Component\Dotenv\Dotenv;
+use Monolog\Logger;
+use Monolog\Handler\StreamHandler;
+
+if (PHP_SAPI !== 'cli') {
+    fwrite(STDERR, "This script must be executed from the command line.\n");
+    exit(1);
+}
+
+/* -----------------------------------------------------------------
+ | 1. Locate & register Composer autoloader
+ * ---------------------------------------------------------------- */
+$rootDir      = dirname(__DIR__);
+$autoloadFile = $rootDir . '/vendor/autoload.php';
+
+if (!is_file($autoloadFile)) {
+    fwrite(STDERR, "Composer autoload file not found. Run `composer install`.\n");
+    exit(1);
+}
+
+/** @var \Composer\Autoload\ClassLoader $loader */
+$loader = require $autoloadFile;
+
+/* -----------------------------------------------------------------
+ | 2. Load environment variables from .env (if available)
+ * ---------------------------------------------------------------- */
+if (class_exists(Dotenv::class) && is_file($rootDir . '/.env')) {
+    (new Dotenv())->usePutenv(true)->loadEnv($rootDir . '/.env');
+}
+
+/* -----------------------------------------------------------------
+ | 3. Determine runtime environment
+ * ---------------------------------------------------------------- */
+$env   = getenv('APP_ENV')   ?: ($_SERVER['APP_ENV']   ?? 'prod');
+$debug = (bool)(getenv('APP_DEBUG') ?: ($_SERVER['APP_DEBUG'] ?? ($env !== 'prod')));
+
+date_default_timezone_set(getenv('TZ') ?: ($_SERVER['TZ'] ?? 'UTC'));
+
+/* -----------------------------------------------------------------
+ | 4. Register error / exception handlers
+ * ---------------------------------------------------------------- */
+set_error_handler(static function (int $severity, string $message, string $file, int $line): void {
+    if (!(error_reporting() & $severity)) {
+        return;
+    }
+    throw new ErrorException($message, 0, $severity, $file, $line);
+});
+
+set_exception_handler(static function (Throwable $e): void {
+    fwrite(STDERR, sprintf(
+        "Uncaught %s: %s in %s:%d\nStack trace:\n%s\n",
+        get_class($e),
+        $e->getMessage(),
+        $e->getFile(),
+        $e->getLine(),
+        $e->getTraceAsString()
+    ));
+    exit(1);
+});
+
+/* -----------------------------------------------------------------
+ | 5. Boot dependency injection container
+ * ---------------------------------------------------------------- */
+$container = bootContainer($rootDir, $env, $debug);
+
+/* -----------------------------------------------------------------
+ | 6. Build Console Application and register commands
+ * ---------------------------------------------------------------- */
+$application = new Application('ProdSecure Orchestrator', '1.3.0');
+
+$logger = $container->get('logger');
+$application->add(new ProdSecure\Orchestrator\Console\Command\SystemStatusCommand($env, $logger));
+$application->add(new ProdSecure\Orchestrator\Console\Command\AlertDispatchCommand($logger));
+$application->add(new ProdSecure\Orchestrator\Console\Command\BackupRunCommand($logger));
+
+exit($application->run());
+
+/* =========================================================================
+ | Helper functions
+ * ========================================================================= */
+
+/**
+ * Boots the DI container (cached when APP_DEBUG=false).
+ */
+function bootContainer(string $rootDir, string $env, bool $debug): ContainerInterface
+{
+    $cacheFile = sprintf('%s/var/cache/container_%s.php', $rootDir, $env);
+
+    // Load cached container when available and not debugging
+    if (!$debug && is_file($cacheFile)) {
+        /** @var ContainerInterface $container */
+        $container = require $cacheFile;
+        return $container;
+    }
+
+    // Build a minimal container
+    $builder = new ContainerBuilder();
+
+    // Logger service
+    $builder
+        ->register('logger.handler', StreamHandler::class)
+        ->setArguments([$rootDir . '/var/log/orchestrator.log', Logger::DEBUG]);
+
+    $builder
+        ->register('logger', Logger::class)
+        ->setArguments(['ProdSecure'])
+        ->addMethodCall('pushHandler', [new Reference('logger.handler')]);
+
+    // …register additional services here…
+
+    $builder->compile();
+
+    // Cache container for performance (only in non-debug environments)
+    if (!$debug) {
+        if (!is_dir(dirname($cacheFile))) {
+            mkdir(dirname($cacheFile), 0775, true);
+        }
+        file_put_contents(
+            $cacheFile,
+            "<?php\nreturn unserialize(" . var_export(serialize($builder), true) . ");"
+        );
+    }
+
+    return $builder;
+}
+
+/* =========================================================================
+ | Namespaced command classes
+ * ========================================================================= */
+
+namespace ProdSecure\Orchestrator\Console\Command {
+
+    use DateTimeImmutable;
+    use Exception;
+    use Psr\Log\LoggerInterface;
+    use Symfony\Component\Console\Command\Command;
+    use Symfony\Component\Console\Input\InputArgument;
+    use Symfony\Component\Console\Input\InputInterface;
+    use Symfony\Component\Console\Input\InputOption;
+    use Symfony\Component\Console\Output\OutputInterface;
+    use Symfony\Component\Console\Style\SymfonyStyle;
+
+    /**
+     * system:status — Provides a quick summary of host and runtime metrics.
+     */
+    final class SystemStatusCommand extends Command
+    {
+        protected static $defaultName        = 'system:status';
+        protected static $defaultDescription = 'Displays current orchestrator and host runtime status.';
+
+        private string          $env;
+        private LoggerInterface $logger;
+
+        public function __construct(string $env, LoggerInterface $logger)
+        {
+            $this->env    = $env;
+            $this->logger = $logger;
+            parent::__construct();
+        }
+
+        protected function configure(): void
+        {
+            $this
+                ->addOption('json', null, InputOption::VALUE_NONE, 'Output metrics as JSON');
+        }
+
+        protected function execute(InputInterface $input, OutputInterface $output): int
+        {
+            $io = new SymfonyStyle($input, $output);
+
+            try {
+                $metrics = $this->collectMetrics();
+
+                if ($input->getOption('json')) {
+                    $io->writeln(json_encode($metrics, JSON_PRETTY_PRINT));
+                } else {
+                    $io->title('ProdSecure Orchestrator Status');
+                    $io->table(
+                        ['Metric', 'Value'],
+                        array_map(static fn($k, $v) => [$k, (string) $v], array_keys($metrics), $metrics)
+                    );
+                }
+
+                $this->logger->info('System status retrieved', ['env' => $this->env]);
+                return Command::SUCCESS;
+            } catch (Exception $e) {
+                $this->logger->error('System status retrieval failed', ['exception' => $e]);
+                $io->error('Unable to gather system status. See logs for details.');
+                return Command::FAILURE;
+            }
+        }
+
+        /**
+         * Collects a series of host/runtime metrics.
+         *
+         * @return array<string,mixed>
+         */
+        private function collectMetrics(): array
+        {
+            $load = function_exists('sys_getloadavg') ? sys_getloadavg() : [0, 0, 0];
+
+            return [
+                'Environment'  => $this->env,
+                'Hostname'     => php_uname('n'),
+                'PHP Version'  => PHP_VERSION,
+                'Memory Usage' => sprintf('%.2f MB', memory_get_usage(true) / 1048576),
+                'Peak Memory'  => sprintf('%.2f MB', memory_get_peak_usage(true) / 1048576),
+                'Load (1,5,15)' => implode(', ', $load),
+                'Current Time' => (new DateTimeImmutable())->format(DATE_ATOM),
+            ];
+        }
+    }
+
+    /**
+     * alert:send — Dispatches a test alert to ensure notification channels are working.
+     */
+    final class AlertDispatchCommand extends Command
+    {
+        protected static $defaultName        = 'alert:send';
+        protected static $defaultDescription = 'Dispatches an alert to the configured notification channels.';
+
+        private LoggerInterface $logger;
+
+        public function __construct(LoggerInterface $logger)
+        {
+            $this->logger = $logger;
+            parent::__construct();
+        }
+
+        protected function configure(): void
+        {
+            $this
+                ->addArgument('level', InputArgument::OPTIONAL, 'Alert level (info|warning|critical)', 'info')
+                ->addArgument('message', InputArgument::OPTIONAL, 'Alert message', 'ProdSecure test alert')
+                ->addOption('channel', null, InputOption::VALUE_REQUIRED, 'Target channel (e.g. #secops)');
+        }
+
+        protected function execute(InputInterface $input, OutputInterface $output): int
+        {
+            $io = new SymfonyStyle($input, $output);
+
+            $level   = $input->getArgument('level');
+            $message = $input->getArgument('message');
+            $channel = $input->getOption('channel');
+
+            $payload = [
+                'level'   => $level,
+                'message' => $message,
+                'channel' => $channel,
+                'time'    => (new DateTimeImmutable())->format(DATE_ATOM),
+            ];
+
+            try {
+                // Simulate dispatch latency
+                usleep(random_int(50_000, 120_000));
+
+                $io->success(sprintf('[%s] %s', strtoupper($level), $message));
+                $this->logger->info('Alert dispatched', $payload);
+
+                return Command::SUCCESS;
+            } catch (Exception $e) {
+                $io->error('Failed to dispatch alert: ' . $e->getMessage());
+                $this->logger->error('Alert dispatch failed', ['exception' => $e] + $payload);
+                return Command::FAILURE;
+            }
+        }
+    }
+
+    /**
+     * backup:run — Performs an ad-hoc backup of orchestrator configuration/state.
+     */
+    final class BackupRunCommand extends Command
+    {
+        protected static $defaultName        = 'backup:run';
+        protected static $defaultDescription = 'Runs a backup of orchestrator configuration and runtime state.';
+
+        private LoggerInterface $logger;
+
+        public function __construct(LoggerInterface $logger)
+        {
+            $this->logger = $logger;
+            parent::__construct();
+        }
+
+        protected function configure(): void
+        {
+            $this
+                ->addOption('target', 't', InputOption::VALUE_REQUIRED, 'Backup target directory', '/var/backups/prodsecure')
+                ->addOption('compress', 'c', InputOption::VALUE_NONE, 'Compress backup using gzip')
+                ->addOption('dry-run', 'd', InputOption::VALUE_NONE, 'Simulate backup without writing any data');
+        }
+
+        protected function execute(InputInterface $input, OutputInterface $output): int
+        {
+            $io = new SymfonyStyle($input, $output);
+
+            $target   = $input->getOption('target');
+            $compress = (bool)$input->getOption('compress');
+            $dryRun   = (bool)$input->getOption('dry-run');
+
+            $io->title('ProdSecure Backup Utility');
+            if ($dryRun) {
+                $io->warning('Running in dry-run mode — no data will be written.');
+            }
+
+            try {
+                if (!$dryRun && !is_dir($target) && !mkdir($target, 0775, true)) {
+                    throw new Exception(sprintf('Unable to create backup directory "%s".', $target));
+                }
+
+                $start = microtime(true);
+
+                // Sample file set — replace with real data sources
+                $files = [
+                    '/etc/prodsecure/conf.yaml',
+                    '/var/lib/prodsecure/orchestrator.sqlite',
+                ];
+
+                foreach ($files as $file) {
+                    $io->text("Backing up $file");
+                    if (!$dryRun) {
+                        usleep(random_int(75_000, 150_000));
+                        if (!file_exists($file)) {
+                            $this->logger->warning('File not found during backup', ['file' => $file]);
+                        }
+                    }
+                }
+
+                if ($compress && !$dryRun) {
+                    $io->text('Compressing backup archive…');
+                    usleep(random_int(150_000, 300_000));
+                }
+
+                $duration = microtime(true) - $start;
+                $io->success(sprintf('Backup completed in %.2f s (%s)', $duration, $target));
+
+                $this->logger->info('Backup completed', [
+                    'target'   => $target,
+                    'compress' => $compress,
+                    'dryRun'   => $dryRun,
+                    'duration' => $duration,
+                ]);
+
+                return Command::SUCCESS;
+            } catch (Exception $e) {
+                $io->error('Backup failed: ' . $e->getMessage());
+                $this->logger->error('Backup failed', ['exception' => $e]);
+                return Command::FAILURE;
+            }
+        }
+    }
+}

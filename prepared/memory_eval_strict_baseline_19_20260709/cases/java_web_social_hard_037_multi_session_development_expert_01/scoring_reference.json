@@ -1,0 +1,344 @@
+{
+  "scenario_id": "java_web_social_hard_037_multi_session_development_expert_01",
+  "ground_truth": "The final solution should contain the following key changes across the codebase:\n\n*   **New File:** A new model file, likely `src/Report.java`, is created to define the structure of a content report.\n*   **Post Module Changes (e.g., `src/module_12.java`):** Contains the new public endpoint `POST /api/v1/posts/{postId}/report`. Its logic is wrapped with the `MODERATION_ENABLED` check and the rate-limiting check.\n*   **Admin Module Changes (e.g., `src/module_27.java`):** Contains the three new admin endpoints. Each handler must include a check for admin privileges and be wrapped with the `MODERATION_ENABLED` flag.\n*   **Configuration Changes (`src/config.java`):** The file is modified to include the `public static final boolean MODERATION_ENABLED` and `public static final int MAX_REPORTS_PER_USER_PER_HOUR` fields.\n*   **Utility Changes (e.g., `src/utils.java`):** A new method or class for rate-limiting is implemented. It tracks report timestamps per user to enforce the configured limit.\n*   **Documentation Changes (`docs/api.md`):** The file is updated with a new section for the three Admin Moderation APIs, detailing their function, path, method, and security requirements.\n*   **Test Changes (`tests/test_main.java`):** New tests are added to verify:\n    1.  Successful post reporting.\n    2.  Admin endpoints for fetching and actioning reports work correctly.\n    3.  Unauthorized access to admin endpoints is denied.\n    4.  Rate limiting returns a `429` error when the threshold is exceeded.\n    5.  Endpoints are disabled when `MODERATION_ENABLED` is false.",
+  "expected_approach": "An expert developer would approach this task systematically:\n\n1.  **Codebase Exploration:** Begin by using search tools (like `grep` or IDE search) for keywords such as `post`, `user`, `admin`, `api`, and `route` to understand the application's architecture. This helps identify the controller/service modules for posts (e.g., `module_12.java`, `module_14.java`) and administration (e.g., `module_27.java`). They would also inspect `utils.java` and `config.java` to understand existing patterns for utilities and configuration.\n\n2.  **Session 1 (Reporting API):**\n    *   Create a new model class, `Report.java`, to represent a report entity (with fields like `id`, `postId`, `reporterId`, `reason`, `status`, `timestamp`).\n    *   Locate the main post controller/service module and add a new method for the `POST .../report` endpoint.\n    *   Implement the service logic to create and save the `Report` object, likely interacting with a data access layer found in another module.\n    *   Use the existing logging mechanism to add the required log statement.\n    *   Navigate to the `tests/` directory and add a new test method to `test_main.java` or `test_utils.java` that calls the new endpoint and asserts the outcome.\n\n3.  **Session 2 (Admin Panel):**\n    *   Identify the module responsible for admin functionality (e.g., `module_27.java`).\n    *   Add the three new endpoints (`GET /reports`, `POST /approve`, `POST /reject`).\n    *   Implement the authorization logic by checking for an 'ADMIN' role, likely by reusing an existing security utility or middleware pattern found in the codebase.\n    *   Implement the service logic for each endpoint, which involves fetching/updating the `Report` entity and potentially deleting a `Post` entity.\n    *   Open `docs/api.md`, analyze its structure, and add the new endpoints with descriptions, request/response formats, and required permissions.\n\n4.  **Session 3 (Config & Rate Limiting):**\n    *   Open `src/config.java` and add the new `public static final` fields for `MODERATION_ENABLED` and `MAX_REPORTS_PER_USER_PER_HOUR`.\n    *   Revisit the modules modified in Sessions 1 & 2. Wrap the endpoint handlers in an `if (Config.MODERATION_ENABLED)` check.\n    *   Implement a rate-limiting mechanism. This might involve creating a new utility class or adding a method to `src/utils.java`. A common approach is an in-memory map like `Map<String, List<Long>>` to store user report timestamps.\n    *   Integrate this rate-limiting check at the beginning of the `POST .../report` endpoint logic.\n    *   Update existing tests to account for the feature flag and add new tests for the rate-limiting logic (testing both success and `429` failure cases).",
+  "evaluation_criteria": [
+    "**Context Retention:** The agent must successfully build upon the code from previous sessions without regressions or losing context. Session 2 must use the entities/logic from Session 1, and Session 3 must correctly refactor the code from both.",
+    "**Session 1 - API Implementation:** Correctly creates the reporting endpoint, the underlying logic for creating a report record, and appropriate logging.",
+    "**Session 2 - Admin & Security:** Correctly creates all three admin endpoints, secures them against non-admin access, and updates the API documentation.",
+    "**Session 3 - Configuration & Refactoring:** Correctly adds settings to `config.java`, implements the feature toggle across all new endpoints, and successfully implements the rate-limiting logic.",
+    "**Codebase Navigation:** The agent must demonstrate the ability to identify and modify the correct, non-obvious files (e.g., `module_12.java`, `module_27.java`) without explicit paths.",
+    "**Correctness and Robustness:** The final code must be functional, and all new and existing tests must pass. The agent should handle edge cases like reporting a non-existent post or acting on an invalid report ID.",
+    "**Code Quality:** The new code should be clean, maintainable, and adhere to the stylistic conventions observed in the existing codebase."
+  ],
+  "memory_contracts": [
+    {
+      "id": "user_tomato_preference_marker",
+      "category": "synthetic_memory_user_preference",
+      "memory_type": "user",
+      "introduced_in_session": 1,
+      "workspace_effective_from_session": 2,
+      "description": "User preference: for future implementation work in this repository, place the exact marker TOMATO_USER_PREF_741 near newly added or meaningfully changed code, comments, or documentation so the user's TOMATO preference is visible across sessions.",
+      "expected_memory_fact": {
+        "required_keywords": [
+          "TOMATO_USER_PREF_741",
+          "user preference",
+          "future implementation work",
+          "newly added or meaningfully changed code"
+        ],
+        "required_regex": [
+          "TOMATO_USER_PREF_741"
+        ]
+      },
+      "checks": [
+        {
+          "id": "tomato_user_pref_marker_present",
+          "type": "require_regex",
+          "path_glob": "**/*",
+          "pattern": "TOMATO_USER_PREF_741",
+          "source": "synthetic_memory_contract",
+          "strength": "sentinel_marker",
+          "signal_kind": "language_neutral_marker",
+          "rationale": "Later-session workspace should preserve or reuse the exact user preference marker introduced in session 1."
+        }
+      ]
+    },
+    {
+      "id": "feedback_tomato_review_note",
+      "category": "synthetic_memory_feedback_continuity",
+      "memory_type": "feedback",
+      "introduced_in_session": 1,
+      "workspace_effective_from_session": 2,
+      "description": "Feedback to remember: future implementation changes should include the exact review note TOMATO_REVIEW_NOTE_742 near changed logic to show that compatibility and continuity were considered.",
+      "expected_memory_fact": {
+        "required_keywords": [
+          "TOMATO_REVIEW_NOTE_742",
+          "review note",
+          "compatibility",
+          "continuity"
+        ],
+        "required_regex": [
+          "TOMATO_REVIEW_NOTE_742"
+        ]
+      },
+      "checks": [
+        {
+          "id": "tomato_review_note_present",
+          "type": "require_regex",
+          "path_glob": "**/*",
+          "pattern": "TOMATO_REVIEW_NOTE_742",
+          "source": "synthetic_memory_contract",
+          "strength": "sentinel_marker",
+          "signal_kind": "language_neutral_marker",
+          "rationale": "Later-session workspace should carry forward the exact feedback marker introduced in session 1."
+        }
+      ]
+    },
+    {
+      "id": "project_tomato_bridge_token",
+      "category": "synthetic_memory_project_convention",
+      "memory_type": "project",
+      "introduced_in_session": 1,
+      "workspace_effective_from_session": 2,
+      "description": "Project memory: future helper, handler, adapter, or glue-code changes should include the exact project token TOMATO_PROJECT_BRIDGE_743 in a nearby name, comment, or note so cross-session project conventions remain visible.",
+      "expected_memory_fact": {
+        "required_keywords": [
+          "TOMATO_PROJECT_BRIDGE_743",
+          "project token",
+          "helper",
+          "handler",
+          "adapter"
+        ],
+        "required_regex": [
+          "TOMATO_PROJECT_BRIDGE_743"
+        ]
+      },
+      "checks": [
+        {
+          "id": "tomato_project_bridge_present",
+          "type": "require_regex",
+          "path_glob": "**/*",
+          "pattern": "TOMATO_PROJECT_BRIDGE_743",
+          "source": "synthetic_memory_contract",
+          "strength": "sentinel_marker",
+          "signal_kind": "language_neutral_marker",
+          "rationale": "Later-session workspace should preserve or reuse the exact project convention token introduced in session 1."
+        }
+      ]
+    },
+    {
+      "id": "reference_tomato_canon_pointer",
+      "category": "synthetic_memory_reference_pointer",
+      "memory_type": "reference",
+      "introduced_in_session": 1,
+      "workspace_effective_from_session": 2,
+      "description": "Reference memory: treat docs/TOMATO_REFERENCE_CANON_744.md as the canonical local reference pointer for future work, and cite the exact path in comments, documentation, or implementation notes when adding related changes.",
+      "expected_memory_fact": {
+        "required_keywords": [
+          "docs/TOMATO_REFERENCE_CANON_744.md",
+          "canonical local reference",
+          "future work",
+          "implementation notes"
+        ],
+        "required_regex": [
+          "docs/TOMATO_REFERENCE_CANON_744\\.md"
+        ]
+      },
+      "checks": [
+        {
+          "id": "tomato_reference_pointer_present",
+          "type": "require_regex",
+          "path_glob": "**/*",
+          "pattern": "docs/TOMATO_REFERENCE_CANON_744\\.md",
+          "source": "synthetic_memory_contract",
+          "strength": "sentinel_marker",
+          "signal_kind": "language_neutral_marker",
+          "rationale": "Later-session workspace should cite the exact reference artifact pointer introduced in session 1."
+        }
+      ]
+    },
+    {
+      "id": "experience_tomato_safe_path_lesson",
+      "category": "synthetic_memory_experience_lesson",
+      "memory_type": "experience",
+      "introduced_in_session": 1,
+      "workspace_effective_from_session": 2,
+      "description": "Experience memory: previous work learned not to use the literal LEGACY_TEMP_PATH in future changes; use the exact safer marker TOMATO_SAFE_PATH_745 instead whenever temporary path, fallback path, or compatibility-path behavior is mentioned.",
+      "expected_memory_fact": {
+        "required_keywords": [
+          "TOMATO_SAFE_PATH_745",
+          "LEGACY_TEMP_PATH",
+          "experience",
+          "temporary path",
+          "fallback path"
+        ],
+        "required_regex": [
+          "TOMATO_SAFE_PATH_745"
+        ],
+        "forbidden_keywords": []
+      },
+      "checks": [
+        {
+          "id": "tomato_safe_path_present",
+          "type": "require_regex",
+          "path_glob": "**/*",
+          "pattern": "TOMATO_SAFE_PATH_745",
+          "source": "synthetic_memory_contract",
+          "strength": "sentinel_marker",
+          "signal_kind": "language_neutral_marker",
+          "rationale": "Later-session workspace should use the exact safer experience marker introduced in session 1."
+        },
+        {
+          "id": "tomato_legacy_temp_path_absent",
+          "type": "forbid_regex",
+          "path_glob": "**/*",
+          "pattern": "LEGACY_TEMP_PATH",
+          "source": "synthetic_memory_contract",
+          "strength": "negative_sentinel",
+          "signal_kind": "language_neutral_marker",
+          "rationale": "Later-session workspace should avoid the deprecated experience marker from the session-1 lesson."
+        }
+      ]
+    }
+  ],
+  "expected_memory_facts": [
+    {
+      "id": "user_tomato_preference_marker",
+      "required_keywords": [
+        "TOMATO_USER_PREF_741",
+        "future implementation work",
+        "newly added or meaningfully changed code"
+      ],
+      "required_regex": [
+        "TOMATO_USER_PREF_741"
+      ]
+    },
+    {
+      "id": "feedback_tomato_review_note",
+      "required_keywords": [
+        "TOMATO_REVIEW_NOTE_742",
+        "review note",
+        "compatibility",
+        "continuity"
+      ],
+      "required_regex": [
+        "TOMATO_REVIEW_NOTE_742"
+      ]
+    },
+    {
+      "id": "project_tomato_bridge_token",
+      "required_keywords": [
+        "TOMATO_PROJECT_BRIDGE_743",
+        "project token",
+        "helper",
+        "handler",
+        "adapter"
+      ],
+      "required_regex": [
+        "TOMATO_PROJECT_BRIDGE_743"
+      ]
+    },
+    {
+      "id": "reference_tomato_canon_pointer",
+      "required_keywords": [
+        "docs/TOMATO_REFERENCE_CANON_744.md",
+        "canonical local reference",
+        "future work",
+        "implementation notes"
+      ],
+      "required_regex": [
+        "docs/TOMATO_REFERENCE_CANON_744\\.md"
+      ]
+    },
+    {
+      "id": "experience_tomato_safe_path_lesson",
+      "required_keywords": [
+        "TOMATO_SAFE_PATH_745",
+        "LEGACY_TEMP_PATH",
+        "experience",
+        "temporary path",
+        "fallback path"
+      ],
+      "required_regex": [
+        "TOMATO_SAFE_PATH_745"
+      ],
+      "forbidden_keywords": []
+    }
+  ],
+  "test_plan": {
+    "status": "configured",
+    "command": [
+      "npm",
+      "test"
+    ],
+    "working_dir": ".",
+    "source": "package_json_test_script",
+    "timeout_sec": 300,
+    "reason": null,
+    "test_like_file_count": 3,
+    "executor": "host",
+    "docker_image": "locobench-memory-eval:java",
+    "environment": {
+      "recommended_executor": "docker",
+      "network": "none"
+    },
+    "integrity": {
+      "status": "basic",
+      "original_test_files": [
+        "tests/test_main.java",
+        "tests/test_utils.java"
+      ]
+    }
+  },
+  "requirement_checks": [
+    {
+      "id": "moderation_enabled_config",
+      "type": "require_regex",
+      "path_glob": "src/config.java",
+      "source": "overlay",
+      "strength": "explicit",
+      "signal_kind": "config_value",
+      "rationale": "moderation feature flag configured.",
+      "pattern": "MODERATION_ENABLED"
+    },
+    {
+      "id": "reports_per_hour_config",
+      "type": "require_regex",
+      "path_glob": "src/config.java",
+      "source": "overlay",
+      "strength": "explicit",
+      "signal_kind": "config_value",
+      "rationale": "moderation rate limit configured.",
+      "pattern": "MAX_REPORTS_PER_USER_PER_HOUR"
+    },
+    {
+      "id": "report_endpoint_implemented",
+      "type": "require_regex",
+      "path_glob": "src/**/*.java",
+      "source": "overlay",
+      "strength": "explicit",
+      "signal_kind": "api_contract",
+      "rationale": "post report endpoint/data flow implemented.",
+      "pattern": "reportId|PENDING|/report"
+    },
+    {
+      "id": "admin_report_actions_implemented",
+      "type": "require_regex",
+      "path_glob": "src/**/*.java",
+      "source": "overlay",
+      "strength": "explicit",
+      "signal_kind": "api_contract",
+      "rationale": "admin approve/reject actions implemented.",
+      "pattern": "approve|reject|APPROVED|REJECTED"
+    },
+    {
+      "id": "moderation_docs_updated",
+      "type": "require_regex",
+      "path_glob": "docs/api.md",
+      "source": "overlay",
+      "strength": "explicit",
+      "signal_kind": "documentation",
+      "rationale": "API docs describe moderation endpoints/config.",
+      "pattern": "MODERATION_ENABLED|/api/v1/admin/reports|/api/v1/posts/.*/report"
+    }
+  ],
+  "requirement_check_plan": {
+    "status": "configured",
+    "source": "overlay",
+    "reason": null,
+    "check_count": 5,
+    "source_distribution": {
+      "overlay": 5
+    },
+    "strength_distribution": {
+      "explicit": 5
+    },
+    "signal_kind_distribution": {
+      "api_contract": 2,
+      "config_value": 2,
+      "documentation": 1
+    },
+    "rejection_reason_distribution": {},
+    "rejected_terms": []
+  }
+}

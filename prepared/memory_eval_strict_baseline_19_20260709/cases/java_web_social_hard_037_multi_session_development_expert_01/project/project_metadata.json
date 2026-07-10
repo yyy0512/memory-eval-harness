@@ -1,0 +1,272 @@
+{
+  "specification": {
+    "unique_id": "java_web_social_hard_037",
+    "name": "CircleConnect Nexus",
+    "description": "CircleConnect Nexus is a large-scale social networking platform designed around community \"circles\" where users collaborate on events, shared purchases, and crowdsourced goals. Built with a strict Model\u2013View\u2013Controller skeleton, the application separates domain logic (circles, posts, pledges, events), delivery (RESTful JSON + server-rendered pages), and presentation (responsive SPA widgets) to keep user-driven features\u2014such as real-time circle feeds, member voting, and pooled-payment pledges\u2014safe, testable, and independently evolvable.  \n\nThe project stresses the social dimension by weaving collective interactions into every major user story: circles can open micro-funding campaigns, members can co-edit event schedules, and influence scores steer content visibility. Core requirements include SSL-everywhere transport, OAuth2 social log-ins, stripe-backed pledge payments, granular activity logging, and an admin observability panel\u2014all orchestrated through Spring Boot MVC controllers, service components, repositories, and React/Thymeleaf hybrid views. With 52 target source files and ~335k tokens, the codebase offers a full spectrum of advanced social-app concerns: rate-limited REST endpoints, sophisticated validation layers, repository abstractions over PostgreSQL, adaptive UI, and an extensible middleware chain for authentication, session and error handling.",
+    "domain": "web_social",
+    "complexity": "hard",
+    "language": "java",
+    "architecture": "mvc",
+    "theme": "social",
+    "target_file_count": 52,
+    "target_token_count": 334933,
+    "features": [
+      "api_endpoints",
+      "frontend_interface",
+      "logging_system",
+      "ssl_security",
+      "admin_panel",
+      "error_handling",
+      "data_validation",
+      "responsive_design",
+      "search_functionality",
+      "payment_processing",
+      "social_login",
+      "user_authentication",
+      "email_notifications",
+      "session_management",
+      "database_integration"
+    ],
+    "architecture_patterns": [
+      "Component_Architecture",
+      "MVC",
+      "Repository_Pattern",
+      "REST_API",
+      "Authentication_Middleware",
+      "Database_ORM"
+    ],
+    "dependencies": [
+      "Spring Boot (Web, Security, Data JPA, Validation)",
+      "Spring MVC",
+      "Hibernate ORM / JPA",
+      "PostgreSQL JDBC Driver",
+      "Spring Session (Redis)",
+      "Thymeleaf (server-side views) + React (SPA widgets) + Webpack",
+      "Spring Cloud Gateway (SSL termination, routing)",
+      "Stripe Java SDK (payment processing)",
+      "Google / Facebook OAuth2 Client libraries (social login)",
+      "SendGrid Java API (email notifications)",
+      "MapStruct (DTO mapping)",
+      "Project Lombok (boilerplate reduction)",
+      "Logback & Logstash-encoder (structured logging)",
+      "JUnit 5 + Mockito (testing)",
+      "Apache Commons Validator / Hibernate Validator (data validation)",
+      "Jackson (JSON serialization)",
+      "Swagger / SpringDoc OpenAPI (API docs)"
+    ],
+    "seed": 669853
+  },
+  "generated_timestamp": 1754355552.716814,
+  "phase_1_complete": true,
+  "uniqueness_factors": {
+    "domain": "web_social",
+    "complexity": "hard",
+    "architecture": "mvc",
+    "theme": "social",
+    "seed": 669853
+  },
+  "files": [
+    {
+      "path": "src/utils.java",
+      "type": "source"
+    },
+    {
+      "path": "src/config.java",
+      "type": "config"
+    },
+    {
+      "path": "src/constants.java",
+      "type": "source"
+    },
+    {
+      "path": "tests/test_main.java",
+      "type": "test"
+    },
+    {
+      "path": "tests/test_utils.java",
+      "type": "test"
+    },
+    {
+      "path": "README.md",
+      "type": "documentation"
+    },
+    {
+      "path": "package.json",
+      "type": "config"
+    },
+    {
+      "path": ".gitignore",
+      "type": "source"
+    },
+    {
+      "path": "Dockerfile",
+      "type": "documentation"
+    },
+    {
+      "path": "docs/api.md",
+      "type": "documentation"
+    },
+    {
+      "path": "src/module_1.java",
+      "type": "source"
+    },
+    {
+      "path": "src/module_2.java",
+      "type": "source"
+    },
+    {
+      "path": "src/module_3.java",
+      "type": "source"
+    },
+    {
+      "path": "src/module_4.java",
+      "type": "source"
+    },
+    {
+      "path": "src/module_5.java",
+      "type": "source"
+    },
+    {
+      "path": "src/module_6.java",
+      "type": "source"
+    },
+    {
+      "path": "src/module_7.java",
+      "type": "source"
+    },
+    {
+      "path": "src/module_8.java",
+      "type": "source"
+    },
+    {
+      "path": "src/module_9.java",
+      "type": "source"
+    },
+    {
+      "path": "src/module_10.java",
+      "type": "source"
+    },
+    {
+      "path": "src/module_11.java",
+      "type": "source"
+    },
+    {
+      "path": "src/module_12.java",
+      "type": "source"
+    },
+    {
+      "path": "src/module_13.java",
+      "type": "source"
+    },
+    {
+      "path": "src/module_14.java",
+      "type": "source"
+    },
+    {
+      "path": "src/module_15.java",
+      "type": "source"
+    },
+    {
+      "path": "src/module_16.java",
+      "type": "source"
+    },
+    {
+      "path": "src/module_17.java",
+      "type": "source"
+    },
+    {
+      "path": "src/module_18.java",
+      "type": "source"
+    },
+    {
+      "path": "src/module_19.java",
+      "type": "source"
+    },
+    {
+      "path": "src/module_20.java",
+      "type": "source"
+    },
+    {
+      "path": "src/module_21.java",
+      "type": "source"
+    },
+    {
+      "path": "src/module_22.java",
+      "type": "source"
+    },
+    {
+      "path": "src/module_23.java",
+      "type": "source"
+    },
+    {
+      "path": "src/module_24.java",
+      "type": "source"
+    },
+    {
+      "path": "src/module_25.java",
+      "type": "source"
+    },
+    {
+      "path": "src/module_26.java",
+      "type": "source"
+    },
+    {
+      "path": "src/module_27.java",
+      "type": "source"
+    },
+    {
+      "path": "src/module_28.java",
+      "type": "source"
+    },
+    {
+      "path": "src/module_29.java",
+      "type": "source"
+    },
+    {
+      "path": "src/module_30.java",
+      "type": "source"
+    },
+    {
+      "path": "src/module_31.java",
+      "type": "source"
+    },
+    {
+      "path": "src/module_32.java",
+      "type": "source"
+    },
+    {
+      "path": "src/module_33.java",
+      "type": "source"
+    },
+    {
+      "path": "src/module_34.java",
+      "type": "source"
+    },
+    {
+      "path": "src/module_35.java",
+      "type": "source"
+    },
+    {
+      "path": "src/module_36.java",
+      "type": "source"
+    },
+    {
+      "path": "src/module_37.java",
+      "type": "source"
+    },
+    {
+      "path": "src/module_38.java",
+      "type": "source"
+    },
+    {
+      "path": "src/module_39.java",
+      "type": "source"
+    }
+  ],
+  "generated_stats": {
+    "files_count": 52,
+    "lines_count": 13183,
+    "generation_time": 2137.086767911911,
+    "timestamp": 1754362847.199415
+  }
+}

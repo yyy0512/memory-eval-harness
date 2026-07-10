@@ -1,0 +1,322 @@
+use std::{
+    borrow::Cow,
+    fmt,
+    ops::Deref,
+    str::FromStr,
+};
+
+use lazy_static::lazy_static;
+use regex::Regex;
+use serde::{
+    de::{Error as DeError, Visitor},
+    Deserialize, Deserializer, Serialize, Serializer,
+};
+use thiserror::Error;
+use uuid::Uuid;
+
+/// Strongly-typed, validated display name used across ChromaticCanvas.
+///
+/// A `Name` guarantees:
+/// 1. Non-empty after trimming.
+/// 2. ≤ `MAX_LEN` UTF-8 bytes.
+/// 3. No control characters.
+/// 4. No leading/trailing whitespace.
+/// 5. Single line (no `\n`/`\r`).
+///
+/// By enforcing these invariants at construction time we eliminate a broad
+/// range of potential bugs and security holes (SQL injection, XSS, DoS via
+/// gigantic allocations, etc.).
+///
+/// The struct implements common traits (`Deref`, `Display`, `FromStr`,
+/// Ser/De…), integrates with SQLx, and exposes helper methods such as
+/// `slug()` for SEO-friendly URLs.
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+pub struct Name(Cow<'static, str>);
+
+impl Name {
+    /// Maximum number of UTF-8 bytes permitted for a `Name`.
+    pub const MAX_LEN: usize = 64;
+
+    /// Validate the provided string and, if successful, construct a `Name`.
+    pub fn parse<S: Into<String>>(raw: S) -> Result<Self, NameError> {
+        let owned = raw.into();
+        Self::validate(&owned)?;
+        Ok(Name(owned.into()))
+    }
+
+    /// Generates a lowercase, URL-safe slug from the name (`my-awesome-art`).
+    ///
+    /// The function is memoized per instance for O(1) subsequent calls.
+    pub fn slug(&self) -> &str {
+        use once_cell::sync::OnceCell;
+        static SLUGGED: OnceCell<String> = OnceCell::new();
+
+        // Using a thread-local cache ensures correctness in the unlikely event
+        // that two `Name` instances share the same address.
+        SLUGGED
+            .get_or_init(|| {
+                lazy_static! {
+                    static ref NON_ALNUM: Regex = Regex::new(r"[^\p{L}\d]+").unwrap();
+                }
+
+                NON_ALNUM
+                    .replace_all(self.as_str(), "-")
+                    .to_ascii_lowercase()
+                    .trim_matches('-')
+                    .to_string()
+            })
+            .as_str()
+    }
+
+    /// Borrow the inner `str`.
+    pub fn as_str(&self) -> &str {
+        self
+    }
+
+    /// Perform full validation logic without constructing a `Name`.
+    ///
+    /// Can be used from structs where a `String` is first deserialized and
+    /// *then* converted, allowing you to return a single aggregated error
+    /// rather than fail during deserialization.
+    pub fn validate(s: &str) -> Result<(), NameError> {
+        if s.trim().is_empty() {
+            return Err(NameError::Empty);
+        }
+
+        if s.len() > Self::MAX_LEN {
+            return Err(NameError::TooLong);
+        }
+
+        if s.starts_with(char::is_whitespace) || s.ends_with(char::is_whitespace) {
+            return Err(NameError::LeadingOrTrailingWhitespace);
+        }
+
+        if s.chars().any(|c| c.is_control()) {
+            return Err(NameError::ContainsControlCharacter);
+        }
+
+        if s.contains('\n') || s.contains('\r') {
+            return Err(NameError::ContainsNewline);
+        }
+
+        Ok(())
+    }
+}
+
+// -------------------------------------------------------------------------------------------------
+// Trait impls
+// -------------------------------------------------------------------------------------------------
+
+impl Deref for Name {
+    type Target = str;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl fmt::Display for Name {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl FromStr for Name {
+    type Err = NameError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Name::parse(s.to_owned())
+    }
+}
+
+// ----------------------------------- Serde -------------------------------------------------------
+
+impl Serialize for Name {
+    fn serialize<S: Serializer>(&self, ser: S) -> Result<S::Ok, S::Error> {
+        ser.serialize_str(&self.0)
+    }
+}
+
+impl<'de> Deserialize<'de> for Name {
+    fn deserialize<D: Deserializer<'de>>(de: D) -> Result<Self, D::Error> {
+        struct NameVisitor;
+
+        impl<'de> Visitor<'de> for NameVisitor {
+            type Value = Name;
+
+            fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+                write!(f, "a non-empty ASCII or Unicode display name ≤ {} bytes", Name::MAX_LEN)
+            }
+
+            fn visit_str<E: DeError>(self, v: &str) -> Result<Self::Value, E> {
+                Name::parse(v.to_owned()).map_err(DeError::custom)
+            }
+
+            fn visit_string<E: DeError>(self, v: String) -> Result<Self::Value, E> {
+                Name::parse(v).map_err(DeError::custom)
+            }
+        }
+
+        de.deserialize_string(NameVisitor)
+    }
+}
+
+// ----------------------------------- SQLx --------------------------------------------------------
+
+// Blanket feature gate so the project can compile without the `sqlx` feature.
+#[cfg(feature = "sqlx")]
+mod sqlx_impls {
+    use super::*;
+    use sqlx::{
+        database::{HasArguments, HasValueRef},
+        encode::{Encode, IsNull},
+        error::BoxDynError,
+        decode::Decode,
+        types::Type,
+        Database,
+    };
+
+    impl<'q, DB> Encode<'q, DB> for Name
+    where
+        DB: Database,
+        String: Encode<'q, DB>,
+    {
+        fn encode_by_ref(&self, buf: &mut <DB as HasArguments<'q>>::ArgumentBuffer) -> IsNull {
+            self.to_string().encode_by_ref(buf)
+        }
+    }
+
+    impl<'r, DB> Decode<'r, DB> for Name
+    where
+        DB: Database,
+        <DB as HasValueRef<'r>>::ValueRef: sqlx::value::ValueRef,
+        String: Decode<'r, DB>,
+    {
+        fn decode(
+            value: <DB as HasValueRef<'r>>::ValueRef,
+        ) -> Result<Self, BoxDynError> {
+            let s: String = String::decode(value)?;
+            Name::parse(s).map_err(|e| e.into())
+        }
+    }
+
+    impl<DB> Type<DB> for Name
+    where
+        DB: Database,
+        String: Type<DB>,
+    {
+        fn type_info() -> DB::TypeInfo {
+            String::type_info()
+        }
+    }
+}
+
+// -------------------------------------------------------------------------------------------------
+// Error type
+// -------------------------------------------------------------------------------------------------
+
+/// Validation errors for [`Name`].
+#[derive(Debug, Error, Serialize)]
+pub enum NameError {
+    #[error("name must not be empty")]
+    Empty,
+    #[error("name exceeds {0} bytes", .0)]
+    TooLong,
+    #[error("name must not contain control characters")]
+    ContainsControlCharacter,
+    #[error("name must not contain newline characters")]
+    ContainsNewline,
+    #[error("name must not have leading or trailing whitespace")]
+    LeadingOrTrailingWhitespace,
+}
+
+impl actix_web::ResponseError for NameError {
+    fn status_code(&self) -> actix_web::http::StatusCode {
+        use actix_web::http::StatusCode::*;
+        match self {
+            NameError::Empty
+            | NameError::TooLong
+            | NameError::ContainsControlCharacter
+            | NameError::ContainsNewline
+            | NameError::LeadingOrTrailingWhitespace => BAD_REQUEST,
+        }
+    }
+}
+
+// -------------------------------------------------------------------------------------------------
+// Example REST endpoint (Actix)
+// -------------------------------------------------------------------------------------------------
+
+#[cfg(feature = "actix-endpoint")]
+pub mod endpoint {
+    use super::*;
+    use actix_web::{
+        post,
+        web::{self, Data, Json, Path},
+        HttpResponse, Result,
+    };
+    use sqlx::PgPool;
+
+    /// Payload used to update a user's display name.
+    #[derive(Deserialize)]
+    pub struct UpdateNamePayload {
+        pub name: Name,
+    }
+
+    /// Endpoint: `POST /api/users/{user_id}/name`
+    ///
+    /// Requires a valid bearer token (middleware enforced elsewhere).
+    /// Updates the user's display name, returning 200 with the new name.
+    #[post("/api/users/{user_id}/name")]
+    pub async fn update_name(
+        db: Data<PgPool>,
+        id: Path<Uuid>,
+        payload: Json<UpdateNamePayload>,
+    ) -> Result<HttpResponse> {
+        sqlx::query!(
+            r#"UPDATE users SET display_name = $1 WHERE id = $2"#,
+            payload.name.as_str(),
+            id.into_inner()
+        )
+        .execute(db.get_ref())
+        .await
+        .map_err(|e| {
+            log::error!("DB failure updating user {}: {:?}", id, e);
+            actix_web::error::ErrorInternalServerError("database error")
+        })?;
+
+        Ok(HttpResponse::Ok().json(&payload.0))
+    }
+}
+
+// -------------------------------------------------------------------------------------------------
+// Tests
+// -------------------------------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn valid_name_roundtrip() {
+        let raw = "Chromatic Canvas";
+        let name = Name::parse(raw).unwrap();
+        assert_eq!(name.as_str(), raw);
+        assert_eq!(name.to_string(), raw);
+    }
+
+    #[test]
+    fn rejects_large_name() {
+        let oversized = "x".repeat(Name::MAX_LEN + 1);
+        assert!(matches!(
+            Name::parse(oversized),
+            Err(NameError::TooLong)
+        ));
+    }
+
+    #[test]
+    fn slug_conversion() {
+        let name = Name::parse("My Awesome ART Piece!!").unwrap();
+        assert_eq!(name.slug(), "my-awesome-art-piece");
+    }
+}

@@ -1,0 +1,301 @@
+```rust
+//! Integration tests for the ChromaticCanvas Control Center (web_dashboard)
+//!
+//! These tests spin-up an in-memory Axum HTTP server that mimics a subset of the
+//! production REST API.  They exercise authentication middleware, session
+//! management, JSON (de)serialization, and robust error handling.  Everything is
+//! declared locally so that the file remains self-contained and green on CI
+//! even when the rest of the application is compiled with `--no-default-features`.
+
+use axum::{
+    async_trait,
+    extract::{Extension, FromRequestParts, Json},
+    http::{header, request::Parts, HeaderMap, HeaderValue, StatusCode},
+    response::{IntoResponse, Response},
+    routing::{get, post},
+    Router,
+};
+use cookie::{Cookie, CookieJar};
+use once_cell::sync::Lazy;
+use serde::{Deserialize, Serialize};
+use std::{
+    collections::HashMap,
+    net::SocketAddr,
+    sync::{Arc, Mutex},
+};
+use tokio::net::TcpListener;
+use tower_cookies::{CookieManagerLayer, Cookies};
+use uuid::Uuid;
+
+/// A thread-safe, shareable slice of application state that is light-weight
+/// enough to be embedded directly in integration tests.
+#[derive(Clone, Default)]
+struct AppState {
+    users: Arc<HashMap<String, String>>,      // `username -> password`
+    sessions: Arc<Mutex<HashMap<Uuid, String>>>, // `session_id -> username`
+}
+
+/// DTO for the JSON payload accepted by the `/auth/login` endpoint.
+#[derive(Deserialize)]
+struct LoginRequest {
+    username: String,
+    password: String,
+}
+
+/// DTO for the JSON payload returned by the `/auth/login` endpoint.
+#[derive(Serialize)]
+struct LoginResponse {
+    session_id: Uuid,
+}
+
+/// Custom error type for unified rejection handling.
+enum ApiError {
+    Unauthorized,
+    BadRequest(String),
+    Internal(String),
+}
+
+impl IntoResponse for ApiError {
+    fn into_response(self) -> Response {
+        match self {
+            ApiError::Unauthorized => (
+                StatusCode::UNAUTHORIZED,
+                Json(json!({ "error": "unauthorized" })),
+            )
+                .into_response(),
+            ApiError::BadRequest(msg) => (
+                StatusCode::BAD_REQUEST,
+                Json(json!({ "error": msg })),
+            )
+                .into_response(),
+            ApiError::Internal(msg) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": msg })),
+            )
+                .into_response(),
+        }
+    }
+}
+
+/// Extractor that ensures the caller is authenticated.
+/// Produces the associated username when successful.
+struct SessionUser(String);
+
+#[async_trait]
+impl<S> FromRequestParts<S> for SessionUser
+where
+    S: Send + Sync,
+{
+    type Rejection = ApiError;
+
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+        // Grab state
+        let Extension(app_state) = Extension::<AppState>::from_request_parts(parts, state)
+            .await
+            .map_err(|_| ApiError::Internal("failed to extract state".into()))?;
+
+        // Grab cookies
+        let cookies = Cookies::from_request_parts(parts, state)
+            .await
+            .map_err(|_| ApiError::Internal("failed to extract cookies".into()))?;
+
+        // Extract `session_id` cookie
+        let Some(cookie) = cookies.get("session_id") else {
+            return Err(ApiError::Unauthorized);
+        };
+
+        let Ok(session_id) = Uuid::parse_str(cookie.value()) else {
+            return Err(ApiError::BadRequest("malformed session id".into()));
+        };
+
+        // Validate session
+        let guard = app_state.sessions.lock().unwrap();
+        guard
+            .get(&session_id)
+            .cloned()
+            .map(SessionUser)
+            .ok_or(ApiError::Unauthorized)
+    }
+}
+
+/// Handler for `GET /dashboard`.
+async fn dashboard(SessionUser(username): SessionUser) -> impl IntoResponse {
+    Json(json!({
+        "message": "welcome back",
+        "user": username,
+        "widgets": [
+            "color_swatch",
+            "revenue_graph",
+            "live_timeline"
+        ]
+    }))
+}
+
+/// Handler for `POST /auth/login`.
+async fn login(
+    Extension(state): Extension<AppState>,
+    cookies: Cookies,
+    Json(payload): Json<LoginRequest>,
+) -> Result<impl IntoResponse, ApiError> {
+    // Validate credentials
+    let stored = state
+        .users
+        .get(&payload.username)
+        .ok_or(ApiError::Unauthorized)?;
+
+    if stored != &payload.password {
+        return Err(ApiError::Unauthorized);
+    }
+
+    // Create session
+    let session_id = Uuid::new_v4();
+    state
+        .sessions
+        .lock()
+        .unwrap()
+        .insert(session_id, payload.username);
+
+    // Set cookie
+    let mut cookie = Cookie::build("session_id", session_id.to_string())
+        .path("/")
+        .http_only(true)
+        .same_site(cookie::SameSite::Lax)
+        .finish();
+    cookies.add(cookie);
+
+    Ok((
+        StatusCode::OK,
+        Json(LoginResponse { session_id }),
+        [(
+            header::SET_COOKIE,
+            HeaderValue::from_str(&cookies
+                .get("session_id")
+                .expect("cookie must exist")
+                .to_string())
+            .unwrap(),
+        )],
+    ))
+}
+
+/// Spin-up a test instance of the app on a random TCP port.
+/// Returns the base URL and a graceful shutdown handle.
+async fn spawn_app() -> (String, tokio::sync::oneshot::Sender<()>) {
+    static USERS: Lazy<HashMap<String, String>> = Lazy::new(|| {
+        HashMap::from([("alice".into(), "hunter2".into())])
+    });
+
+    let app_state = AppState {
+        users: Arc::new(USERS.clone()),
+        ..Default::default()
+    };
+
+    let router = Router::new()
+        .route("/auth/login", post(login))
+        .route("/dashboard", get(dashboard))
+        .layer(Extension(app_state))
+        .layer(CookieManagerLayer::new());
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr: SocketAddr = listener.local_addr().unwrap();
+    let (tx, rx) = tokio::sync::oneshot::channel::<()>();
+
+    tokio::spawn(async move {
+        axum::Server::from_tcp(listener)
+            .unwrap()
+            .serve(router.into_make_service())
+            .with_graceful_shutdown(async {
+                rx.await.ok();
+            })
+            .await
+            .unwrap();
+    });
+
+    (format!("http://{}", addr), tx)
+}
+
+//
+// ---------------------------
+//           Tests
+// ---------------------------
+//
+
+#[tokio::test]
+async fn unauthorized_dashboard_access_is_rejected() {
+    let (base, shutdown) = spawn_app().await;
+    let client = reqwest::Client::new();
+
+    let res = client.get(format!("{base}/dashboard")).send().await.unwrap();
+    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+
+    // Clean up
+    shutdown.send(()).ok();
+}
+
+#[tokio::test]
+async fn login_establishes_session_and_allows_dashboard_access() {
+    let (base, shutdown) = spawn_app().await;
+    let client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .cookie_store(true)
+        .build()
+        .unwrap();
+
+    // Attempt login
+    let res = client
+        .post(format!("{base}/auth/login"))
+        .json(&LoginRequest {
+            username: "alice".into(),
+            password: "hunter2".into(),
+        })
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), StatusCode::OK);
+
+    // The cookie jar inside the client should now contain `session_id`.
+    let cookies: Vec<_> = client
+        .cookie_store()
+        .unwrap()
+        .cookies(&reqwest::Url::parse(&base).unwrap())
+        .collect();
+
+    assert!(
+        cookies.iter().any(|c| c.name() == "session_id"),
+        "No session_id cookie set"
+    );
+
+    // Access dashboard
+    let res = client
+        .get(format!("{base}/dashboard"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+
+    let payload: serde_json::Value = res.json().await.unwrap();
+    assert_eq!(payload["user"], "alice");
+
+    // Clean up
+    shutdown.send(()).ok();
+}
+
+#[tokio::test]
+async fn login_fails_with_invalid_credentials() {
+    let (base, shutdown) = spawn_app().await;
+    let client = reqwest::Client::new();
+
+    let res = client
+        .post(format!("{base}/auth/login"))
+        .json(&LoginRequest {
+            username: "alice".into(),
+            password: "wrong_password".into(),
+        })
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+    shutdown.send(()).ok();
+}
+```

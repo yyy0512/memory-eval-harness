@@ -1,0 +1,386 @@
+```rust
+//! src/module_37.rs
+//! -----------------------------------------------------------------------------
+//! Session & SSL-aware authentication middleware for ChromaticCanvas Control
+//! Center. This module focuses on generating, signing, and validating secure
+//! session tokens. It is designed as an Actix-web middleware that can be
+//! mounted into the service layer.
+//!
+//! Highlights
+//! ----------
+//! 1. HMAC-SHA256 signing for tamper-proof cookies.
+//! 2. Pluggable `SessionStore` abstraction (in-memory by default, ready for
+//!    Redis / SQL back-ends).
+//! 3. Rotating session keys (opt-in), configurable TTL, and sliding
+//!    expiration.
+//! 4. Idiomatic error handling and tracing instrumentation.
+//!
+//! NOTE: All cryptographic operations rely on the `ring` crate, while async
+//! traits are powered by `async_trait`.
+//! -----------------------------------------------------------------------------
+
+use actix_web::{
+    body::MessageBody,
+    dev::{forward_ready, Service, ServiceRequest, ServiceResponse, Transform},
+    error::ErrorUnauthorized,
+    http::{header, HeaderValue},
+    Error, HttpMessage,
+};
+use async_trait::async_trait;
+use chrono::{DateTime, Duration, Utc};
+use dashmap::DashMap;
+use futures_util::future::{ok, LocalBoxFuture, Ready};
+use ring::{hmac, rand::{SecureRandom, SystemRandom}};
+use serde::{Deserialize, Serialize};
+use std::{fmt, rc::Rc, sync::Arc, task::{Context, Poll}};
+use thiserror::Error;
+use uuid::Uuid;
+
+/// Name of the session cookie (`__Host-` prefix to enforce Secure + sameSite)
+pub const SESSION_COOKIE_NAME: &str = "__Host-cc_session";
+
+/// Key length for HMAC-SHA256 (256 bits)
+pub const SESSION_KEY_LEN: usize = 32;
+
+/// Default session time-to-live (hours)
+pub const DEFAULT_TTL_HOURS: i64 = 8;
+
+/// ----------------------------------------------------------------------------
+/// Session Token
+/// ----------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionToken {
+    pub id: Uuid,
+    pub user_id: Uuid,
+    pub iat: DateTime<Utc>,
+    pub exp: DateTime<Utc>,
+}
+
+impl SessionToken {
+    /// Create a new token with the chosen TTL (in hours).
+    pub fn new(user_id: Uuid, ttl_hours: i64) -> Self {
+        let now = Utc::now();
+        Self {
+            id: Uuid::new_v4(),
+            user_id,
+            iat: now,
+            exp: now + Duration::hours(ttl_hours),
+        }
+    }
+
+    /// Check whether the token is expired.
+    pub fn is_expired(&self) -> bool {
+        Utc::now() > self.exp
+    }
+}
+
+/// ----------------------------------------------------------------------------
+/// Signing & Verification
+/// ----------------------------------------------------------------------------
+
+#[derive(Debug, Clone)]
+pub struct SigningKey(hmac::Key);
+
+impl SigningKey {
+    pub fn new(secret: &[u8]) -> Self {
+        Self(hmac::Key::new(hmac::HMAC_SHA256, secret))
+    }
+
+    pub fn sign(&self, data: &[u8]) -> Vec<u8> {
+        hmac::sign(&self.0, data).as_ref().to_vec()
+    }
+
+    pub fn verify(&self, data: &[u8], signature: &[u8]) -> bool {
+        hmac::verify(&self.0, data, signature).is_ok()
+    }
+}
+
+/// Generate a random signing secret suitable for `SigningKey`.
+pub fn generate_secret() -> Vec<u8> {
+    let rng = SystemRandom::new();
+    let mut key = vec![0u8; SESSION_KEY_LEN];
+    rng.fill(&mut key).expect("rng failure");
+    key
+}
+
+/// ----------------------------------------------------------------------------
+/// Storage Abstraction
+/// ----------------------------------------------------------------------------
+
+#[derive(Debug, Error)]
+pub enum SessionError {
+    #[error("session not found")]
+    NotFound,
+    #[error("session expired")]
+    Expired,
+    #[error("session tampered")]
+    InvalidSignature,
+    #[error("underlying storage error: {0}")]
+    Storage(String),
+}
+
+#[async_trait]
+pub trait SessionStore: Send + Sync + 'static {
+    async fn insert(&self, token: SessionToken) -> Result<(), SessionError>;
+    async fn get(&self, id: &Uuid) -> Result<SessionToken, SessionError>;
+    async fn remove(&self, id: &Uuid) -> Result<(), SessionError>;
+}
+
+/// A simple, non-persistent in-memory store for dev / unit tests.
+#[derive(Default)]
+pub struct InMemoryStore {
+    inner: DashMap<Uuid, SessionToken>,
+}
+
+#[async_trait]
+impl SessionStore for InMemoryStore {
+    async fn insert(&self, token: SessionToken) -> Result<(), SessionError> {
+        self.inner.insert(token.id, token);
+        Ok(())
+    }
+
+    async fn get(&self, id: &Uuid) -> Result<SessionToken, SessionError> {
+        self.inner
+            .get(id)
+            .map(|r| r.value().clone())
+            .ok_or(SessionError::NotFound)
+    }
+
+    async fn remove(&self, id: &Uuid) -> Result<(), SessionError> {
+        self.inner.remove(id);
+        Ok(())
+    }
+}
+
+/// ----------------------------------------------------------------------------
+/// Actix-web Middleware
+/// ----------------------------------------------------------------------------
+
+/// Configuration parameters for `SessionMiddleware`.
+#[derive(Clone)]
+pub struct SessionConfig {
+    pub ttl_hours: i64,
+    pub sliding_exp: bool,
+}
+
+impl Default for SessionConfig {
+    fn default() -> Self {
+        Self {
+            ttl_hours: DEFAULT_TTL_HOURS,
+            sliding_exp: true,
+        }
+    }
+}
+
+/// The middleware is generic over the store implementation.
+pub struct SessionMiddleware<S> {
+    service: Rc<S>,
+    store: Arc<dyn SessionStore>,
+    signing_key: SigningKey,
+    config: SessionConfig,
+}
+
+impl<S, B> Transform<S, ServiceRequest> for SessionMiddleware<S>
+where
+    S: Service<ServiceRequest, Response = ServiceResponse<B>, Error = Error> + 'static,
+    B: MessageBody + 'static,
+{
+    type Response = ServiceResponse<B>;
+    type Error = Error;
+    type InitError = ();
+    type Transform = SessionMiddleware<S>;
+    type Future = Ready<Result<Self::Transform, Self::InitError>>;
+
+    fn new_transform(&self, service: S) -> Self::Future {
+        ok(SessionMiddleware {
+            service: Rc::new(service),
+            store: Arc::clone(&self.store),
+            signing_key: self.signing_key.clone(),
+            config: self.config.clone(),
+        })
+    }
+}
+
+impl<S, B> Service<ServiceRequest> for SessionMiddleware<S>
+where
+    S: Service<ServiceRequest, Response = ServiceResponse<B>, Error = Error> + 'static,
+    B: MessageBody + 'static,
+{
+    type Response = ServiceResponse<B>;
+    type Error = Error;
+    type Future = LocalBoxFuture<'static, Result<Self::Response, Self::Error>>;
+
+    forward_ready!(service);
+
+    fn call(&self, mut req: ServiceRequest) -> Self::Future {
+        // Clone arcs for async move
+        let store = Arc::clone(&self.store);
+        let signing_key = self.signing_key.clone();
+        let config = self.config.clone();
+        let svc = Rc::clone(&self.service);
+
+        Box::pin(async move {
+            // Attempt to extract and validate session.
+            if let Some(cookie) = req.cookie(SESSION_COOKIE_NAME) {
+                match validate_cookie(cookie.value(), &signing_key, &store).await {
+                    Ok(mut token) => {
+                        // Attach user_id to request extensions for downstream extraction.
+                        req.extensions_mut().insert(token.user_id);
+
+                        // If sliding expiration is enabled, refresh.
+                        if config.sliding_exp {
+                            token.exp = Utc::now() + Duration::hours(config.ttl_hours);
+                            store
+                                .insert(token.clone())
+                                .await
+                                .map_err(|e| ErrorUnauthorized(e.to_string()))?;
+
+                            let header_val = build_cookie(&token, &signing_key, config.ttl_hours)?;
+                            req.headers_mut().append(
+                                header::SET_COOKIE,
+                                header_val.parse().unwrap(),
+                            );
+                        }
+                    }
+                    Err(SessionError::Expired) => {
+                        // Remove expired cookie from client
+                        let mut expired = actix_web::cookie::Cookie::named(SESSION_COOKIE_NAME);
+                        expired.make_removal();
+                        req.headers_mut().append(
+                            header::SET_COOKIE,
+                            HeaderValue::from_str(&expired.to_string()).unwrap(),
+                        );
+                        // Continue without user id (anonymous)
+                    }
+                    Err(_) => {
+                        // Tampered or not found: deny access for protected endpoints
+                        return Err(ErrorUnauthorized("Invalid session"));
+                    }
+                }
+            }
+
+            // Proceed down the service stack.
+            let res = svc.call(req).await?;
+
+            Ok(res)
+        })
+    }
+}
+
+/// Validate cookie, returns token if success.
+async fn validate_cookie(
+    value: &str,
+    key: &SigningKey,
+    store: &Arc<dyn SessionStore>,
+) -> Result<SessionToken, SessionError> {
+    // Format: "<uuid>|<signature_base64>"
+    let mut split = value.splitn(2, '|');
+    let id_part = split.next().ok_or(SessionError::InvalidSignature)?;
+    let sig_part = split.next().ok_or(SessionError::InvalidSignature)?;
+    let id = Uuid::parse_str(id_part).map_err(|_| SessionError::InvalidSignature)?;
+    let sig = base64::decode(sig_part).map_err(|_| SessionError::InvalidSignature)?;
+
+    // Verify integrity
+    if !key.verify(id_part.as_bytes(), &sig) {
+        return Err(SessionError::InvalidSignature);
+    }
+
+    // Load from store
+    let token = store.get(&id).await?;
+    if token.is_expired() {
+        // Clean up
+        store.remove(&id).await.ok();
+        return Err(SessionError::Expired);
+    }
+    Ok(token)
+}
+
+/// Build a `SET_COOKIE` header value for the given token.
+fn build_cookie(
+    token: &SessionToken,
+    key: &SigningKey,
+    ttl_hours: i64,
+) -> Result<String, fmt::Error> {
+    let signature = key.sign(token.id.to_string().as_bytes());
+    let signature_b64 = base64::encode(signature);
+    let cookie_val = format!("{}|{}", token.id, signature_b64);
+
+    let mut cookie = actix_web::cookie::Cookie::build(SESSION_COOKIE_NAME, cookie_val)
+        .path("/")
+        .secure(true)
+        .http_only(true)
+        .same_site(actix_web::cookie::SameSite::Strict)
+        .max_age(time::Duration::hours(ttl_hours))
+        .finish();
+
+    Ok(cookie.to_string())
+}
+
+/// ----------------------------------------------------------------------------
+/// Public helpers for login / logout flows
+/// ----------------------------------------------------------------------------
+
+/// Create a new session for `user_id` and return a `SET_COOKIE` header value.
+pub async fn create_session_header(
+    user_id: Uuid,
+    store: Arc<dyn SessionStore>,
+    signing_key: SigningKey,
+    config: SessionConfig,
+) -> Result<String, SessionError> {
+    let token = SessionToken::new(user_id, config.ttl_hours);
+    store.insert(token.clone()).await?;
+    build_cookie(&token, &signing_key, config.ttl_hours).map_err(|e| SessionError::Storage(e.to_string()))
+}
+
+/// Destroy an existing session & produce removal cookie.
+pub async fn destroy_session_header(
+    cookie_val: &str,
+    store: Arc<dyn SessionStore>,
+    signing_key: SigningKey,
+) -> Result<String, SessionError> {
+    let token = validate_cookie(cookie_val, &signing_key, &store).await?;
+    store.remove(&token.id).await?;
+
+    let mut expired = actix_web::cookie::Cookie::named(SESSION_COOKIE_NAME);
+    expired.make_removal();
+    Ok(expired.to_string())
+}
+
+/// ----------------------------------------------------------------------------
+/// Tests
+/// ----------------------------------------------------------------------------
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use actix_web::test;
+
+    #[actix_rt::test]
+    async fn roundtrip_session_cookie() {
+        let store = Arc::new(InMemoryStore::default());
+        let secret = generate_secret();
+        let key = SigningKey::new(&secret);
+        let cfg = SessionConfig::default();
+        let user_id = Uuid::new_v4();
+
+        let set_cookie = create_session_header(user_id, store.clone(), key.clone(), cfg.clone())
+            .await
+            .expect("create");
+
+        // Simulate browser sending cookie back.
+        let value = actix_web::cookie::Cookie::parse(set_cookie)
+            .unwrap()
+            .value()
+            .to_string();
+
+        let token = validate_cookie(&value, &key, &store).await.expect("validate");
+        assert_eq!(token.user_id, user_id);
+
+        // Destroy
+        let destroy_val = destroy_session_header(&value, store.clone(), key.clone())
+            .await
+            .expect("destroy");
+        assert!(destroy_val.contains("Max-Age=0"));
+    }
+}
+```

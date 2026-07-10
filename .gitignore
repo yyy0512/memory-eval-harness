@@ -77,6 +77,18 @@ credentials.env
 output/
 results/
 reports/
+runs/
+
+# Raw/generated memory-eval inputs and local archives
+*.zip
+*.tar.gz
+memory_eval_v*_data/
+prepared/*inputs*/
+prepared/_*/
+prepared/memory_eval_*_contracts*/
+prepared/memory_eval_go_*/
+prepared/memory_eval_strict_baseline_1_20260709/
+prepared/memory_eval_strict_baseline_1_req_*/
 
 # Cache
 .cache/
@@ -91,3 +103,8 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 temp/
+
+# Versioned strict memory-eval datasets are self-contained and intentionally committed.
+!prepared/
+!prepared/memory_eval_strict_baseline_*/
+!prepared/memory_eval_strict_baseline_*/**

@@ -1,0 +1,47 @@
+{
+  "scenario_id": "typescript_ml_inference_expert_016_multi_session_development_medium_01",
+  "case_id": "typescript_ml_inference_expert_016",
+  "category": "extended_development_projects",
+  "original_task_category": "multi_session_development",
+  "project_source": "cases/typescript_ml_inference_expert_016_multi_session_development_medium_01/project",
+  "project_name": "InsightHexaAI: Strategic ML Inference Suite for Enterprise KPIs",
+  "language": "typescript",
+  "complexity": "expert",
+  "session_count": 3,
+  "turns": [
+    {
+      "session": 1,
+      "file": "turns/session_1.jsonl",
+      "turn_count": 2
+    },
+    {
+      "session": 2,
+      "file": "turns/session_2.jsonl",
+      "turn_count": 1
+    },
+    {
+      "session": 3,
+      "file": "turns/session_3.jsonl",
+      "turn_count": 1
+    }
+  ],
+  "prompts_for_review": [
+    {
+      "session": 1,
+      "file": "prompts/session_1.txt"
+    },
+    {
+      "session": 2,
+      "file": "prompts/session_2.txt"
+    },
+    {
+      "session": 3,
+      "file": "prompts/session_3.txt"
+    }
+  ],
+  "hashes": {
+    "scenario_json_sha256": "5fac3345bbd7d83f4afdcc5103bac6212a71a7c444c71260dd558c2e25fa799b",
+    "project_tree_sha256": "38830021a350e5add3e4fcbb9b01b3307798c627f2f7162e984c64ffffca9f9b",
+    "prepared_case_sha256": "92073ff3b82f2428058e199e65c5d0268d78e66e395413c95ca7413c75404b2e"
+  }
+}

@@ -1,0 +1,375 @@
+```rust
+//! src/module_19.rs
+//!
+//! AI-driven Color-Scheme suggestion service with
+//! – in-memory TTL cache  
+//! – rich error handling  
+//! – Axum endpoint (GET /api/color-schemes)  
+//!
+//! This module can be mounted inside the ChromaticCanvas service layer
+//! without touching the rest of the dashboard.
+
+use std::{
+    collections::hash_map::DefaultHasher,
+    hash::{Hash, Hasher},
+    sync::Arc,
+    time::Duration,
+};
+
+use axum::{
+    extract::{Query, State},
+    http::StatusCode,
+    response::{IntoResponse, Response},
+    routing::get,
+    Json, Router,
+};
+use chrono::Utc;
+use dashmap::DashMap;
+use reqwest::Client;
+use serde::{Deserialize, Serialize};
+use serde_json::json;
+use thiserror::Error;
+use tokio::{
+    spawn,
+    time::{interval, Instant},
+};
+use tracing::{error, info, instrument};
+
+/// Typed Result alias.
+type Result<T> = std::result::Result<T, ServiceError>;
+
+/* --------------------------------------------------------------------- */
+/* Domain types                                                          */
+/* --------------------------------------------------------------------- */
+
+/// HEX color + optional human-readable name.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Color {
+    /// `#RRGGBB`
+    pub hex: String,
+    pub name: Option<String>,
+}
+
+/// Full scheme returned to the caller.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ColorScheme {
+    pub id: u64,
+    pub primary: Color,
+    pub palette: Vec<Color>,
+    pub generated_at: chrono::DateTime<Utc>,
+}
+
+/* --------------------------------------------------------------------- */
+/* Request query                                                         */
+/* --------------------------------------------------------------------- */
+
+#[derive(Debug, Clone, Deserialize, Hash)]
+pub struct SchemeQuery {
+    /// E.g. `"sunset", "cyberpunk"`
+    pub keywords: Option<String>,
+    /// Optional base color (`#RRGGBB`)
+    pub base: Option<String>,
+    /// If true, ignore cache and call upstream.
+    pub refresh: Option<bool>,
+}
+
+/* --------------------------------------------------------------------- */
+/* Error handling                                                        */
+/* --------------------------------------------------------------------- */
+
+#[derive(Debug, Error)]
+pub enum ServiceError {
+    #[error("invalid_parameter: {0}")]
+    InvalidParameter(String),
+
+    #[error("upstream_error: {0}")]
+    Upstream(String),
+
+    #[error("internal_error")]
+    Internal(#[from] anyhow::Error),
+}
+
+impl IntoResponse for ServiceError {
+    fn into_response(self) -> Response {
+        let (status, body) = match self {
+            ServiceError::InvalidParameter(msg) => (StatusCode::BAD_REQUEST, msg),
+            ServiceError::Upstream(msg) => (StatusCode::BAD_GATEWAY, msg),
+            ServiceError::Internal(err) => {
+                error!(error = ?err, "internal error");
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    String::from("internal_server_error"),
+                )
+            }
+        };
+
+        (status, Json(json!({ "error": body }))).into_response()
+    }
+}
+
+/* --------------------------------------------------------------------- */
+/* Generic memory cache with TTL                                         */
+/* --------------------------------------------------------------------- */
+
+#[derive(Clone)]
+struct Cached<T> {
+    value: T,
+    expires_at: Instant,
+}
+
+#[derive(Clone)]
+struct MemoryCache<K, V> {
+    store: Arc<DashMap<K, Cached<V>>>,
+    ttl: Duration,
+}
+
+impl<K, V> MemoryCache<K, V>
+where
+    K: Eq + Hash + Clone + Send + Sync + 'static,
+    V: Clone + Send + Sync + 'static,
+{
+    fn new(ttl: Duration) -> Self {
+        let me = Self {
+            store: Arc::new(DashMap::new()),
+            ttl,
+        };
+        me.spawn_cleanup_task();
+        me
+    }
+
+    fn spawn_cleanup_task(&self) {
+        let store = self.store.clone();
+        let ttl = self.ttl;
+        spawn(async move {
+            let mut ticker = interval(ttl);
+            loop {
+                ticker.tick().await;
+                let now = Instant::now();
+                store.retain(|_, v| v.expires_at > now);
+            }
+        });
+    }
+
+    fn get(&self, key: &K) -> Option<V> {
+        self.store.get(key).and_then(|c| {
+            if c.expires_at > Instant::now() {
+                Some(c.value.clone())
+            } else {
+                None
+            }
+        })
+    }
+
+    fn put(&self, key: K, value: V) {
+        self.store.insert(
+            key,
+            Cached {
+                value,
+                expires_at: Instant::now() + self.ttl,
+            },
+        );
+    }
+}
+
+/* --------------------------------------------------------------------- */
+/* Service trait                                                         */
+/* --------------------------------------------------------------------- */
+
+#[async_trait::async_trait]
+pub trait ColorSchemeService: Send + Sync {
+    async fn suggest(&self, query: &SchemeQuery) -> Result<ColorScheme>;
+}
+
+/* --------------------------------------------------------------------- */
+/* Real AI implementation                                                */
+/* --------------------------------------------------------------------- */
+
+#[derive(Clone)]
+pub struct AiColorSchemeService {
+    client: Client,
+    endpoint: String,
+    api_key: String,
+    cache: MemoryCache<u64, ColorScheme>,
+}
+
+impl AiColorSchemeService {
+    pub fn new(endpoint: impl Into<String>, api_key: impl Into<String>, ttl: Duration) -> Self {
+        Self {
+            client: Client::builder()
+                .user_agent("ChromaticCanvas/1.0")
+                .timeout(Duration::from_secs(10))
+                .build()
+                .expect("create reqwest client"),
+            endpoint: endpoint.into(),
+            api_key: api_key.into(),
+            cache: MemoryCache::new(ttl),
+        }
+    }
+
+    fn query_hash(q: &SchemeQuery) -> u64 {
+        let mut h = DefaultHasher::new();
+        q.hash(&mut h);
+        h.finish()
+    }
+
+    fn validate(q: &SchemeQuery) -> Result<()> {
+        if let Some(base) = &q.base {
+            let valid = base.starts_with('#') && base.len() == 7 && u32::from_str_radix(&base[1..], 16).is_ok();
+            if !valid {
+                return Err(ServiceError::InvalidParameter(
+                    "base must be #RRGGBB".into(),
+                ));
+            }
+        }
+        Ok(())
+    }
+}
+
+#[async_trait::async_trait]
+impl ColorSchemeService for AiColorSchemeService {
+    #[instrument(skip(self, query))]
+    async fn suggest(&self, query: &SchemeQuery) -> Result<ColorScheme> {
+        Self::validate(query)?;
+
+        let key = Self::query_hash(query);
+        let bypass_cache = query.refresh.unwrap_or(false);
+
+        if !bypass_cache {
+            if let Some(scheme) = self.cache.get(&key) {
+                info!("cache hit");
+                return Ok(scheme);
+            }
+        }
+
+        // Build upstream payload.
+        #[derive(Serialize)]
+        struct Payload<'a> {
+            keywords: &'a Option<String>,
+            base: &'a Option<String>,
+        }
+
+        let upstream_resp = self
+            .client
+            .post(&self.endpoint)
+            .header("X-API-KEY", &self.api_key)
+            .json(&Payload {
+                keywords: &query.keywords,
+                base: &query.base,
+            })
+            .send()
+            .await
+            .map_err(|e| ServiceError::Upstream(format!("upstream connection failed: {e}")))?;
+
+        if !upstream_resp.status().is_success() {
+            return Err(ServiceError::Upstream(format!(
+                "upstream status {}",
+                upstream_resp.status()
+            )));
+        }
+
+        #[derive(Deserialize)]
+        struct UpstreamColor {
+            hex: String,
+            name: Option<String>,
+        }
+        #[derive(Deserialize)]
+        struct UpstreamSchema {
+            primary: UpstreamColor,
+            palette: Vec<UpstreamColor>,
+        }
+
+        let decoded: UpstreamSchema = upstream_resp
+            .json()
+            .await
+            .map_err(|e| ServiceError::Upstream(format!("upstream JSON error: {e}")))?;
+
+        let scheme = ColorScheme {
+            id: key,
+            primary: Color {
+                hex: decoded.primary.hex,
+                name: decoded.primary.name,
+            },
+            palette: decoded
+                .palette
+                .into_iter()
+                .map(|c| Color { hex: c.hex, name: c.name })
+                .collect(),
+            generated_at: Utc::now(),
+        };
+
+        self.cache.put(key, scheme.clone());
+        Ok(scheme)
+    }
+}
+
+/* --------------------------------------------------------------------- */
+/* Axum wiring                                                           */
+/* --------------------------------------------------------------------- */
+
+#[derive(Clone)]
+pub struct AppState {
+    inner: Arc<dyn ColorSchemeService>,
+}
+
+pub fn router(service: Arc<dyn ColorSchemeService>) -> Router {
+    Router::new()
+        .route("/api/color-schemes", get(get_color_scheme))
+        .with_state(AppState { inner: service })
+}
+
+#[instrument(skip(state))]
+async fn get_color_scheme(
+    State(state): State<AppState>,
+    Query(query): Query<SchemeQuery>,
+) -> Result<Json<ColorScheme>> {
+    let scheme = state.inner.suggest(&query).await?;
+    Ok(Json(scheme))
+}
+
+/* --------------------------------------------------------------------- */
+/* Tests                                                                 */
+/* --------------------------------------------------------------------- */
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::time::{sleep, Duration};
+
+    struct MockService;
+
+    #[async_trait::async_trait]
+    impl ColorSchemeService for MockService {
+        async fn suggest(&self, _query: &SchemeQuery) -> Result<ColorScheme> {
+            Ok(ColorScheme {
+                id: 1,
+                primary: Color {
+                    hex: "#000000".into(),
+                    name: Some("black".into()),
+                },
+                palette: vec![],
+                generated_at: Utc::now(),
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn cache_expires() {
+        let cache: MemoryCache<u64, i32> = MemoryCache::new(Duration::from_millis(50));
+        cache.put(42, 99);
+        assert_eq!(cache.get(&42), Some(99));
+        sleep(Duration::from_millis(60)).await;
+        assert_eq!(cache.get(&42), None);
+    }
+
+    #[tokio::test]
+    async fn validation_fails_for_bad_hex() {
+        let query = SchemeQuery {
+            keywords: None,
+            base: Some("bad".into()),
+            refresh: None,
+        };
+        let svc = AiColorSchemeService::new("http://localhost", "k", Duration::from_secs(1));
+        assert!(matches!(svc.suggest(&query).await.unwrap_err(), ServiceError::InvalidParameter(_)));
+    }
+}
+```

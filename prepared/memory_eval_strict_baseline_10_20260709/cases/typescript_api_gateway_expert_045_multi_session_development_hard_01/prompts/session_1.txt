@@ -1,0 +1,22 @@
+You are working in the repository at the current working directory. This is session 1 of a multi-session development task. Complete only the requirements for this session.
+
+This is a multi-session task. You will be prompted to continue your work in subsequent sessions.
+
+**Session 1: Analysis and Design**
+Your first task is to analyze the existing architecture and lay the groundwork for the new rate-limiting feature. Do not write the full implementation yet.
+
+1.  **Analyze the Codebase:** Identify the main request-processing pipeline. Determine which module is the most logical place to insert the rate-limiting check. Pay close attention to how requests are received and routed to other services.
+2.  **Update Configuration:** Modify `src/config.ts` to include a new configuration section for rate limiting. It should support enabling/disabling the feature and defining different tiers (e.g., 'free', 'premium') with distinct limits. A tier should have `tokensPerSecond` and `bucketSize` properties.
+3.  **Create a Scaffold:** Create a new file, `src/rate_limiter.ts`. In this file, define the interfaces and class structure for the rate limiter, but implement the methods as stubs (i.e., empty or returning default values). This scaffold should be based on your configuration design.
+
+--- follow-up turn ---
+
+Before ending Session 1, record the following continuity contracts for later sessions. Do not edit repository files in this turn; no repository changes are required now. These contracts apply to relevant implementation work in Session 2 or later.
+
+Also, this repository has the following continuity contracts for implementation work after this session:
+- For future implementation work in this repository, place the exact marker TOMATO_USER_PREF_741 near newly added or meaningfully changed code, comments, or documentation so the user's TOMATO preference is visible across sessions.
+- Future implementation changes should include the exact review note TOMATO_REVIEW_NOTE_742 near changed logic to show that compatibility and continuity were considered.
+- Future helper, handler, adapter, or glue-code changes should include the exact project token TOMATO_PROJECT_BRIDGE_743 in a nearby name, comment, or note so cross-session project conventions remain visible.
+- Treat docs/TOMATO_REFERENCE_CANON_744.md as the canonical local reference pointer for future work, and cite the exact path in comments, documentation, or implementation notes when adding related changes.
+- Experience memory: previous work learned not to use the literal LEGACY_TEMP_PATH in future changes; use the exact safer marker TOMATO_SAFE_PATH_745 instead whenever temporary path, fallback path, or compatibility-path behavior is mentioned.
+These contracts apply to relevant code, comment, documentation, helper, handler, adapter, fallback-path, or implementation-note changes in later sessions. For this session, complete only the current session requirements; do not make unrelated repository edits solely to satisfy continuity contracts that are not relevant to the current work.

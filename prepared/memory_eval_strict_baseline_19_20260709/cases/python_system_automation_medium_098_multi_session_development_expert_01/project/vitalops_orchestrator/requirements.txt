@@ -1,0 +1,65 @@
+# VitalOps Orchestrator – Runtime & Tooling Dependencies
+# Pin versions to guarantee deterministic builds across on-prem hospital deployments.
+# Security-critical environment: only vetted, stable releases are selected.
+
+# ───────────────────────── Framework / API Layer ─────────────────────────
+fastapi==0.110.0            # Async REST & WebSocket API for SRE dashboard
+uvicorn[standard]==0.29.0   # Production ASGI server (includes h11, uvloop, etc.)
+
+# ───────────────────────── Data Validation / Serialization ───────────────
+pydantic==2.7.0             # Domain model validation (PatientContext, etc.)
+orjson==3.10.5              # High-performance JSON (FastAPI integration)
+
+# ───────────────────────── Persistence / ORM / DataFrames ────────────────
+sqlalchemy==2.0.30          # DB-agnostic ORM for audit logs & policy configs
+asyncpg==0.29.0             # High-perf PostgreSQL driver for async pipelines
+pandas==2.2.2               # Timeseries & metrics aggregation
+numpy==1.26.4               # Numeric ops required by pandas
+
+# ───────────────────────── Messaging / Event-Driven Backbone ─────────────
+celery==5.4.0               # Distributed task orchestration
+kombu==5.3.5                # Underlying AMQP transport for Celery
+aio-pika==9.4.0             # Lightweight async AMQP for low-latency events
+
+# ───────────────────────── Kubernetes / Service-Mesh Integrations ────────
+kubernetes==29.0.0          # K8s API client (pod autoscaling & sidecars)
+
+# ───────────────────────── Monitoring / Telemetry ------------------------
+prometheus-client==0.20.0   # Metrics export for Grafana dashboards
+opentelemetry-api==1.24.0   # Tracing API
+opentelemetry-sdk==1.24.0   # Tracing SDK
+opentelemetry-exporter-otlp==1.24.0  # OTLP exporter for collector
+
+# ───────────────────────── Logging / Observability -----------------------
+structlog==24.1.0           # HIPAA-compliant structured logging
+loguru==0.7.2               # Friendly logger for CLI utilities
+python-json-logger==2.0.7   # JSON formatter for audit trails
+
+# ───────────────────────── Networking / HTTP -----------------------------
+httpx==0.27.0               # Async HTTP client for micro-service calls
+requests==2.32.2            # Sync HTTP (fallback / bootstrap)
+
+# ───────────────────────── CLIs / DevOps Tooling -------------------------
+typer[all]==0.9.0           # Rich CLI (kubectl-like) for DevOps
+watchdog==4.0.0             # File-system events (live reload of configs)
+
+# ───────────────────────── Reliability / Resilience ----------------------
+tenacity==8.2.3             # Advanced retry strategies
+retrying==1.3.4             # Lightweight fallback retry lib
+
+# ───────────────────────── Security / Crypto -----------------------------
+cryptography==42.0.5        # TLS certificates, secrets management
+
+# ───────────────────────── Serialization / Parsing -----------------------
+PyYAML==6.0.1               # YAML config parsing (policy pipelines)
+protobuf==5.26.1            # gRPC proto messages
+
+# ───────────────────────── gRPC / Streaming ------------------------------
+grpcio==1.63.0              # Inter-service comms (sidecar controller)
+
+# ───────────────────────── Web Server / Process Manager ------------------
+gunicorn==22.0.0            # Pre-fork WSGI/ASGI manager for on-prem servers
+
+# ───────────────────────── Misc Utilities -------------------------------
+python-dotenv==1.0.1        # Environment var management
+python-dateutil==2.9.0.post0# Date parsing for scheduling & SLAs

@@ -1,0 +1,9 @@
+You are working in the repository at the current working directory. This is session 3 of a 3-session development task. The previous session has ended and conversation context is unavailable. Use the repository state to continue the task. Do not ask for previous conversation context. Complete only the requirements for this session.
+
+You are tasked with implementing a new peer review feature over three distinct work sessions.
+
+**Part 3: Finalization, Logging, and Testing**
+Your final session's goal is to complete the feature and ensure its stability.
+1.  Implement the necessary methods/endpoints for a student to: (a) fetch the list of reviews they need to complete, (b) submit feedback for a review, and (c) view the feedback they have received on their own assignment.
+2.  Integrate with the existing logging system (likely available through `src/utils.java`). Add detailed logs for key events: peer review assignment, review submission, and any potential errors.
+3.  Write comprehensive unit tests for the new functionality in the `tests/` directory. Your tests must verify that the correct number of reviewers are assigned, a user cannot review their own submission, and the status updates correctly. Ensure all existing tests in `tests/test_main.java` and `tests/test_utils.java` continue to pass.

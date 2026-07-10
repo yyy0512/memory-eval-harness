@@ -1,0 +1,323 @@
+{
+  "scenario_id": "java_web_social_medium_073_multi_session_development_hard_01",
+  "ground_truth": "The final solution should contain these key changes:\n\n-   **`src/config.java`**: A new line is added: `public static final int PEER_REVIEWS_PER_ASSIGNMENT = 3;`\n-   **New File `src/PeerReview.java` (or equivalent structure)**: A new class `PeerReview` is defined, containing fields for tracking the review's state, participants, and content.\n-   **`src/module_4.java`**: \n    -   The `Assignment` class is modified to include a `List<PeerReview>`.\n    -   The primary assignment submission method is appended with a call to a new, private `assignPeerReviews` method.\n    -   The `assignPeerReviews` method contains the logic for randomly selecting peers (by calling `module_8`) and creating `PeerReview` objects.\n    -   It calls the notification service in `module_7` for each assignment.\n    -   New public methods are added to manage the lifecycle of a review (submission, retrieval).\n-   **`tests/test_main.java` (or a new test file)**: New `@Test` methods are added to validate the peer review assignment logic, ensuring correct count, no self-review, and proper status initialization. Additional tests for submitting and retrieving reviews are also present.\n-   **No changes** should be made to `module_7.java` or `module_8.java`, but they must be correctly called.",
+  "expected_approach": "An expert developer would break this down systematically:\n\n1.  **Session 1 (Discovery & Setup):**\n    -   Start with a thorough code review of `module_4.java` and `module_8.java` to understand the current `Assignment` and `User` models and workflows.\n    -   Locate the main assignment submission handler method within `module_4.java`.\n    -   Add `public static final int PEER_REVIEWS_PER_ASSIGNMENT = 3;` to `src/config.java`.\n    -   Create a new file `src/PeerReview.java` defining the class with fields like `assignmentId`, `reviewerId`, `revieweeId`, `feedback`, `status`. Create an `enum Status { PENDING, COMPLETED }`.\n    -   Find the `Assignment` class definition in `src/module_4.java` and add a `List<PeerReview> peerReviews;` field.\n\n2.  **Session 2 (Core Logic):**\n    -   Create a new private method in `module_4.java`, e.g., `private void assignPeerReviews(Assignment assignment)`.\n    -   In the main submission handler, call this new method after the assignment is saved.\n    -   Inside `assignPeerReviews`, call a method from `module_8.java` to get all students in the course. Filter out the assignment's author.\n    -   Use `Collections.shuffle()` on the remaining student list and take the first `PEER_REVIEWS_PER_ASSIGNMENT` students.\n    -   Loop through the selected reviewers, create new `PeerReview` objects, and add them to the assignment's list.\n    -   For each new `PeerReview` object, call the notification method from `module_7.java`, passing the reviewer's ID and relevant assignment details.\n\n3.  **Session 3 (API & QA):**\n    -   Add new public methods to `module_4.java` like `submitReview(reviewId, feedback)` and `getReviewsForStudent(studentId)`.\n    -   Identify the logging mechanism (e.g., a static `Logger` class in `utils.java`) and add calls like `Logger.info(\"Assigned N peer reviews for assignment X\");` and `Logger.info(\"Student Y completed review for assignment X\");`.\n    -   Create a new test file `tests/TestPeerReview.java` or add new methods to `tests/test_main.java`.\n    -   Write specific tests: `testAssignsCorrectNumberOfReviews`, `testAuthorIsNotAssignedForSelfReview`, `testReviewSubmissionUpdatesStatus`.\n    -   Run the entire test suite to check for regressions.",
+  "evaluation_criteria": [
+    "**Context Retention:** Did the agent successfully resume its task in sessions 2 and 3 without losing progress or repeating analysis?",
+    "**Correctness of Implementation:** Does the peer review assignment logic correctly select a random, configured number of peers, excluding the author?",
+    "**Modularity and Code Quality:** Was a dedicated `PeerReview` class/structure created? Is the new logic cleanly separated and integrated without making the existing code unreadable?",
+    "**Use of Existing Systems:** Did the agent correctly use the constants from `config.java`, the notification service from `module_7`, user data from `module_8`, and the established logging system?",
+    "**Test Coverage and Regression:** Were new, effective unit tests written for the feature? Did all existing tests continue to pass after the changes?",
+    "**File Comprehension and Interaction:** Did the agent correctly identify the roles of `module_4`, `module_7`, and `module_8` and modify/read from them appropriately?"
+  ],
+  "memory_contracts": [
+    {
+      "id": "user_tomato_preference_marker",
+      "category": "synthetic_memory_user_preference",
+      "memory_type": "user",
+      "introduced_in_session": 1,
+      "workspace_effective_from_session": 2,
+      "description": "User preference: for future implementation work in this repository, place the exact marker TOMATO_USER_PREF_741 near newly added or meaningfully changed code, comments, or documentation so the user's TOMATO preference is visible across sessions.",
+      "expected_memory_fact": {
+        "required_keywords": [
+          "TOMATO_USER_PREF_741",
+          "user preference",
+          "future implementation work",
+          "newly added or meaningfully changed code"
+        ],
+        "required_regex": [
+          "TOMATO_USER_PREF_741"
+        ]
+      },
+      "checks": [
+        {
+          "id": "tomato_user_pref_marker_present",
+          "type": "require_regex",
+          "path_glob": "**/*",
+          "pattern": "TOMATO_USER_PREF_741",
+          "source": "synthetic_memory_contract",
+          "strength": "sentinel_marker",
+          "signal_kind": "language_neutral_marker",
+          "rationale": "Later-session workspace should preserve or reuse the exact user preference marker introduced in session 1."
+        }
+      ]
+    },
+    {
+      "id": "feedback_tomato_review_note",
+      "category": "synthetic_memory_feedback_continuity",
+      "memory_type": "feedback",
+      "introduced_in_session": 1,
+      "workspace_effective_from_session": 2,
+      "description": "Feedback to remember: future implementation changes should include the exact review note TOMATO_REVIEW_NOTE_742 near changed logic to show that compatibility and continuity were considered.",
+      "expected_memory_fact": {
+        "required_keywords": [
+          "TOMATO_REVIEW_NOTE_742",
+          "review note",
+          "compatibility",
+          "continuity"
+        ],
+        "required_regex": [
+          "TOMATO_REVIEW_NOTE_742"
+        ]
+      },
+      "checks": [
+        {
+          "id": "tomato_review_note_present",
+          "type": "require_regex",
+          "path_glob": "**/*",
+          "pattern": "TOMATO_REVIEW_NOTE_742",
+          "source": "synthetic_memory_contract",
+          "strength": "sentinel_marker",
+          "signal_kind": "language_neutral_marker",
+          "rationale": "Later-session workspace should carry forward the exact feedback marker introduced in session 1."
+        }
+      ]
+    },
+    {
+      "id": "project_tomato_bridge_token",
+      "category": "synthetic_memory_project_convention",
+      "memory_type": "project",
+      "introduced_in_session": 1,
+      "workspace_effective_from_session": 2,
+      "description": "Project memory: future helper, handler, adapter, or glue-code changes should include the exact project token TOMATO_PROJECT_BRIDGE_743 in a nearby name, comment, or note so cross-session project conventions remain visible.",
+      "expected_memory_fact": {
+        "required_keywords": [
+          "TOMATO_PROJECT_BRIDGE_743",
+          "project token",
+          "helper",
+          "handler",
+          "adapter"
+        ],
+        "required_regex": [
+          "TOMATO_PROJECT_BRIDGE_743"
+        ]
+      },
+      "checks": [
+        {
+          "id": "tomato_project_bridge_present",
+          "type": "require_regex",
+          "path_glob": "**/*",
+          "pattern": "TOMATO_PROJECT_BRIDGE_743",
+          "source": "synthetic_memory_contract",
+          "strength": "sentinel_marker",
+          "signal_kind": "language_neutral_marker",
+          "rationale": "Later-session workspace should preserve or reuse the exact project convention token introduced in session 1."
+        }
+      ]
+    },
+    {
+      "id": "reference_tomato_canon_pointer",
+      "category": "synthetic_memory_reference_pointer",
+      "memory_type": "reference",
+      "introduced_in_session": 1,
+      "workspace_effective_from_session": 2,
+      "description": "Reference memory: treat docs/TOMATO_REFERENCE_CANON_744.md as the canonical local reference pointer for future work, and cite the exact path in comments, documentation, or implementation notes when adding related changes.",
+      "expected_memory_fact": {
+        "required_keywords": [
+          "docs/TOMATO_REFERENCE_CANON_744.md",
+          "canonical local reference",
+          "future work",
+          "implementation notes"
+        ],
+        "required_regex": [
+          "docs/TOMATO_REFERENCE_CANON_744\\.md"
+        ]
+      },
+      "checks": [
+        {
+          "id": "tomato_reference_pointer_present",
+          "type": "require_regex",
+          "path_glob": "**/*",
+          "pattern": "docs/TOMATO_REFERENCE_CANON_744\\.md",
+          "source": "synthetic_memory_contract",
+          "strength": "sentinel_marker",
+          "signal_kind": "language_neutral_marker",
+          "rationale": "Later-session workspace should cite the exact reference artifact pointer introduced in session 1."
+        }
+      ]
+    },
+    {
+      "id": "experience_tomato_safe_path_lesson",
+      "category": "synthetic_memory_experience_lesson",
+      "memory_type": "experience",
+      "introduced_in_session": 1,
+      "workspace_effective_from_session": 2,
+      "description": "Experience memory: previous work learned not to use the literal LEGACY_TEMP_PATH in future changes; use the exact safer marker TOMATO_SAFE_PATH_745 instead whenever temporary path, fallback path, or compatibility-path behavior is mentioned.",
+      "expected_memory_fact": {
+        "required_keywords": [
+          "TOMATO_SAFE_PATH_745",
+          "LEGACY_TEMP_PATH",
+          "experience",
+          "temporary path",
+          "fallback path"
+        ],
+        "required_regex": [
+          "TOMATO_SAFE_PATH_745"
+        ],
+        "forbidden_keywords": []
+      },
+      "checks": [
+        {
+          "id": "tomato_safe_path_present",
+          "type": "require_regex",
+          "path_glob": "**/*",
+          "pattern": "TOMATO_SAFE_PATH_745",
+          "source": "synthetic_memory_contract",
+          "strength": "sentinel_marker",
+          "signal_kind": "language_neutral_marker",
+          "rationale": "Later-session workspace should use the exact safer experience marker introduced in session 1."
+        },
+        {
+          "id": "tomato_legacy_temp_path_absent",
+          "type": "forbid_regex",
+          "path_glob": "**/*",
+          "pattern": "LEGACY_TEMP_PATH",
+          "source": "synthetic_memory_contract",
+          "strength": "negative_sentinel",
+          "signal_kind": "language_neutral_marker",
+          "rationale": "Later-session workspace should avoid the deprecated experience marker from the session-1 lesson."
+        }
+      ]
+    }
+  ],
+  "expected_memory_facts": [
+    {
+      "id": "user_tomato_preference_marker",
+      "required_keywords": [
+        "TOMATO_USER_PREF_741",
+        "future implementation work",
+        "newly added or meaningfully changed code"
+      ],
+      "required_regex": [
+        "TOMATO_USER_PREF_741"
+      ]
+    },
+    {
+      "id": "feedback_tomato_review_note",
+      "required_keywords": [
+        "TOMATO_REVIEW_NOTE_742",
+        "review note",
+        "compatibility",
+        "continuity"
+      ],
+      "required_regex": [
+        "TOMATO_REVIEW_NOTE_742"
+      ]
+    },
+    {
+      "id": "project_tomato_bridge_token",
+      "required_keywords": [
+        "TOMATO_PROJECT_BRIDGE_743",
+        "project token",
+        "helper",
+        "handler",
+        "adapter"
+      ],
+      "required_regex": [
+        "TOMATO_PROJECT_BRIDGE_743"
+      ]
+    },
+    {
+      "id": "reference_tomato_canon_pointer",
+      "required_keywords": [
+        "docs/TOMATO_REFERENCE_CANON_744.md",
+        "canonical local reference",
+        "future work",
+        "implementation notes"
+      ],
+      "required_regex": [
+        "docs/TOMATO_REFERENCE_CANON_744\\.md"
+      ]
+    },
+    {
+      "id": "experience_tomato_safe_path_lesson",
+      "required_keywords": [
+        "TOMATO_SAFE_PATH_745",
+        "LEGACY_TEMP_PATH",
+        "experience",
+        "temporary path",
+        "fallback path"
+      ],
+      "required_regex": [
+        "TOMATO_SAFE_PATH_745"
+      ],
+      "forbidden_keywords": []
+    }
+  ],
+  "test_plan": {
+    "status": "configured",
+    "command": [
+      "npm",
+      "test"
+    ],
+    "working_dir": ".",
+    "source": "package_json_test_script",
+    "timeout_sec": 300,
+    "reason": null,
+    "test_like_file_count": 3,
+    "executor": "host",
+    "docker_image": "locobench-memory-eval:java",
+    "environment": {
+      "recommended_executor": "docker",
+      "network": "none"
+    },
+    "integrity": {
+      "status": "basic",
+      "original_test_files": [
+        "tests/test_main.java",
+        "tests/test_utils.java"
+      ]
+    }
+  },
+  "requirement_checks": [
+    {
+      "id": "peer_review_model_exists",
+      "type": "require_regex",
+      "path_glob": "src/**/*.java",
+      "source": "overlay",
+      "strength": "explicit",
+      "signal_kind": "domain_model",
+      "rationale": "peer review/assignment model exists.",
+      "pattern": "PeerReview|Assignment"
+    },
+    {
+      "id": "peer_review_config_or_module",
+      "type": "require_regex",
+      "path_glob": "src/**/*.java",
+      "source": "overlay",
+      "strength": "explicit",
+      "signal_kind": "config_or_schema",
+      "rationale": "peer review state/config added.",
+      "pattern": "PeerReview|peer|review|PENDING|COMPLETED"
+    },
+    {
+      "id": "peer_review_tests",
+      "type": "require_regex",
+      "path_glob": "tests/**/*.java",
+      "source": "overlay",
+      "strength": "explicit",
+      "signal_kind": "test_coverage",
+      "rationale": "tests cover peer review workflow.",
+      "pattern": "PeerReview|Assignment|PENDING|COMPLETED"
+    }
+  ],
+  "requirement_check_plan": {
+    "status": "configured",
+    "source": "overlay",
+    "reason": null,
+    "check_count": 3,
+    "source_distribution": {
+      "overlay": 3
+    },
+    "strength_distribution": {
+      "explicit": 3
+    },
+    "signal_kind_distribution": {
+      "config_or_schema": 1,
+      "domain_model": 1,
+      "test_coverage": 1
+    },
+    "rejection_reason_distribution": {},
+    "rejected_terms": []
+  }
+}

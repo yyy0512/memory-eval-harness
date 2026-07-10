@@ -1,0 +1,430 @@
+```rust
+//! ChromaticCanvas Control Center – Session Management & Middleware
+//!
+//! This module provides a production–ready, drop-in session layer for the
+//! Actix-Web powered service tier.  It exposes three main building blocks:
+//!   1. `SessionManager` – high-level API to create / verify / mutate sessions.
+//!   2. `SessionStore`   – async persistence abstraction with an in-memory impl.
+//!   3. `SessionLayer`   – Actix middleware that injects a typed `Session`
+//!                         extractor into every request.
+//!
+//!  • Encrypted + HMAC-signed cookies (ring)
+//!  • Rotating key support (hot reload ready)
+//!  • Graceful error handling and tracing integration
+//!  • `Send + Sync` guaranteed for every public type
+//!
+//! The code is written to compile with `edition = "2021"` and the following
+//! Cargo dependencies (add them to your `Cargo.toml`):
+//!
+//! ```toml
+//! [dependencies]
+//! actix-web      = "4"
+//! actix-service  = "2"
+//! async-trait    = "0.1"
+//! base64         = "0.21"
+//! chrono         = { version = "0.4", features = ["serde"] }
+//! dashmap        = "5"
+//! rand           = "0.8"
+//! ring           = "0.16"
+//! serde          = { version = "1.0", features = ["derive"] }
+//! thiserror      = "1"
+//! tracing        = "0.1"
+//! uuid           = { version = "1", features = ["v4"] }
+//! ```
+//!
+//! Optional database-backed stores can be implemented behind the `db` feature
+//! flag (see trait definition).
+
+use std::{
+    future::{ready, Future, Ready},
+    pin::Pin,
+    sync::Arc,
+    task::{Context, Poll},
+    time::Duration,
+};
+
+use actix_service::{Service, Transform};
+use actix_web::{
+    body::MessageBody,
+    cookie::{Cookie, SameSite},
+    dev::{ServiceRequest, ServiceResponse},
+    error::ErrorUnauthorized,
+    http::{header, HeaderValue},
+    Error, FromRequest, HttpMessage, HttpResponse,
+};
+use async_trait::async_trait;
+use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
+use chrono::{DateTime, Utc};
+use dashmap::DashMap;
+use rand::{distributions::Alphanumeric, Rng};
+use ring::hmac;
+use serde::{Deserialize, Serialize};
+use thiserror::Error;
+use tracing::{debug, error, instrument, trace};
+use uuid::Uuid;
+
+/// Name of the cookie used to transport the session identifier
+const DEFAULT_COOKIE_NAME: &str = "cc_session";
+
+/// How long a session is valid without activity (rolling expiration)
+const DEFAULT_TTL: Duration = Duration::from_secs(60 * 60 * 24 * 7); // 7 days
+
+/// Margin used when refreshing the cookie (sliding window)
+const REFRESH_MARGIN: Duration = Duration::from_secs(60 * 30); // 30 minutes
+
+/// Cryptographically-secure random string length for session IDs.
+/// UUID v4 already has sufficient entropy, but we still add randomness
+/// to make enumeration impossible if UUID generator is compromised.
+const RANDOM_SUFFIX_LEN: usize = 6;
+
+/// Strongly-typed session representation extracted by handlers.
+#[derive(Debug, Clone)]
+pub struct Session {
+    pub id: String,
+    /// Underlying data (lazily fetched).  
+    /// This allows us to e.g. store arbitrary JSON blobs.
+    pub data: SessionData,
+}
+
+impl Session {
+    /// Convenience accessor for the authenticated user id (if any)
+    pub fn user_id(&self) -> Option<Uuid> {
+        self.data.user_id
+    }
+}
+
+/// Business data held by the session.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionData {
+    pub user_id: Option<Uuid>,
+    pub created_at: DateTime<Utc>,
+    pub last_activity: DateTime<Utc>,
+    /// Any additional, ad-hoc values can be stored here.
+    pub meta: serde_json::Value,
+}
+
+impl Default for SessionData {
+    fn default() -> Self {
+        let now = Utc::now();
+        Self {
+            user_id: None,
+            created_at: now,
+            last_activity: now,
+            meta: serde_json::json!({}),
+        }
+    }
+}
+
+/// All session related errors bubble up through this enum.
+#[derive(Debug, Error)]
+pub enum SessionError {
+    #[error("invalid or expired session")]
+    Invalid,
+    #[error("persistence error: {0}")]
+    Store(String),
+    #[error("cryptography error")]
+    Crypto,
+}
+
+/// Abstract persistence layer for sessions.
+#[async_trait]
+pub trait SessionStore: Send + Sync + 'static {
+    async fn load(&self, session_id: &str) -> Result<Option<SessionData>, SessionError>;
+    async fn save(&self, session_id: &str, data: SessionData) -> Result<(), SessionError>;
+    async fn destroy(&self, session_id: &str) -> Result<(), SessionError>;
+}
+
+/// In-memory implementation using a concurrent DashMap.
+/// Suitable for local dev / tests.
+#[derive(Debug, Default)]
+pub struct InMemoryStore {
+    inner: DashMap<String, SessionData>,
+}
+
+#[async_trait]
+impl SessionStore for InMemoryStore {
+    async fn load(&self, session_id: &str) -> Result<Option<SessionData>, SessionError> {
+        Ok(self.inner.get(session_id).map(|v| v.value().clone()))
+    }
+
+    async fn save(&self, session_id: &str, data: SessionData) -> Result<(), SessionError> {
+        self.inner.insert(session_id.to_owned(), data);
+        Ok(())
+    }
+
+    async fn destroy(&self, session_id: &str) -> Result<(), SessionError> {
+        self.inner.remove(session_id);
+        Ok(())
+    }
+}
+
+/// Handle responsible for issuing & verifying signed cookie values.
+#[derive(Debug)]
+pub struct SessionManager {
+    store: Arc<dyn SessionStore>,
+    mac_key: hmac::Key,
+    ttl: Duration,
+    cookie_name: String,
+}
+
+impl SessionManager {
+    /// Create a new `SessionManager` with a random HMAC key.
+    pub fn new<S: SessionStore>(
+        store: S,
+        ttl: Option<Duration>,
+        cookie_name: Option<String>,
+    ) -> Self {
+        Self {
+            store: Arc::new(store),
+            mac_key: Self::generate_key(),
+            ttl: ttl.unwrap_or(DEFAULT_TTL),
+            cookie_name: cookie_name.unwrap_or_else(|| DEFAULT_COOKIE_NAME.to_owned()),
+        }
+    }
+
+    fn generate_key() -> hmac::Key {
+        let key: [u8; 64] = rand::random();
+        hmac::Key::new(hmac::HMAC_SHA256, &key)
+    }
+
+    /// Generate a fresh, random session ID.
+    fn generate_session_id(&self) -> String {
+        let rand_suffix: String = rand::thread_rng()
+            .sample_iter(&Alphanumeric)
+            .take(RANDOM_SUFFIX_LEN)
+            .map(char::from)
+            .collect();
+        format!("{}-{}", Uuid::new_v4(), rand_suffix)
+    }
+
+    /// Sign a session ID & encode it for transport.
+    fn sign_id(&self, id: &str) -> String {
+        let tag = hmac::sign(&self.mac_key, id.as_bytes());
+        let signed = [id.as_bytes(), tag.as_ref()].concat();
+        URL_SAFE_NO_PAD.encode(signed)
+    }
+
+    /// Verify cookie payload, returning session ID on success.
+    fn verify_cookie(&self, cookie_val: &str) -> Result<String, SessionError> {
+        let raw = URL_SAFE_NO_PAD
+            .decode(cookie_val.as_bytes())
+            .map_err(|_| SessionError::Crypto)?;
+        if raw.len() <= hmac::TAG_LEN {
+            return Err(SessionError::Invalid);
+        }
+        let (id_raw, tag_raw) = raw.split_at(raw.len() - hmac::TAG_LEN);
+        let tag = hmac::Tag::try_from(tag_raw).map_err(|_| SessionError::Crypto)?;
+        hmac::verify(&self.mac_key, id_raw, tag).map_err(|_| SessionError::Invalid)?;
+        let id = std::str::from_utf8(id_raw)
+            .map_err(|_| SessionError::Crypto)?
+            .to_owned();
+        Ok(id)
+    }
+
+    /// Create a new session and corresponding cookie.
+    #[instrument(skip(self))]
+    pub async fn create_new_session_cookie(&self) -> Result<Cookie<'static>, SessionError> {
+        let id = self.generate_session_id();
+        let data = SessionData::default();
+        self.store.save(&id, data).await?;
+
+        Ok(self.build_cookie(&id))
+    }
+
+    /// Refresh the session's sliding expiration window.
+    #[instrument(skip(self))]
+    pub async fn touch(&self, id: &str) -> Result<(), SessionError> {
+        if let Some(mut data) = self.store.load(id).await? {
+            data.last_activity = Utc::now();
+            self.store.save(id, data).await?;
+        }
+        Ok(())
+    }
+
+    /// Destroy a session (logout).
+    #[instrument(skip(self))]
+    pub async fn destroy_session(&self, id: &str) -> Result<(), SessionError> {
+        self.store.destroy(id).await
+    }
+
+    /// Build an HTTP cookie from a plain session ID.
+    fn build_cookie(&self, id: &str) -> Cookie<'static> {
+        let value = self.sign_id(id);
+        Cookie::build(self.cookie_name.clone(), value)
+            .http_only(true)
+            .secure(true) // SSL termination enforced by infra
+            .same_site(SameSite::Lax)
+            .path("/")
+            .max_age(time::Duration::seconds(self.ttl.as_secs() as i64))
+            .finish()
+    }
+
+    /// Main entry: extract or create a session from the incoming request.
+    #[instrument(skip(self, req))]
+    pub async fn extract_session<B>(
+        &self,
+        req: &ServiceRequest,
+    ) -> Result<(Session, Option<Cookie<'static>>), SessionError> {
+        // 1. Attempt to read & verify cookie
+        let incoming_cookie = req
+            .cookie(&self.cookie_name)
+            .ok_or(SessionError::Invalid)?;
+
+        let id = self.verify_cookie(incoming_cookie.value())?;
+        let maybe_data = self.store.load(&id).await?;
+        let mut data = maybe_data.ok_or(SessionError::Invalid)?;
+
+        // 2. Check for expiration
+        let now = Utc::now();
+        if now - data.last_activity > chrono::Duration::from_std(self.ttl).unwrap() {
+            self.store.destroy(&id).await?;
+            return Err(SessionError::Invalid);
+        }
+
+        // 3. Refresh if needed
+        let mut refresh_cookie: Option<Cookie<'static>> = None;
+        if now - data.last_activity > chrono::Duration::from_std(REFRESH_MARGIN).unwrap() {
+            data.last_activity = now;
+            self.store.save(&id, data.clone()).await?;
+            refresh_cookie.replace(self.build_cookie(&id));
+        }
+
+        Ok((Session { id, data }, refresh_cookie))
+    }
+}
+
+/// Actix-layer that transparently injects a `Session` extractor.
+#[derive(Debug, Clone)]
+pub struct SessionLayer {
+    manager: Arc<SessionManager>,
+}
+
+impl SessionLayer {
+    pub fn new(manager: Arc<SessionManager>) -> Self {
+        Self { manager }
+    }
+}
+
+impl<S, B> Transform<S, ServiceRequest> for SessionLayer
+where
+    S: Service<ServiceRequest, Response = ServiceResponse<B>, Error = Error> + 'static,
+    S::Future: 'static,
+    B: MessageBody + 'static,
+{
+    type Response = ServiceResponse<B>;
+    type Error = Error;
+    type Transform = SessionMiddleware<S>;
+    type InitError = ();
+    type Future = Ready<Result<Self::Transform, Self::InitError>>;
+
+    fn new_transform(&self, service: S) -> Self::Future {
+        ready(Ok(SessionMiddleware {
+            service: Arc::new(service),
+            manager: self.manager.clone(),
+        }))
+    }
+}
+
+pub struct SessionMiddleware<S> {
+    service: Arc<S>,
+    manager: Arc<SessionManager>,
+}
+
+impl<S, B> Service<ServiceRequest> for SessionMiddleware<S>
+where
+    S: Service<ServiceRequest, Response = ServiceResponse<B>, Error = Error> + 'static,
+    S::Future: 'static,
+    B: MessageBody + 'static,
+{
+    type Response = ServiceResponse<B>;
+    type Error = Error;
+    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>>>>;
+
+    #[instrument(skip(self, req))]
+    fn poll_ready(&self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.service.poll_ready(cx)
+    }
+
+    #[instrument(skip(self, req))]
+    fn call(&self, mut req: ServiceRequest) -> Self::Future {
+        let svc = self.service.clone();
+        let manager = self.manager.clone();
+
+        Box::pin(async move {
+            // Attempt to get / validate session
+            match manager.extract_session::<B>(&req).await {
+                Ok((session, maybe_refresh_cookie)) => {
+                    // Attach to request extensions so handlers can extract it.
+                    req.extensions_mut().insert(session);
+
+                    let mut res = svc.call(req).await?;
+
+                    // Propagate refreshed cookie if needed
+                    if let Some(cookie) = maybe_refresh_cookie {
+                        res.response_mut()
+                            .headers_mut()
+                            .append(header::SET_COOKIE, HeaderValue::from_str(&cookie.to_string()).unwrap());
+                    }
+
+                    Ok(res)
+                }
+                Err(err) => {
+                    error!(cause = ?err, "session extraction failed");
+                    Err(ErrorUnauthorized("Authentication required"))
+                }
+            }
+        })
+    }
+}
+
+/// Async extractor that pulls the `Session` object from request extensions.
+impl FromRequest for Session {
+    type Error = Error;
+    type Future = Ready<Result<Self, Self::Error>>;
+
+    #[instrument(skip(req))]
+    fn from_request(req: &actix_web::HttpRequest, _: &mut actix_web::dev::Payload) -> Self::Future {
+        if let Some(session) = req.extensions().get::<Session>() {
+            ready(Ok(session.clone()))
+        } else {
+            ready(Err(ErrorUnauthorized("Session missing")))
+        }
+    }
+}
+
+/// Helper function to wire up everything for an `actix_web::App`.
+/// Example:
+/// ```no_run
+/// use actix_web::{App, HttpServer};
+/// use module_21::session::*;
+///
+/// #[actix_web::main]
+/// async fn main() -> std::io::Result<()> {
+///     let manager = std::sync::Arc::new(SessionManager::new(
+///         InMemoryStore::default(),
+///         None,
+///         None,
+///     ));
+///
+///     HttpServer::new(move || {
+///         App::new()
+///             .wrap(SessionLayer::new(manager.clone()))
+///             .service(
+///                 actix_web::web::resource("/protected").to(
+///                     |session: Session| async move {
+///                         format!("Hello {:?}", session.user_id())
+///                     },
+///                 ),
+///             )
+///     })
+///     .bind(("127.0.0.1", 8080))?
+///     .run()
+///     .await
+/// }
+/// ```
+pub mod prelude {
+    pub use super::{
+        InMemoryStore, Session, SessionLayer, SessionManager, SessionStore,
+    };
+}
+```

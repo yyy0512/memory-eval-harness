@@ -1,9 +1,0 @@
-You are working in the repository at the current working directory. This is session 1 of a multi-session development task. Complete only the requirements for this session. At the end, save any useful project-specific memory for future sessions.
-
-You will implement a new Dark Mode feature for the MusePulse Lite application over three separate development sessions. You must retain context and build upon your work from the previous session.
-
-**Session 1: Data Model and Persistence**
-Your first task is to update the data model to support the new Dark Mode setting. 
-1.  Inspect `musepulse_lite//src//model//capsule.h` and find the `AppSettings` struct.
-2.  Add a new boolean or integer flag named `dark_mode_enabled` to this struct.
-3.  Modify the functions `viewmodel_load_settings` and `viewmodel_save_settings` in `musepulse_lite//src//viewmodel//main_viewmodel.c` to correctly load and save this new setting from a configuration file. Assume the file I/O functions already exist; you just need to add the logic for the new flag.

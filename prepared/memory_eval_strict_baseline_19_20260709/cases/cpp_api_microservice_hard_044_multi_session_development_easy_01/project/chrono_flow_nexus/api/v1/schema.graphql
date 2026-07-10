@@ -1,0 +1,362 @@
+"""
+ChronoFlow Nexus – GraphQL Schema (v1)
+======================================
+Copyright © 2024 ChronoFlow
+
+This document defines the public, version-1 GraphQL surface exposed by the
+ChronoFlow Nexus micro-service.  The schema is carefully designed to support
+high-volume, latency-sensitive production workloads while remaining friendly
+to client developers who need fine-grained control over exactly which data is
+fetched.
+
+General conventions
+-------------------
+ • All top-level resources are globally unique by UUID.
+ • Every list is paginated by the ‘Connection’ pattern unless the maximum
+   cardinality is inherently small.
+ • Mutations follow the Relay payload-wrapped style to enable future
+   extensibility without breaking binary contracts.
+ • Most query fields are cached by default (see @cacheControl).
+ • High-cost operations feature an explicit @rateLimit directive.
+ • Breaking changes are avoided in the v1 channel; instead, fields may be
+   soft-deprecated via @deprecated(reason: "...").
+"""
+
+###############################################################################
+# Scalar types
+###############################################################################
+scalar UUID                    # rfc4122 compliant 128-bit identifier
+scalar DateTime                # ISO-8601 with timezone, e.g. “2024-05-12T15:10:00Z”
+scalar Duration                # ISO-8601 duration, e.g. “PT2H13M”
+scalar JSON                    # Arbitrary JSON object – use sparingly!
+
+###############################################################################
+# Custom directives
+###############################################################################
+"""
+@rateLimit enforces a token-bucket limit for the decorated field or object.
+‘window’ uses the ISO-8601 duration notation – e.g. “PT1M” (1 minute).
+"""
+directive @rateLimit(
+  max:     Int!,
+  window:  String!
+) on FIELD_DEFINITION | OBJECT
+
+"""
+@cacheControl is compatible with Apollo’s cache-control spec.
+"""
+enum CacheControlScope { PUBLIC PRIVATE }
+directive @cacheControl(
+  maxAge:  Int!,
+  scope:   CacheControlScope = PUBLIC
+) on FIELD_DEFINITION | OBJECT
+
+###############################################################################
+# Pagination helpers
+###############################################################################
+input PaginationInput {
+  """Return the first *n* elements from the list (forward pagination)."""
+  first:  Int
+  """Opaque cursor after which elements are returned (forward pagination)."""
+  after:  String
+  """Return the last *n* elements from the list (backward pagination)."""
+  last:   Int
+  """Opaque cursor before which elements are returned (backward pagination)."""
+  before: String
+}
+
+"""
+Standard page-info wrapper compliant with Relay specification.
+"""
+type PageInfo {
+  hasNextPage:     Boolean!
+  hasPreviousPage: Boolean!
+  startCursor:     String
+  endCursor:       String
+}
+
+###############################################################################
+# Domain enums
+###############################################################################
+enum TaskStatus {
+  TODO
+  IN_PROGRESS
+  BLOCKED
+  REVIEW
+  DONE
+  ARCHIVED
+}
+
+###############################################################################
+# Root types
+###############################################################################
+type Query {
+  """Details about the currently authenticated account."""
+  me: User! @cacheControl(maxAge: 30)
+
+  user(id: UUID!): User
+  users(pagination: PaginationInput = {}): UserConnection!
+
+  team(id: UUID!): Team
+  teams(pagination: PaginationInput = {}): TeamConnection!
+
+  task(id: UUID!): Task
+  tasks(
+    filter:     TaskFilterInput,
+    pagination: PaginationInput = {}
+  ): TaskConnection!
+
+  timeEntry(id: UUID!): TimeEntry
+  timeEntries(
+    filter:     TimeEntryFilterInput,
+    pagination: PaginationInput = {}
+  ): TimeEntryConnection!
+
+  """Entry-point for analytics & KPI aggregation queries."""
+  analytics: AnalyticsQueryRoot! @rateLimit(max: 30, window: "PT1M")
+}
+
+type Mutation {
+  # ---- Task mutations -------------------------------------------------------
+  createTask(input: CreateTaskInput!): TaskPayload!
+  updateTask(input: UpdateTaskInput!): TaskPayload!
+  deleteTask(id: UUID!): DeletePayload!
+
+  # ---- Time-entry mutations -------------------------------------------------
+  createTimeEntry(input: CreateTimeEntryInput!): TimeEntryPayload!
+  updateTimeEntry(input: UpdateTimeEntryInput!): TimeEntryPayload!
+  deleteTimeEntry(id: UUID!): DeletePayload!
+
+  # ---- Focus-session mutations ---------------------------------------------
+  startFocusSession(input: StartFocusSessionInput!): FocusSessionPayload!
+  endFocusSession(id: UUID!): FocusSessionPayload!
+}
+
+type Subscription {
+  """Emitted whenever a task is updated for the specified team."""
+  taskUpdated(teamId: UUID!): Task!
+
+  """Stream new time-entries created by a particular user."""
+  timeEntryCreated(userId: UUID!): TimeEntry!
+}
+
+###############################################################################
+# Core entities
+###############################################################################
+type User {
+  id:        UUID!
+  username:  String!
+  email:     String!
+  createdAt: DateTime!
+  updatedAt: DateTime!
+
+  teams(
+    pagination: PaginationInput = {}
+  ): TeamConnection! @cacheControl(maxAge: 60)
+
+  timeEntries(
+    pagination: PaginationInput = {}
+  ): TimeEntryConnection! @cacheControl(maxAge: 60)
+
+  # Deprecated field kept for backward compatibility
+  legacyHandle: String @deprecated(reason: "Use `username` instead.")
+}
+
+type Team {
+  id:        UUID!
+  name:      String!
+  createdAt: DateTime!
+  updatedAt: DateTime!
+
+  members(
+    pagination: PaginationInput = {}
+  ): UserConnection!
+
+  tasks(
+    pagination: PaginationInput = {}
+  ): TaskConnection!
+}
+
+type Task {
+  id:          UUID!
+  title:       String!
+  description: String
+  status:      TaskStatus!
+  createdAt:   DateTime!
+  updatedAt:   DateTime!
+  dueAt:       DateTime
+
+  assignees: [User!]!
+  timeEntries(
+    pagination: PaginationInput = {}
+  ): TimeEntryConnection!
+}
+
+type TimeEntry {
+  id:        UUID!
+  task:      Task!
+  user:      User!
+  startedAt: DateTime!
+  endedAt:   DateTime
+  duration:  Duration
+  notes:     String
+}
+
+type FocusSession {
+  id:         UUID!
+  user:       User!
+  startedAt:  DateTime!
+  endedAt:    DateTime
+  interruptions: Int!
+}
+
+###############################################################################
+# Connections (Relay-style)
+###############################################################################
+type UserConnection {
+  edges: [UserEdge!]!
+  pageInfo: PageInfo!
+}
+
+type UserEdge {
+  node:   User!
+  cursor: String!
+}
+
+type TeamConnection {
+  edges: [TeamEdge!]!
+  pageInfo: PageInfo!
+}
+
+type TeamEdge {
+  node:   Team!
+  cursor: String!
+}
+
+type TaskConnection {
+  edges: [TaskEdge!]!
+  pageInfo: PageInfo!
+}
+
+type TaskEdge {
+  node:   Task!
+  cursor: String!
+}
+
+type TimeEntryConnection {
+  edges: [TimeEntryEdge!]!
+  pageInfo: PageInfo!
+}
+
+type TimeEntryEdge {
+  node:   TimeEntry!
+  cursor: String!
+}
+
+###############################################################################
+# Analytics surface
+###############################################################################
+input DateRangeInput {
+  from: DateTime!
+  to:   DateTime!
+}
+
+type FlowMetric {
+  date:                 DateTime!
+  deepWorkHours:        Float!   # Hours spent in >25 min uninterrupted sessions
+  contextSwitches:      Int!
+  interruptions:        Int!
+  utilization:          Float!   # Ratio (0-1) of focused time vs. scheduled hours
+}
+
+type WorkloadSlice {
+  user:          User!
+  totalDuration: Duration!
+}
+
+type AnalyticsQueryRoot {
+  """Time-series of flow metrics for the requested period (inclusive)."""
+  flowMetrics(period: DateRangeInput!): [FlowMetric!]!
+
+  """Aggregate time spent on a given task across all assignees."""
+  timeSpentByTask(taskId: UUID!): Duration!
+
+  """Breakdown of workload per user inside a team for the specified period."""
+  workloadDistribution(
+    teamId: UUID!,
+    period: DateRangeInput!
+  ): [WorkloadSlice!]!
+}
+
+###############################################################################
+# Filter & input objects
+###############################################################################
+input TaskFilterInput {
+  statusIn:   [TaskStatus!]
+  assigneeId: UUID
+  teamId:     UUID
+}
+
+input TimeEntryFilterInput {
+  userId: UUID
+  taskId: UUID
+  range:  DateRangeInput
+}
+
+# ----- Task mutation inputs --------------------------------------------------
+input CreateTaskInput {
+  title:       String!
+  description: String
+  assigneeIds: [UUID!]
+  teamId:      UUID!
+  dueAt:       DateTime
+}
+
+input UpdateTaskInput {
+  id:          UUID!
+  title:       String
+  description: String
+  status:      TaskStatus
+  assigneeIds: [UUID!]
+  dueAt:       DateTime
+}
+
+type TaskPayload {
+  task: Task!
+}
+
+# ----- TimeEntry mutation inputs --------------------------------------------
+input CreateTimeEntryInput {
+  taskId:     UUID!
+  startedAt:  DateTime!
+  endedAt:    DateTime
+  notes:      String
+}
+
+input UpdateTimeEntryInput {
+  id:         UUID!
+  endedAt:    DateTime
+  notes:      String
+}
+
+type TimeEntryPayload {
+  timeEntry: TimeEntry!
+}
+
+# ----- Focus Session mutation inputs ----------------------------------------
+input StartFocusSessionInput {
+  userId: UUID!
+}
+
+type FocusSessionPayload {
+  focusSession: FocusSession!
+}
+
+###############################################################################
+# Generic payloads
+###############################################################################
+type DeletePayload {
+  id:       UUID!
+  success:  Boolean!
+  message:  String
+}

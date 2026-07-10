@@ -1,0 +1,38 @@
+{
+  "scenario_id": "python_mobile_utility_expert_095_multi_session_development_easy_01",
+  "case_id": "python_mobile_utility_expert_095",
+  "category": "extended_development_projects",
+  "original_task_category": "multi_session_development",
+  "project_source": "cases/python_mobile_utility_expert_095_multi_session_development_easy_01/project",
+  "project_name": "PrismPocket",
+  "language": "python",
+  "complexity": "expert",
+  "session_count": 2,
+  "turns": [
+    {
+      "session": 1,
+      "file": "turns/session_1.jsonl",
+      "turn_count": 2
+    },
+    {
+      "session": 2,
+      "file": "turns/session_2.jsonl",
+      "turn_count": 1
+    }
+  ],
+  "prompts_for_review": [
+    {
+      "session": 1,
+      "file": "prompts/session_1.txt"
+    },
+    {
+      "session": 2,
+      "file": "prompts/session_2.txt"
+    }
+  ],
+  "hashes": {
+    "scenario_json_sha256": "14f3b4d609ecca121ab7eb39831277cd44d16b095e9803183802dc762ceb929c",
+    "project_tree_sha256": "108f11cc7f34d9e240926853a86da6a511a650cb71dd7c3dbf763083c645317c",
+    "prepared_case_sha256": "2f4431eb1e66934266692a746efd1647852676901b5650fdbbedf73c31dfa768"
+  }
+}

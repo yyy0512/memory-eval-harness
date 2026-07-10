@@ -1,0 +1,108 @@
+{
+  "name": "@paypalsphere/notification-service",
+  "version": "1.0.0",
+  "description": "Notification microservice for PayPalsphere ecosystem that dispatches real-time user notifications across email, push, SMS and in-app channels, powered by CQRS & event sourcing.",
+  "main": "dist/index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node dist/index.js",
+    "dev": "cross-env NODE_ENV=development ts-node-dev --respawn --transpile-only src/index.ts",
+    "build": "rimraf dist && tsc -p tsconfig.json",
+    "lint": "eslint 'src/**/*.ts'",
+    "test": "jest --runInBand",
+    "test:watch": "jest --watch",
+    "audit": "npm audit --production",
+    "prepare": "husky install"
+  },
+  "keywords": [
+    "fintech",
+    "payments",
+    "microservice",
+    "notification",
+    "cqrs",
+    "event-sourcing",
+    "paypal",
+    "sphere"
+  ],
+  "author": "PayPalsphere Engineering",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=18.0",
+    "npm": ">=9.0"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "dependencies": {
+    "@aws-sdk/client-sns": "^3.432.0",
+    "@aws-sdk/client-sqs": "^3.432.0",
+    "@sendgrid/mail": "^7.7.0",
+    "amqplib": "^0.10.3",
+    "axios": "^1.6.2",
+    "bullmq": "^4.5.1",
+    "cls-hooked": "^4.2.2",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "helmet": "^7.0.0",
+    "jwks-rsa": "^3.0.1",
+    "jsonwebtoken": "^9.0.1",
+    "lodash": "^4.17.21",
+    "node-cron": "^3.0.2",
+    "pino": "^8.22.0",
+    "pino-pretty": "^10.2.0",
+    "reflect-metadata": "^0.1.13",
+    "rxjs": "^7.8.1",
+    "uuid": "^9.0.1",
+    "winston": "^3.10.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/amqplib": "^0.10.9",
+    "@types/express": "^4.17.17",
+    "@types/jest": "^29.5.3",
+    "@types/jsonwebtoken": "^9.0.2",
+    "@types/lodash": "^4.14.194",
+    "@types/node": "^18.17.3",
+    "@typescript-eslint/eslint-plugin": "^6.7.5",
+    "@typescript-eslint/parser": "^6.7.5",
+    "cross-env": "^7.0.3",
+    "eslint": "^8.49.0",
+    "eslint-config-prettier": "^9.0.0",
+    "eslint-plugin-import": "^2.29.0",
+    "eslint-plugin-jsdoc": "^46.8.1",
+    "eslint-plugin-prettier": "^5.0.0",
+    "husky": "^8.0.3",
+    "jest": "^29.7.0",
+    "prettier": "^3.0.3",
+    "rimraf": "^5.0.1",
+    "supertest": "^6.3.3",
+    "ts-jest": "^29.1.1",
+    "ts-node": "^10.9.1",
+    "ts-node-dev": "^2.0.0",
+    "typescript": "^5.2.2"
+  },
+  "jest": {
+    "preset": "ts-jest",
+    "testEnvironment": "node",
+    "clearMocks": true,
+    "coverageDirectory": "coverage",
+    "collectCoverageFrom": [
+      "src/**/*.ts",
+      "!src/index.ts",
+      "!src/**/types.ts"
+    ]
+  },
+  "config": {
+    "service": "notification-service",
+    "namespace": "paypalsphere"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "husky": {
+    "hooks": {
+      "pre-commit": "npm run lint && npm run test"
+    }
+  }
+}

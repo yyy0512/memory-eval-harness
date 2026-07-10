@@ -1,9 +1,0 @@
-You are working in the repository at the current working directory. This is session 1 of a multi-session development task. Complete only the requirements for this session. At the end, save any useful project-specific memory for future sessions.
-
-You are a developer working on the HeartLink Lite app. Your task is to add a mood tracking feature over two sessions.
-
-**SESSION 1: Data & Persistence Layer**
-Your first task is to lay the groundwork for the new mood tracking feature by updating the core data structures and storage functions. You must:
-1.  In `heartlink-lite/src/hl_vitals_viewmodel.h`, find the `HeartLinkVitals` struct and add a new field to it: `int current_mood;`.
-2.  In `heartlink-lite/src/hl_vitals_viewmodel.c`, locate the `hl_vitals_save_to_storage` and `hl_vitals_load_from_storage` functions.
-3.  Update both functions to save and load the new `current_mood` field. Use the key `"user_mood"` for storage operations. Assume the underlying storage functions (`local_storage_write_int`, `local_storage_read_int`) are available and work correctly.

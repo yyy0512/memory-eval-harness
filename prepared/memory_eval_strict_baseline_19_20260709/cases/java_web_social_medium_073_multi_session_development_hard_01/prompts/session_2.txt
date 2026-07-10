@@ -1,0 +1,12 @@
+You are working in the repository at the current working directory. This is session 2 of a 3-session development task. The previous session has ended and conversation context is unavailable. Use the repository state to continue the task. Do not ask for previous conversation context. Complete only the requirements for this session.
+
+You are tasked with implementing a new peer review feature over three distinct work sessions.
+
+**Part 2: Core Logic & System Integration**
+Your second session's goal is to implement the core business logic.
+1.  Modify the assignment submission process in `src/module_4.java`. After an assignment is successfully submitted, trigger a new process to assign peer reviewers.
+2.  This process must fetch the list of students in the course (you'll need to find this logic, likely in `src/module_8.java`), and randomly select the configured number of reviewers, ensuring the original author is not assigned to review their own work.
+3.  For each assigned reviewer, create a `PeerReview` object with a 'PENDING' status and link it to the assignment.
+4.  Integrate with the existing notification system. Use the functionality in `src/module_7.java` to send an email notification to each student who has been assigned a new peer review task.
+
+**(You will now be interrupted. In the next session, you must finalize the feature.)**

@@ -1,0 +1,120 @@
+{
+  "schema_version": 1,
+  "generated_at": "2023-10-02T14:45:00Z",
+  "_meta": {
+    "description": "CampusGuard EDU Monitor ‒ Backup target manifest. \
+This file is consumed by the BackupController (src/backup/backup_controller.c) at \
+service bootstrap.  All paths must be absolute and accessible by the \
+`campusguard` system user.\n\nNOTE: Do *NOT* place secrets in this file; \
+use the encrypted key-vault described in docs/security/key_vault.md.",
+    "owner": "ops@campusguard.edu",
+    "issue_tracker": "https://gitlab.campusguard.edu/system_monitoring/edu-monitor/-/issues"
+  },
+
+  "defaults": {
+    "backup_window": "02:00-05:00",
+    "checksum_algo": "sha256",
+    "compression": {
+      "method": "lz4",
+      "level": 6
+    },
+    "encryption": {
+      "enabled": true,
+      "key_ref": "vault://campusguard/backup/default_key"
+    },
+    "retention": {
+      "daily": 7,
+      "weekly": 4,
+      "monthly": 12,
+      "yearly": 5
+    },
+    "verify_after_backup": true,
+    "snapshot_quorum": 3,
+    "notification_policy": {
+      "on_error": "alerting_channel://ops-pager",
+      "on_success": "none"
+    }
+  },
+
+  "targets": [
+    {
+      "id": "cg-sqlite-meta",
+      "description": "Primary SQLite database that stores monitoring metadata (logs, metrics, alert rules).",
+      "class": "database",
+      "driver": "sqlite-dump",
+      "source": "/var/lib/campusguard/db/metadata.sqlite",
+      "enabled": true,
+      "schedule": "0 3 * * *",  // 03:00 every day
+      "retention_override": {
+        "daily": 14,
+        "weekly": 8,
+        "monthly": 24
+      }
+    },
+
+    {
+      "id": "cg-logs-archive",
+      "description": "Compressed tar archive of rotated observer & agent logs.",
+      "class": "filesystem",
+      "driver": "tar",
+      "source": "/var/log/campusguard",
+      "exclude": [
+        "*.tmp",
+        "*.bak",
+        "*/*/debug/*"
+      ],
+      "enabled": true,
+      "schedule": "30 2 * * *" // 02:30 every day, before sqlite dump
+    },
+
+    {
+      "id": "cg-student-artifacts",
+      "description": "Student-generated dashboards, Jupyter notebooks, and custom plugins.",
+      "class": "filesystem",
+      "driver": "rsync",
+      "source": "/srv/campusguard/student_artifacts",
+      "exclude": [
+        "**/__pycache__/**",
+        "**/*.pyc"
+      ],
+      "enabled": true,
+      "schedule": "0 4 * * Sun",  // Weekly backup at 04:00 on Sunday
+      "retention_override": {
+        "weekly": 26,
+        "monthly": 60
+      }
+    },
+
+    {
+      "id": "cg-config-bundles",
+      "description": "Version-controlled system configuration and manifests.",
+      "class": "git",
+      "driver": "git-clone",
+      "source": "https://gitlab.campusguard.edu/config/ops-infra.git",
+      "branch": "main",
+      "depth": 1,
+      "enabled": true,
+      "schedule": "15 */6 * * *",  // Every 6 hours
+      "verify_command": "/usr/local/bin/validate-config.sh"
+    }
+  ],
+
+  "hooks": {
+    "pre_backup": [
+      {
+        "id": "pause-alert-queue",
+        "command": "/usr/local/bin/cgctl alerting pause --window=${BACKUP_ID}"
+      }
+    ],
+    "post_backup": [
+      {
+        "id": "resume-alert-queue",
+        "command": "/usr/local/bin/cgctl alerting resume --window=${BACKUP_ID}"
+      },
+      {
+        "id": "cleanup-temp-snapshots",
+        "command": "/usr/local/bin/cgctl backup purge-temporaries --older-than=48h"
+      }
+    ]
+  }
+}

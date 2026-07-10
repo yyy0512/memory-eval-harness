@@ -1,0 +1,12 @@
+You are working in the repository at the current working directory. This is session 3 of a 3-session development task. The previous session has ended and conversation context is unavailable. Use the repository state to continue the task. Do not ask for previous conversation context. Complete only the requirements for this session.
+
+You are assigned to build a new content moderation feature for the CircleConnect Nexus application. The work is broken down into three main parts. Complete each part before moving to the next, preserving the context and code from the previous session.
+
+**Session 3: Configuration and Rate Limiting**
+For the final phase, you need to make the system configurable and protect it from spam.
+
+1.  **Add Configuration:** Modify `src/config.java` to include two new settings:
+    *   A boolean flag `MODERATION_ENABLED` (default to `true`).
+    *   An integer `MAX_REPORTS_PER_USER_PER_HOUR` (default to `5`).
+2.  **Implement Feature Toggle:** Refactor the code from Session 1 & 2. If `MODERATION_ENABLED` is `false`, all moderation-related API endpoints should be disabled (e.g., return a `404 Not Found` or `503 Service Unavailable`).
+3.  **Implement Rate Limiting:** Apply a rate limit to the `POST /api/v1/posts/{postId}/report` endpoint using the `MAX_REPORTS_PER_USER_PER_HOUR` setting. If a user exceeds this limit, the endpoint should return a `429 Too Many Requests` error.

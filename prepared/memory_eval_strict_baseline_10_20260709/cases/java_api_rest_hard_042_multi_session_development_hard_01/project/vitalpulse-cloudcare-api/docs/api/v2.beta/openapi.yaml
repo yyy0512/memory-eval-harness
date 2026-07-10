@@ -1,0 +1,463 @@
+```yaml
+openapi: 3.1.0
+
+info:
+  title: VitalPulse CloudCare API
+  version: "2.0.0-beta"
+  description: |
+    VitalPulse CloudCare API (v2 BETA) is a HIPAA-grade, serverless platform for
+    exchanging patient telemetry, medication events and clinician orders in
+    real time.  
+    This OpenAPI document describes the REST surface for the beta release of
+    version 2.  The API is **subject to change** until the version is promoted
+    to GA.  
+    Key characteristics:
+      • Command / Query segregation for predictable latency  
+      • OAuth 2.0 with SMART on FHIR scopes  
+      • FHIR R4-compatible resources & validation  
+      • Fine-grained RBAC and rate limiting (_429 Too Many Requests_)  
+      • Cursor-based pagination across all collection endpoints  
+
+  contact:
+    name: VitalPulse Engineering
+    email: api-support@vitalpulse.health
+
+servers:
+  - url: https://api.vitalpulse.health/v2beta
+    description: Production (US-East-1)
+  - url: https://sandbox.vitalpulse.health/v2beta
+    description: Sandbox – no PHI
+
+tags:
+  - name: Telemetry
+    description: Continuous vital-sign measurements (FHIR Observation)
+  - name: Medication
+    description: Medication administrations & requests
+  - name: Orders
+    description: Clinician orders (labs, procedures, referrals)
+  - name: Meta
+    description: Health & metadata operations
+
+components:
+  securitySchemes:
+    SMARTOAuth:
+      type: oauth2
+      description: OAuth 2.0 Authorization Code Grant with SMART on FHIR scopes.
+      flows:
+        authorizationCode:
+          authorizationUrl: https://auth.vitalpulse.health/oauth2/authorize
+          tokenUrl: https://auth.vitalpulse.health/oauth2/token
+          scopes:
+            system/Observation.read: Read patient telemetry
+            system/Observation.write: Write patient telemetry
+            system/MedicationRequest.read: Read medication resources
+            system/MedicationRequest.write: Write medication resources
+            system/ServiceRequest.write: Write orders
+            offline_access: Refresh tokens for background jobs
+
+  parameters:
+    CursorParam:
+      in: query
+      name: cursor
+      description: Opaque cursor returned by the previous page; omit to start with the newest records.
+      schema:
+        type: string
+    LimitParam:
+      in: query
+      name: limit
+      description: Maximum number of resources to return (25–500, default = 250).
+      schema:
+        type: integer
+        minimum: 25
+        maximum: 500
+        default: 250
+    PatientIdPath:
+      in: path
+      name: patientId
+      required: true
+      description: 128-bit UUID of the patient
+      schema:
+        type: string
+        format: uuid
+
+  responses:
+    Unauthorized:
+      description: Access token is missing, expired or invalid.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Forbidden:
+      description: The supplied token is valid but lacks the required scope.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    NotFound:
+      description: The requested resource or patient ID was not found.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    TooManyRequests:
+      description: |
+        The client has exceeded the contractually agreed request rate.
+        A `Retry-After` header MAY be present, specifying the earliest timestamp
+        at which the client may retry.
+      headers:
+        Retry-After:
+          description: Seconds until the next request is accepted.
+          schema:
+            type: integer
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    InternalError:
+      description: An unexpected server error occurred.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+  schemas:
+    # Only an excerpt of FHIR resources is included here to keep the document concise.
+    Observation:
+      $comment: Conforms to HL7 FHIR R4 Observation
+      type: object
+      externalDocs:
+        description: Full FHIR R4 Observation schema
+        url: https://www.hl7.org/fhir/observation.html
+      required: [resourceType, status, category, code, subject, effectiveDateTime, valueQuantity]
+      properties:
+        resourceType:
+          type: string
+          const: Observation
+        id:
+          type: string
+        status:
+          type: string
+          enum: [registered, preliminary, final, amended]
+        effectiveDateTime:
+          type: string
+          format: date-time
+        valueQuantity:
+          type: object        # simplified
+        meta:
+          $ref: '#/components/schemas/Meta'
+        # ... further FHIR fields omitted for brevity
+
+    MedicationRequest:
+      $comment: Conforms to HL7 FHIR R4 MedicationRequest
+      type: object
+      externalDocs:
+        url: https://www.hl7.org/fhir/medicationrequest.html
+
+    ServiceRequest:
+      $comment: Conforms to HL7 FHIR R4 ServiceRequest
+      type: object
+      externalDocs:
+        url: https://www.hl7.org/fhir/servicerequest.html
+
+    Bundle:
+      description: |
+        Standard FHIR bundle enriched with VitalPulse cursor-based pagination
+        metadata.
+      type: object
+      required: [resourceType, type, entry, link]
+      properties:
+        resourceType:
+          type: string
+          const: Bundle
+        type:
+          type: string
+          enum: [searchset]
+        total:
+          type: integer
+          description: Total number of matching resources in the server.
+        link:
+          type: array
+          items:
+            $ref: '#/components/schemas/Link'
+        entry:
+          type: array
+          items:
+            type: object
+      additionalProperties: false
+
+    Link:
+      type: object
+      required: [relation, url]
+      properties:
+        relation:
+          type: string
+        url:
+          type: string
+          format: uri
+
+    Meta:
+      type: object
+      properties:
+        versionId:
+          type: string
+        lastUpdated:
+          type: string
+          format: date-time
+
+    Error:
+      type: object
+      required: [timestamp, correlationId, status, message]
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+        correlationId:
+          type: string
+          description: Echo of the `X-Correlation-ID` request header helpful for support.
+        status:
+          type: integer
+        message:
+          type: string
+        details:
+          type: array
+          items:
+            type: object
+
+security:
+  - SMARTOAuth:
+      - system/Observation.read
+      - system/Observation.write
+      - system/MedicationRequest.read
+      - system/MedicationRequest.write
+
+paths:
+
+  /patients/{patientId}/telemetry-streams:
+    parameters:
+      - $ref: '#/components/parameters/PatientIdPath'
+    get:
+      tags: [Telemetry]
+      summary: Retrieve telemetry observations for a patient
+      description: |
+        Returns a cursor-paginated bundle of Observation resources for the given
+        patient, ordered by `effectiveDateTime` descending unless the `cursor`
+        points to a different segment.
+      operationId: listTelemetry
+      security:
+        - SMARTOAuth: [system/Observation.read]
+      parameters:
+        - $ref: '#/components/parameters/CursorParam'
+        - $ref: '#/components/parameters/LimitParam'
+      responses:
+        "200":
+          description: Bundle of Observation resources
+          headers:
+            X-RateLimit-Limit:
+              description: Maximum number of requests permitted per minute.
+              schema: { type: integer }
+            X-RateLimit-Remaining:
+              description: Requests remaining in the current minute.
+              schema: { type: integer }
+            X-Correlation-ID:
+              description: Echoed back from the request header or generated by the server.
+              schema: { type: string }
+          content:
+            application/fhir+json:
+              schema:
+                $ref: '#/components/schemas/Bundle'
+        "400":
+          $ref: '#/components/responses/NotFound'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "429":
+          $ref: '#/components/responses/TooManyRequests'
+        "500":
+          $ref: '#/components/responses/InternalError'
+
+    post:
+      tags: [Telemetry]
+      summary: Ingest a batch of telemetry observations
+      operationId: createTelemetry
+      security:
+        - SMARTOAuth: [system/Observation.write]
+      requestBody:
+        description: FHIR Bundle or single Observation resource
+        required: true
+        content:
+          application/fhir+json:
+            schema:
+              oneOf:
+                - $ref: '#/components/schemas/Observation'
+                - $ref: '#/components/schemas/Bundle'
+      responses:
+        "202":
+          description: |
+            Ingestion accepted for asynchronous processing.  The response Bundle
+            contains the canonical URLs where the newly created Observations will
+            be available.
+          content:
+            application/fhir+json:
+              schema:
+                $ref: '#/components/schemas/Bundle'
+        "400":
+          $ref: '#/components/responses/NotFound'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "409":
+          description: |
+            A duplicate Observation was detected (idempotency conflict) and the
+            request was rejected.  The conflicting resource URL is provided in
+            the `Location` header.
+          headers:
+            Location:
+              description: Canonical location of the existing Observation.
+              schema: { type: string, format: uri }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        "429":
+          $ref: '#/components/responses/TooManyRequests'
+        "500":
+          $ref: '#/components/responses/InternalError'
+
+  /medications:
+    get:
+      tags: [Medication]
+      summary: Query medication requests/administrations
+      operationId: listMedications
+      security:
+        - SMARTOAuth: [system/MedicationRequest.read]
+      parameters:
+        - name: patientId
+          in: query
+          schema:
+            type: string
+            format: uuid
+          description: Filter by patient UUID
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [active, completed, stopped, draft]
+          description: Filter by medication status
+        - $ref: '#/components/parameters/CursorParam'
+        - $ref: '#/components/parameters/LimitParam'
+      responses:
+        "200":
+          description: Bundle of MedicationRequest resources
+          content:
+            application/fhir+json:
+              schema:
+                $ref: '#/components/schemas/Bundle'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "429":
+          $ref: '#/components/responses/TooManyRequests'
+        "500":
+          $ref: '#/components/responses/InternalError'
+
+    post:
+      tags: [Medication]
+      summary: Create or update a medication request
+      operationId: createMedication
+      security:
+        - SMARTOAuth: [system/MedicationRequest.write]
+      requestBody:
+        required: true
+        content:
+          application/fhir+json:
+            schema:
+              $ref: '#/components/schemas/MedicationRequest'
+            examples:
+              example1:
+                value:
+                  resourceType: MedicationRequest
+                  status: active
+                  intent: order
+                  # … further fields omitted
+      responses:
+        "201":
+          description: MedicationRequest created
+          headers:
+            Location:
+              description: Canonical URL of the newly created resource
+              schema: { type: string, format: uri }
+          content:
+            application/fhir+json:
+              schema:
+                $ref: '#/components/schemas/MedicationRequest'
+        "400":
+          $ref: '#/components/responses/NotFound'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "409":
+          description: Conflict – resource with identical `identifier` already exists.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        "429":
+          $ref: '#/components/responses/TooManyRequests'
+        "500":
+          $ref: '#/components/responses/InternalError'
+
+  /orders:
+    post:
+      tags: [Orders]
+      summary: Place a clinician order (ServiceRequest)
+      operationId: createOrder
+      security:
+        - SMARTOAuth: [system/ServiceRequest.write]
+      requestBody:
+        required: true
+        content:
+          application/fhir+json:
+            schema:
+              $ref: '#/components/schemas/ServiceRequest'
+      responses:
+        "201":
+          description: ServiceRequest created
+          headers:
+            Location:
+              description: Canonical URL of the newly created resource
+              schema: { type: string, format: uri }
+          content:
+            application/fhir+json:
+              schema:
+                $ref: '#/components/schemas/ServiceRequest'
+        "400":
+          $ref: '#/components/responses/NotFound'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "429":
+          $ref: '#/components/responses/TooManyRequests'
+        "500":
+          $ref: '#/components/responses/InternalError'
+
+  /meta/ping:
+    get:
+      tags: [Meta]
+      summary: Health probe
+      description: Lightweight endpoint to verify API availability and authentication status.
+      operationId: ping
+      responses:
+        "204":
+          description: API is alive; no content is returned.
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "429":
+          $ref: '#/components/responses/TooManyRequests'
+        "500":
+          $ref: '#/components/responses/InternalError'
+```

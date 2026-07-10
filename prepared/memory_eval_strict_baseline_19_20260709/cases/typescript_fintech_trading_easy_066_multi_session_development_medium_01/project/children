@@ -1,0 +1,347 @@
+```typescript
+/**
+ * children.ts
+ *
+ * MediTrade Pulse – Core Risk-Assessment “children” module
+ * -------------------------------------------------------
+ * This module defines the *children* of the primary RiskAssessmentEngine:
+ * a composable hierarchy of domain-specific RiskRules that independently
+ * calculate partial scores and produce rich, auditable events.
+ *
+ * Each rule is implemented as a self-contained class that fulfils the
+ * RiskRule interface and can therefore be registered, enabled/disabled,
+ * and hot-reloaded at runtime via feature flags or a rules-as-code UI.
+ *
+ * NOTE:
+ * – This file is intentionally framework-agnostic; no I/O, HTTP, or DB
+ *   concerns leak into the domain logic.
+ * – All events generated here are plain objects and only *describe* what
+ *   happened.  Persistence, publication (Kafka/NATS/etc.), and monitoring
+ *   belong in outer adapters.
+ */
+
+/* -------------------------------------------------------------------------- */
+/*                               Domain Imports                               */
+/* -------------------------------------------------------------------------- */
+
+import { v4 as uuid } from 'uuid';
+
+/**
+ * Normally these domain types would live in @meditrade-pulse/core, but are
+ * replicated here in abbreviated form to keep the file self-contained.
+ */
+export type Currency = 'USD' | 'EUR' | 'GBP' | 'JPY';
+
+export interface ClinicalAttributes {
+  /**
+   * ISO-8601 expiry date; undefined for non-perishable commodities.
+   */
+  expiresAt?: string;
+  /**
+   * Unique manufacturer batch/lot code.
+   */
+  batchCode: string;
+  /**
+   * Regulatory safety grade, e.g., “STERILE”, “NON-STERILE”, etc.
+   */
+  safetyGrade: string;
+}
+
+export interface Order {
+  id: string;
+  isin: string; // International Securities Identification Number
+  quantity: number;
+  /**
+   * Price per unit in base currency.
+   */
+  unitPrice: number;
+  currency: Currency;
+  clinical: ClinicalAttributes;
+  /**
+   * ISO-8601 trade timestamp
+   */
+  tradedAt: string;
+}
+
+export interface RiskScore {
+  /**
+   * A numeric score between 0 (no risk) and 1 (max risk).
+   */
+  value: number;
+  /**
+   * Machine-readable breakdown of sub-scores keyed by rule ID.
+   */
+  components: Record<string, number>;
+  /**
+   * Human-friendly summary.
+   */
+  note: string;
+}
+
+/* -------------------------------------------------------------------------- */
+/*                            Event Sourcing Primitives                       */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Every domain event carries a type discriminator so it can be routed and
+ * serialised generically.
+ */
+export interface DomainEvent<T extends string = string, P = unknown> {
+  id: string;
+  type: T;
+  occurredAt: string;
+  payload: P;
+}
+
+/**
+ * In real life this would be injected (e.g. through a hexagonal port) but a
+ * no-op default is provided to keep the file self-contained.
+ */
+export interface EventPublisher {
+  publish<E extends DomainEvent>(event: E): void;
+}
+
+const NullPublisher: EventPublisher = {
+  publish: (_event) => {
+    /* intentional no-op */
+  },
+};
+
+/* -------------------------------------------------------------------------- */
+/*                                Risk Rules                                  */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * RiskRule – implementing classes provide an algorithm that converts an
+ * order → numeric (0-1) risk contribution.  They MUST be pure functions.
+ */
+export interface RiskRule {
+  /**
+   * Globally unique identifier, also used as map key when constructing the
+   * composite RiskScore.
+   */
+  readonly id: string;
+
+  /**
+   * Returns 0-1 risk contribution for a single order.
+   *
+   * @throws Error if order data are malformed or incomplete for this rule.
+   */
+  evaluate(order: Order): number;
+}
+
+/* ----------------------------- Helper(s) ---------------------------------- */
+
+const clamp01 = (value: number): number => Math.max(0, Math.min(1, value));
+
+/* -------------------------------------------------------------------------- */
+/*                          Concrete Rule Implementations                     */
+/* -------------------------------------------------------------------------- */
+
+/** Rule: penalise near-expiry inventory (linear decay within 30 days). */
+export class ExpiryDateRule implements RiskRule {
+  public readonly id = 'ExpiryDateRule';
+
+  public evaluate(order: Order): number {
+    const { expiresAt } = order.clinical;
+    if (!expiresAt) return 0;
+
+    const today = new Date().setHours(0, 0, 0, 0);
+    const expiry = Date.parse(expiresAt);
+
+    if (Number.isNaN(expiry)) {
+      throw new Error(`Invalid expiry date: ${expiresAt}`);
+    }
+
+    const diffDays = Math.round((expiry - today) / 86_400_000); // ms → days
+
+    if (diffDays <= 0) return 1; // already expired = maximum risk
+    if (diffDays >= 30) return 0; // >30 days = negligible risk
+
+    // Linear decay: 30 days → 0 risk; 0 days → 1 risk
+    return clamp01(1 - diffDays / 30);
+  }
+}
+
+/** Rule: penalise lots flagged in recall list (static async lookup). */
+export class BatchRecallRule implements RiskRule {
+  public readonly id = 'BatchRecallRule';
+
+  constructor(private readonly recalledBatches: Set<string>) {}
+
+  public evaluate(order: Order): number {
+    return this.recalledBatches.has(order.clinical.batchCode) ? 1 : 0;
+  }
+}
+
+/** Rule: safety grade not meeting the configured baseline. */
+export class SafetyGradeRule implements RiskRule {
+  public readonly id = 'SafetyGradeRule';
+
+  constructor(private readonly allowedGrades: ReadonlySet<string>) {}
+
+  public evaluate(order: Order): number {
+    return this.allowedGrades.has(order.clinical.safetyGrade) ? 0 : 0.8;
+  }
+}
+
+/* -------------------------------------------------------------------------- */
+/*                          Composite Risk-Assessment                         */
+/* -------------------------------------------------------------------------- */
+
+export interface RiskAssessmentEngineOptions {
+  rules?: RiskRule[];
+  publisher?: EventPublisher;
+  /**
+   * Weighting function applied when aggregating sub-scores.  Must return a
+   * map whose keys match rule IDs and whose values are the *weight* for that
+   * rule (default = equal weighting).
+   */
+  weightingFn?: (rules: readonly RiskRule[]) => Record<string, number>;
+}
+
+/**
+ * RiskAssessmentEngine – orchestrates rule evaluation + composite scoring and
+ * publishes granular events for auditability.
+ */
+export class RiskAssessmentEngine {
+  private readonly rules: ReadonlyArray<RiskRule>;
+  private readonly publisher: EventPublisher;
+  private readonly weightingFn: NonNullable<
+    RiskAssessmentEngineOptions['weightingFn']
+  >;
+
+  constructor({
+    rules = [
+      new ExpiryDateRule(),
+      new BatchRecallRule(new Set(/* recall codes fetched elsewhere */)),
+      new SafetyGradeRule(new Set(['STERILE', 'CLINICAL'])),
+    ],
+    publisher = NullPublisher,
+    weightingFn = (rulesList) =>
+      Object.fromEntries(rulesList.map((r) => [r.id, 1 / rulesList.length])),
+  }: RiskAssessmentEngineOptions = {}) {
+    if (!rules.length) {
+      throw new Error('RiskAssessmentEngine must be initialised with ≥1 rule');
+    }
+    this.rules = rules;
+    this.publisher = publisher;
+    this.weightingFn = weightingFn;
+  }
+
+  /**
+   * Evaluates an order and produces an immutable RiskScore object while
+   * publishing individual `RiskRuleEvaluated` domain events for each rule.
+   */
+  public assess(order: Order): RiskScore {
+    const weights = this.weightingFn(this.rules);
+    const components: Record<string, number> = {};
+
+    for (const rule of this.rules) {
+      const contribution = clamp01(rule.evaluate(order));
+      components[rule.id] = contribution;
+
+      const event: DomainEvent<
+        'RiskRuleEvaluated',
+        {
+          ruleId: string;
+          orderId: string;
+          contribution: number;
+        }
+      > = {
+        id: uuid(),
+        type: 'RiskRuleEvaluated',
+        occurredAt: new Date().toISOString(),
+        payload: {
+          ruleId: rule.id,
+          orderId: order.id,
+          contribution,
+        },
+      };
+
+      this.safePublish(event);
+    }
+
+    const aggregated = Object.entries(components).reduce(
+      (sum, [ruleId, score]) => sum + score * (weights[ruleId] ?? 0),
+      0,
+    );
+
+    const riskScore: RiskScore = {
+      value: clamp01(aggregated),
+      components,
+      note:
+        aggregated < 0.33
+          ? 'Low clinical-supply risk'
+          : aggregated < 0.66
+          ? 'Moderate clinical-supply risk'
+          : 'High clinical-supply risk',
+    };
+
+    const summaryEvent: DomainEvent<
+      'RiskAssessmentCompleted',
+      { orderId: string; score: RiskScore }
+    > = {
+      id: uuid(),
+      type: 'RiskAssessmentCompleted',
+      occurredAt: new Date().toISOString(),
+      payload: { orderId: order.id, score: riskScore },
+    };
+
+    this.safePublish(summaryEvent);
+
+    return riskScore;
+  }
+
+  /* ------------------------------------------------------------------------
+   * Private helpers
+   * --------------------------------------------------------------------- */
+
+  private safePublish(event: DomainEvent): void {
+    try {
+      this.publisher.publish(event);
+    } catch (err) {
+      // Publishing failures must not break the domain flow; instead surface
+      // to monitoring and continue.
+      /* eslint-disable no-console */
+      console.error(
+        `[RiskAssessmentEngine] Failed to publish event ${event.type}:`,
+        err,
+      );
+      /* eslint-enable no-console */
+    }
+  }
+}
+
+/* -------------------------------------------------------------------------- */
+/*                             Example (REMOVE ME)                            */
+/* -------------------------------------------------------------------------- */
+/*
+  // The following snippet demonstrates usage in an application service:
+  const engine = new RiskAssessmentEngine({
+    publisher: myEventBusAdapter,
+    rules: [
+      new ExpiryDateRule(),
+      new BatchRecallRule(await recallService.getActiveBatchCodes()),
+      new SafetyGradeRule(new Set(['STERILE', 'OR-GRADE'])),
+    ],
+  });
+
+  const order: Order = {
+    id: 'ORD-123',
+    isin: 'US12345XYZ09',
+    quantity: 2_500,
+    unitPrice: 42.0,
+    currency: 'USD',
+    tradedAt: new Date().toISOString(),
+    clinical: {
+      batchCode: 'LOT-456-ABC',
+      expiresAt: '2024-11-26',
+      safetyGrade: 'NON-STERILE',
+    },
+  };
+
+  const risk = engine.assess(order);
+  console.log(risk);
+*/
+```

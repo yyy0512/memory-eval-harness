@@ -1,0 +1,433 @@
+// src/module_12.rs
+//
+// ChromaticCanvas Control Center – Session & Authentication Middleware
+//
+// This module provides a pluggable session-management layer backed by either
+// an in-memory store (for tests / dev) or Redis (for production).  It exposes
+// a Tower / Axum `Layer` that transparently hydrates the `Session` for every
+// incoming request and persists mutations before the response is sent.
+//
+// The middleware is built to be framework-agnostic *enough* to be re-used
+// outside Axum if needed, but ships with convenient Axum extractors.
+//
+// Compile-time features:
+//   ‑-features "redis-store"     Enables the Redis session backend
+//
+// External crates (add to Cargo.toml):
+//   axum           = { version = "0.6", features = ["headers"] }
+//   async-trait    = "0.1"
+//   chrono         = { version = "0.4", features = ["serde"] }
+//   redis          = { version = "0.23", optional = true, features = ["tokio-comp"] }
+//   serde          = { version = "1", features = ["derive"] }
+//   thiserror      = "1"
+//   tokio          = { version = "1", features = ["macros", "rt-multi-thread"] }
+//   uuid           = { version = "1", features = ["serde", "v4"] }
+
+use axum::{
+    async_trait,
+    extract::{FromRequestParts, State},
+    http::{
+        header::{COOKIE, SET_COOKIE},
+        request::Parts,
+        HeaderMap, HeaderValue, Request, Response, StatusCode,
+    },
+    middleware::Next,
+    response::IntoResponse,
+};
+use chrono::{Duration as ChronoDuration, Utc};
+use serde::{Deserialize, Serialize};
+use std::{
+    collections::HashMap,
+    fmt,
+    net::IpAddr,
+    sync::Arc,
+    time::{Duration, SystemTime},
+};
+use thiserror::Error;
+use tokio::sync::RwLock;
+use uuid::Uuid;
+
+// ======================================================================
+// Public structs & enums
+// ======================================================================
+
+/// Serializable session object that lives in the store and is hydrated on every
+/// request.
+///
+/// Custom payloads (e.g., user preferences) should go into the `data` map.
+/// The session can be invalidated server-side (e.g., after password change)
+/// by setting `revoked = true`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Session {
+    pub id: Uuid,
+    pub issued_at: i64,
+    pub expires_at: i64,
+    pub ip: Option<IpAddr>,
+    pub user_id: Option<Uuid>,
+    pub revoked: bool,
+    pub data: HashMap<String, serde_json::Value>,
+}
+
+impl Session {
+    pub fn is_expired(&self) -> bool {
+        Utc::now().timestamp() > self.expires_at
+    }
+}
+
+/// Error type returned by the middleware or the underlying store.
+#[derive(Debug, Error)]
+pub enum SessionError {
+    #[error("Session not found or expired")]
+    NotFound,
+    #[error("Session revoked")]
+    Revoked,
+    #[error("Underlying store error: {0}")]
+    Store(#[from] anyhow::Error),
+    #[error("Serialization error: {0}")]
+    Serde(#[from] serde_json::Error),
+}
+
+// ======================================================================
+// Session Store Abstraction
+// ======================================================================
+
+#[async_trait]
+pub trait SessionStore: Send + Sync + 'static {
+    /// Fetch a session by ID. Should return [`SessionError::NotFound`] if
+    /// the record does not exist or is expired.
+    async fn load_session(&self, id: &Uuid) -> Result<Session, SessionError>;
+
+    /// Persist a session (insert or update).
+    async fn save_session(&self, session: &Session) -> Result<(), SessionError>;
+
+    /// Remove a session (e.g., on logout).
+    async fn delete_session(&self, id: &Uuid) -> Result<(), SessionError>;
+}
+
+// ----------------------------- In-Memory Store ------------------------ //
+
+/// A thread-safe in-memory store *only* intended for unit-tests or dev
+/// hot-reload scenarios.
+#[derive(Clone, Default)]
+pub struct MemorySessionStore {
+    inner: Arc<RwLock<HashMap<Uuid, Session>>>,
+}
+
+#[async_trait]
+impl SessionStore for MemorySessionStore {
+    async fn load_session(&self, id: &Uuid) -> Result<Session, SessionError> {
+        let guard = self.inner.read().await;
+        match guard.get(id) {
+            Some(s) if !s.is_expired() && !s.revoked => Ok(s.clone()),
+            _ => Err(SessionError::NotFound),
+        }
+    }
+
+    async fn save_session(&self, session: &Session) -> Result<(), SessionError> {
+        self.inner
+            .write()
+            .await
+            .insert(session.id, session.clone());
+        Ok(())
+    }
+
+    async fn delete_session(&self, id: &Uuid) -> Result<(), SessionError> {
+        self.inner.write().await.remove(id);
+        Ok(())
+    }
+}
+
+// ----------------------------- Redis Store ---------------------------- //
+#[cfg(feature = "redis-store")]
+mod redis_store {
+    use super::*;
+    use redis::AsyncCommands;
+
+    /// A Redis-backed session store for production deployments.
+    #[derive(Clone)]
+    pub struct RedisSessionStore {
+        client: redis::Client,
+        namespace: String,
+        ttl: usize,
+    }
+
+    impl RedisSessionStore {
+        pub fn new(client: redis::Client, namespace: &str, ttl: Duration) -> Self {
+            Self {
+                client,
+                namespace: namespace.trim_end_matches(':').to_owned(),
+                ttl: ttl.as_secs() as usize,
+            }
+        }
+
+        fn key(&self, id: &Uuid) -> String {
+            format!("{}:{}", self.namespace, id)
+        }
+    }
+
+    #[async_trait]
+    impl SessionStore for RedisSessionStore {
+        async fn load_session(&self, id: &Uuid) -> Result<Session, SessionError> {
+            let mut conn = self.client.get_async_connection().await.map_err(anyhow::Error::from)?;
+            let value: Option<Vec<u8>> = conn.get(self.key(id)).await.map_err(anyhow::Error::from)?;
+            let value = value.ok_or(SessionError::NotFound)?;
+            let session: Session = bincode::deserialize(&value)?;
+            if session.revoked || session.is_expired() {
+                Err(SessionError::NotFound)
+            } else {
+                Ok(session)
+            }
+        }
+
+        async fn save_session(&self, session: &Session) -> Result<(), SessionError> {
+            let mut conn = self.client.get_async_connection().await.map_err(anyhow::Error::from)?;
+            let serialized = bincode::serialize(session)?;
+            let _: () = conn
+                .set_ex(self.key(&session.id), serialized, self.ttl)
+                .await
+                .map_err(anyhow::Error::from)?;
+            Ok(())
+        }
+
+        async fn delete_session(&self, id: &Uuid) -> Result<(), SessionError> {
+            let mut conn = self.client.get_async_connection().await.map_err(anyhow::Error::from)?;
+            let _: () = conn.del(self.key(id)).await.map_err(anyhow::Error::from)?;
+            Ok(())
+        }
+    }
+}
+
+#[cfg(feature = "redis-store")]
+pub use redis_store::RedisSessionStore;
+
+// ======================================================================
+// Tower / Axum Layer & Extractor
+// ======================================================================
+
+/// Configuration for the `SessionLayer`.
+#[derive(Clone)]
+pub struct SessionConfig {
+    pub cookie_name: &'static str,
+    pub cookie_max_age: Duration,
+    pub http_only: bool,
+    pub secure: bool,
+}
+
+/// The middleware layer that manages session lifecycle.
+#[derive(Clone)]
+pub struct SessionLayer<S> {
+    store: Arc<S>,
+    config: SessionConfig,
+}
+
+impl<S> SessionLayer<S>
+where
+    S: SessionStore,
+{
+    pub fn new(store: Arc<S>, config: SessionConfig) -> Self {
+        Self { store, config }
+    }
+}
+
+/// Axum extractor that makes session available in handler functions.
+///
+/// Example:
+/// ```no_run
+/// async fn dashboard(Session(session): Session) -> impl IntoResponse {
+///     if let Some(user_id) = session.user_id {
+///         format!("Hello {user_id}")
+///     } else {
+///         StatusCode::UNAUTHORIZED
+///     }
+/// }
+/// ```
+pub struct Session(pub Session);
+
+#[async_trait]
+impl<S> FromRequestParts<Arc<S>> for Session
+where
+    S: SessionStore,
+{
+    type Rejection = (StatusCode, &'static str);
+
+    async fn from_request_parts(
+        parts: &mut Parts,
+        store: &Arc<S>,
+    ) -> Result<Self, Self::Rejection> {
+        let headers = &parts.headers;
+        let id = extract_session_id(headers, COOKIE, store)
+            .await
+            .map_err(|_| (StatusCode::UNAUTHORIZED, "Invalid session"))?;
+        Ok(Session(id))
+    }
+}
+
+// ---------------------------- Middleware impl ------------------------- //
+
+impl<S> tower::Layer<axum::Router<Arc<S>>> for SessionLayer<S>
+where
+    S: SessionStore,
+{
+    type Service = SessionService<S, <axum::Router<Arc<S>> as tower::Service<hyper::Request<hyper::Body>>>::Response>;
+
+    fn layer(&self, inner: axum::Router<Arc<S>>) -> Self::Service {
+        SessionService {
+            inner,
+            store: Arc::clone(&self.store),
+            config: self.config.clone(),
+        }
+    }
+}
+
+pub struct SessionService<S, R> {
+    inner: axum::Router<Arc<S>>,
+    store: Arc<S>,
+    config: SessionConfig,
+}
+
+impl<S, R, B> tower::Service<Request<B>> for SessionService<S, R>
+where
+    S: SessionStore,
+    R: IntoResponse,
+    B: Send + 'static,
+{
+    type Response = Response;
+    type Error = axum::Error;
+    type Future = axum::response::ResponseFuture;
+
+    fn poll_ready(
+        &mut self,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), Self::Error>> {
+        self.inner.poll_ready(cx)
+    }
+
+    fn call(&mut self, mut req: Request<B>) -> Self::Future {
+        let store = Arc::clone(&self.store);
+        let cfg = self.config.clone();
+
+        // Extract or create session at the *beginning* of the request.
+        // NOTE: we are ignoring errors here to keep the example concise; a
+        // real impl should differentiate between "missing" vs "tampered".
+        let sid_opt = req
+            .headers()
+            .get(COOKIE)
+            .and_then(|hv| hv.to_str().ok())
+            .and_then(|cookie_header| {
+                cookie_header
+                    .split(';')
+                    .find_map(|kv| {
+                        let kv = kv.trim();
+                        kv.strip_prefix(&format!("{}=", cfg.cookie_name))
+                    })
+                    .and_then(|raw| Uuid::parse_str(raw).ok())
+            });
+
+        let session_fut = async move {
+            match sid_opt {
+                Some(sid) => match store.load_session(&sid).await {
+                    Ok(sess) => sess,
+                    Err(_) => create_anonymous_session(&store, cfg.cookie_max_age).await,
+                },
+                None => create_anonymous_session(&store, cfg.cookie_max_age).await,
+            }
+        };
+
+        // We need to embed session into request extensions so downstream
+        // handlers / extractors can use it.
+        let mut fut_inner = self.inner.clone();
+        Box::pin(async move {
+            let mut session = session_fut.await;
+
+            let expires = ChronoDuration::from_std(cfg.cookie_max_age)
+                .unwrap_or_else(|_| ChronoDuration::hours(1));
+            session.expires_at = (Utc::now() + expires).timestamp();
+
+            // Insert to request extensions for handler access
+            req.extensions_mut().insert(session.clone());
+
+            let mut response: Response = fut_inner.call(req).await.into_response();
+
+            // Persist any mutations performed inside handler
+            if let Err(err) = store.save_session(&session).await {
+                eprintln!("Failed to save session: {err}");
+            }
+
+            // Always set updated cookie header
+            let cookie_header = build_set_cookie(&session, &cfg);
+            response.headers_mut().append(SET_COOKIE, cookie_header);
+
+            Ok::<_, axum::Error>(response)
+        })
+    }
+}
+
+// ======================================================================
+// Helper fns
+// ======================================================================
+
+fn build_set_cookie(session: &Session, cfg: &SessionConfig) -> HeaderValue {
+    let mut cookie = format!("{}={}; Path=/; Max-Age={}", cfg.cookie_name, session.id, cfg.cookie_max_age.as_secs());
+    if cfg.http_only {
+        cookie.push_str("; HttpOnly");
+    }
+    if cfg.secure {
+        cookie.push_str("; Secure");
+    }
+    HeaderValue::from_str(&cookie).expect("valid SET_COOKIE header")
+}
+
+async fn extract_session_id<S>(
+    headers: &HeaderMap,
+    cookie_header: axum::http::header::HeaderName,
+    store: &S,
+) -> Result<Session, SessionError>
+where
+    S: SessionStore,
+{
+    let value = headers
+        .get(cookie_header)
+        .ok_or(SessionError::NotFound)?
+        .to_str()
+        .map_err(|_| SessionError::NotFound)?;
+
+    let sid = value
+        .split(';')
+        .find_map(|kv| kv.trim().split_once('='))
+        .and_then(|(k, v)| if k == "sid" { Some(v) } else { None })
+        .ok_or(SessionError::NotFound)?;
+
+    let sid = Uuid::parse_str(sid).map_err(|_| SessionError::NotFound)?;
+    store.load_session(&sid).await
+}
+
+async fn create_anonymous_session<S>(store: &S, ttl: Duration) -> Session
+where
+    S: SessionStore,
+{
+    let now = Utc::now();
+    let expires = now + ChronoDuration::from_std(ttl).unwrap_or_else(|_| ChronoDuration::hours(1));
+    let session = Session {
+        id: Uuid::new_v4(),
+        issued_at: now.timestamp(),
+        expires_at: expires.timestamp(),
+        ip: None,
+        user_id: None,
+        revoked: false,
+        data: HashMap::new(),
+    };
+    if let Err(e) = store.save_session(&session).await {
+        eprintln!("Could not save new session: {e}");
+    }
+    session
+}
+
+// ======================================================================
+// Display implementations for better logging
+// ======================================================================
+
+impl fmt::Display for Session {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Session<{}>", self.id)
+    }
+}

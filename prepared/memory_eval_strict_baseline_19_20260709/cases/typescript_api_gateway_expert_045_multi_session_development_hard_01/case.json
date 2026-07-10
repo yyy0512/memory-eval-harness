@@ -1,0 +1,47 @@
+{
+  "scenario_id": "typescript_api_gateway_expert_045_multi_session_development_hard_01",
+  "case_id": "typescript_api_gateway_expert_045",
+  "category": "extended_development_projects",
+  "original_task_category": "multi_session_development",
+  "project_source": "cases/typescript_api_gateway_expert_045_multi_session_development_hard_01/project",
+  "project_name": "SocialPulse Gateway",
+  "language": "typescript",
+  "complexity": "expert",
+  "session_count": 3,
+  "turns": [
+    {
+      "session": 1,
+      "file": "turns/session_1.jsonl",
+      "turn_count": 2
+    },
+    {
+      "session": 2,
+      "file": "turns/session_2.jsonl",
+      "turn_count": 1
+    },
+    {
+      "session": 3,
+      "file": "turns/session_3.jsonl",
+      "turn_count": 1
+    }
+  ],
+  "prompts_for_review": [
+    {
+      "session": 1,
+      "file": "prompts/session_1.txt"
+    },
+    {
+      "session": 2,
+      "file": "prompts/session_2.txt"
+    },
+    {
+      "session": 3,
+      "file": "prompts/session_3.txt"
+    }
+  ],
+  "hashes": {
+    "scenario_json_sha256": "b2609e5acb641bbc37db9f823ec5fa55d7ff4f200c887ec8620f925bfc935074",
+    "project_tree_sha256": "c84973a991c9e6d8391b4272bbf18fd7e37e1814bbb3726c375b370b59c9e2d6",
+    "prepared_case_sha256": "1531b8349b85ea712c1de45f302633bca15e73154b1447f478d4a7dffdbe6c55"
+  }
+}

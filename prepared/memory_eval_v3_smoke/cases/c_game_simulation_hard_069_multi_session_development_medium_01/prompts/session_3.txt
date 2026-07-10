@@ -1,9 +1,0 @@
-You are working in the repository at the current working directory. This is session 3 of a 3-session development task. The previous session has ended and conversation context is unavailable. Use the repository state and your persistent memory if available. Do not ask for previous conversation context. Complete only the requirements for this session. At the end, update memory with decisions and remaining work.
-
-You will implement this feature over three sessions. You must retain context between sessions to complete the full task.
-
-**Session 3: System Integration and Finalization**
-In the final session, you will connect your logic to the audio and resource systems to bring the feature to life.
-1.  Find the part of the engine responsible for loading game assets. Assume three new sound files exist: `friendly_ambient.ogg`, `wary_ambient.ogg`, and `hostile_ambient.ogg` in `synergyverse//assets//sounds//`. Add the necessary code to load these sounds using the resource manager.
-2.  Assign the loaded sound resource handles to the corresponding new fields in each `AIAgent` instance upon its creation or initialization.
-3.  Return to the AI update logic you wrote in Session 2. Replace the logging call with a call to the engine's audio system to play the selected sound. The sound should be 3D, positioned at the agent's location, and should loop. You will need to find the correct function in the engine's audio system to accomplish this.

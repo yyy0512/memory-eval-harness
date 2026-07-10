@@ -1,0 +1,151 @@
+#--------------------------------------------------------------------------- 
+# Doxyfile
+# CampusGuard EDU Monitor – System Monitoring Suite
+#
+# This Doxygen configuration file generates reference documentation for the
+# C-based CampusGuard EDU Monitor project.  It is tuned for medium-scale
+# academic/production use and embraces modern Doxygen capabilities such as
+# Markdown support, GraphViz call graphs, PlantUML diagrams, and source-level
+# browsing.  The settings are heavily commented so that students can learn
+# practical documentation practices alongside DevSecOps concepts.
+#---------------------------------------------------------------------------
+
+#---------------------------------------------------------------------------
+# Project identity
+#---------------------------------------------------------------------------
+
+PROJECT_NAME           = "CampusGuard EDU Monitor"
+PROJECT_BRIEF          = "C-based system monitoring, security scanning, backup & recovery"
+PROJECT_NUMBER         = 2.1.0
+PROJECT_LOGO           = ../assets/logo_campusguard.png
+OUTPUT_DIRECTORY       = ../../build/docs
+CREATE_SUBDIRS         = YES
+OUTPUT_LANGUAGE        = English
+OPTIMIZE_OUTPUT_FOR_C  = YES
+
+#---------------------------------------------------------------------------
+# Build configuration
+#---------------------------------------------------------------------------
+
+EXTRACT_ALL            = YES             # Always include undocumented symbols
+EXTRACT_STATIC         = YES
+EXTRACT_PRIVATE        = NO
+EXTRACT_PACKAGE        = NO
+EXTRACT_STATIC         = YES
+HIDE_UNDOC_MEMBERS     = NO
+HIDE_UNDOC_CLASSES     = NO
+HIDE_FRIEND_COMPOUNDS  = YES
+SOURCE_BROWSER         = YES
+INLINE_SOURCES         = YES
+STRIP_CODE_COMMENTS    = NO
+REFERENCED_BY_RELATION = YES
+REFERENCES_RELATION    = YES
+REFERENCES_LINK_SOURCE = YES
+CALL_GRAPH             = YES
+CALLER_GRAPH           = YES
+ENABLED_SECTIONS       =
+
+#---------------------------------------------------------------------------
+# Input
+#---------------------------------------------------------------------------
+
+INPUT                  = ../../src \
+                         ../../include \
+                         ../overview.md \
+                         ../architecture.md \
+                         ../CHANGELOG.md
+FILE_PATTERNS          = *.c *.h *.md
+RECURSIVE              = YES
+EXCLUDE_PATTERNS       = */tests/* \
+                         */third_party/*
+
+#---------------------------------------------------------------------------
+# Preprocessor & Macros
+#---------------------------------------------------------------------------
+
+ENABLE_PREPROCESSING   = YES
+MACRO_EXPANSION        = YES
+EXPAND_ONLY_PREDEF     = NO
+PREDEFINED             = DOXYGEN=1 \
+                         CAMPUSGUARD_EDU=1 \
+                         $(shell uname -s | tr A-Z a-z)
+SEARCH_INCLUDES        = YES
+INCLUDE_PATH           = ../../include
+
+#---------------------------------------------------------------------------
+# Output formats
+#---------------------------------------------------------------------------
+
+GENERATE_HTML          = YES
+HTML_OUTPUT            = html
+HTML_COLORSTYLE        = LIGHT
+HTML_DYNAMIC_SECTIONS  = YES
+HTML_TIMESTAMP         = YES
+HTML_EXTRA_STYLESHEET  = ../assets/doxygen_theme.css
+HTML_EXTRA_FILES       = ../assets/logo_campusguard.png
+
+GENERATE_LATEX         = NO
+GENERATE_MAN           = NO
+GENERATE_RTF           = NO
+GENERATE_XML           = YES
+XML_OUTPUT             = xml
+
+#---------------------------------------------------------------------------
+# Diagrams & Graphs
+#---------------------------------------------------------------------------
+
+HAVE_DOT               = YES
+DOT_IMAGE_FORMAT       = svg
+DOT_GRAPH_MAX_NODES    = 100
+MAX_DOT_GRAPH_DEPTH    = 0
+DOT_TRANSPARENT        = YES
+CALL_GRAPH             = YES
+CALLER_GRAPH           = YES
+UML_LOOK               = YES
+TEMPLATE_RELATIONS     = YES
+DOT_MULTI_TARGETS      = YES
+
+#---------------------------------------------------------------------------
+# Markdown / PlantUML
+#---------------------------------------------------------------------------
+
+MARKDOWN_SUPPORT       = YES
+MD_RETVAL_BRIEF        = YES
+PLANTUML_JAR_PATH      = /usr/share/plantuml/plantuml.jar
+PLANTUML_CFG_FILE      =
+PLANTUML_INCLUDE_PATH  = ../diagrams
+USE_MDFILE_AS_MAINPAGE = ../overview.md
+
+#---------------------------------------------------------------------------
+# Tags / External references
+#---------------------------------------------------------------------------
+
+GENERATE_TAGFILE       = campusguard.tag
+TAGFILES               =
+
+#---------------------------------------------------------------------------
+# Warnings & Quality gates
+#---------------------------------------------------------------------------
+
+WARNINGS               = YES
+WARN_IF_UNDOCUMENTED   = YES
+WARN_IF_DOC_ERROR      = YES
+WARN_NO_PARAMDOC       = YES
+WARN_FORMAT            = "[%p:%l] %m"
+WARN_LOGFILE           = ../../build/docs/doxygen_warnings.log
+
+#---------------------------------------------------------------------------
+# Misc
+#---------------------------------------------------------------------------
+
+# Allow linking to source files in GitHub (teaching students how to cross-reference)
+# NOTE: The GIT_HASH token is injected at build time via CI.
+HTML_HEADER            =
+HTML_FOOTER            =
+HTML_DYNAMIC_SECTIONS  = YES
+HTML_EXTRA_STYLESHEET  =
+
+# Normalized timestamp embedding (deterministic builds)
+SOURCE_DATE_EPOCH      = 0
+
+# EOF

@@ -1,0 +1,47 @@
+{
+  "scenario_id": "java_web_social_hard_037_multi_session_development_expert_01",
+  "case_id": "java_web_social_hard_037",
+  "category": "extended_development_projects",
+  "original_task_category": "multi_session_development",
+  "project_source": "cases/java_web_social_hard_037_multi_session_development_expert_01/project",
+  "project_name": "CircleConnect Nexus",
+  "language": "java",
+  "complexity": "hard",
+  "session_count": 3,
+  "turns": [
+    {
+      "session": 1,
+      "file": "turns/session_1.jsonl",
+      "turn_count": 2
+    },
+    {
+      "session": 2,
+      "file": "turns/session_2.jsonl",
+      "turn_count": 1
+    },
+    {
+      "session": 3,
+      "file": "turns/session_3.jsonl",
+      "turn_count": 1
+    }
+  ],
+  "prompts_for_review": [
+    {
+      "session": 1,
+      "file": "prompts/session_1.txt"
+    },
+    {
+      "session": 2,
+      "file": "prompts/session_2.txt"
+    },
+    {
+      "session": 3,
+      "file": "prompts/session_3.txt"
+    }
+  ],
+  "hashes": {
+    "scenario_json_sha256": "d96e6af92cda87d27fc003f17f5153a58ef6a2a90ebe069f4b6e63131229495b",
+    "project_tree_sha256": "4fd4b5763d0713c3294b8cedf7e4cdb66e8bb2c6f473e281dcb94f3a84625b85",
+    "prepared_case_sha256": "f1e2533fb31a62ba29d1157a1756d05a1fc54eed435f955981c328e9a568cd80"
+  }
+}

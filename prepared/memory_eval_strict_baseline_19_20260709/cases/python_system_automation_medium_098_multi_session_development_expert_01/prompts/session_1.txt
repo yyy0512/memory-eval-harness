@@ -1,0 +1,20 @@
+You are working in the repository at the current working directory. This is session 1 of a multi-session development task. Complete only the requirements for this session.
+
+You are tasked with implementing the Canary Deployment feature. This will be done over several sessions. Follow the instructions for each session carefully, building upon your previous work.
+
+**Session 1: Configuration and Data Modeling**
+Your first task is to lay the groundwork for the canary deployment feature by defining its configuration and data model.
+1.  Modify `vitalops_orchestrator/config.yaml`: Under the `deployment` section, add a new configuration structure for the `canary` strategy. It should include parameters for `traffic_percentage` (int, 1-99), `analysis_duration` (string, e.g., '10m'), and a `success_criteria` object containing `max_error_rate` (float) and `max_p95_latency_ms` (int).
+2.  Modify `vitalops_orchestrator/vitalops/models/domain.py`: Locate the `DeploymentConfig` model. Create a new Pydantic model, `CanarySettings`, to represent the configuration you just added in the YAML file. Add `canary_settings: Optional[CanarySettings]` to the `DeploymentConfig` model to link it.
+
+--- follow-up turn ---
+
+Before ending Session 1, record the following continuity contracts for later sessions. Do not edit repository files in this turn; no repository changes are required now. These contracts apply to relevant implementation work in Session 2 or later.
+
+Also, this repository has the following continuity contracts for implementation work after this session:
+- For future implementation work in this repository, place the exact marker TOMATO_USER_PREF_741 near newly added or meaningfully changed code, comments, or documentation so the user's TOMATO preference is visible across sessions.
+- Future implementation changes should include the exact review note TOMATO_REVIEW_NOTE_742 near changed logic to show that compatibility and continuity were considered.
+- Future helper, handler, adapter, or glue-code changes should include the exact project token TOMATO_PROJECT_BRIDGE_743 in a nearby name, comment, or note so cross-session project conventions remain visible.
+- Treat docs/TOMATO_REFERENCE_CANON_744.md as the canonical local reference pointer for future work, and cite the exact path in comments, documentation, or implementation notes when adding related changes.
+- Experience memory: previous work learned not to use the literal LEGACY_TEMP_PATH in future changes; use the exact safer marker TOMATO_SAFE_PATH_745 instead whenever temporary path, fallback path, or compatibility-path behavior is mentioned.
+These contracts apply to relevant code, comment, documentation, helper, handler, adapter, fallback-path, or implementation-note changes in later sessions. For this session, complete only the current session requirements; do not make unrelated repository edits solely to satisfy continuity contracts that are not relevant to the current work.

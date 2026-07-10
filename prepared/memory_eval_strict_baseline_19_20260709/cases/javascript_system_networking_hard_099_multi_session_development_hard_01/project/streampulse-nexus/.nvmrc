@@ -1,0 +1,152 @@
+#!/usr/bin/env node
+/**
+ * StreamPulse Nexus – Runtime Environment Bootstrap
+ * -------------------------------------------------
+ * Although this file lives at the project root as “.nvmrc”, it doubles as
+ * an executable script.  Developers can:
+ *
+ *   • run   `nvm use`          – NVM will read the first *data* line (see below)
+ *   • run   `node .nvmrc`      – The script validates the environment, prints
+ *                                diagnostics, and exits non-zero on failure
+ *
+ * Why combine the concerns?
+ *   1. Keeps the authoritative Node.js version in one place
+ *   2. Gives contributors an immediate feedback loop (`node .nvmrc`)
+ *   3. Eliminates drift between CI pipelines, local shells and Docker images
+ *
+ * IMPORTANT: The version string must appear **exactly** on the first non-comment
+ *            line for NVM compatibility (no leading “v” required).
+ *
+ *            Do NOT remove or re-order the line containing `NODE_REQUIRED`.
+ */
+
+/*─────────────────────────────  Node.js Version  ─────────────────────────────*/
+// NODE_REQUIRED: 18.17.1
+
+
+/*───────────────────────────── Implementation  ───────────────────────────────*/
+'use strict';
+
+const fs             = require('fs');
+const os             = require('os');
+const path           = require('path');
+const { execSync }   = require('child_process');
+
+let semver;  // Lazy-loaded (optional)
+
+/**
+ * Reads the required Node.js version from this very file.
+ * The version is declared on the line beginning with “NODE_REQUIRED:”.
+ */
+function readRequiredVersion() {
+  const selfPath  = __filename;
+  const contents  = fs.readFileSync(selfPath, 'utf8')
+                       .split(/\r?\n/)
+                       .map(line => line.trim());
+
+  for (const line of contents) {
+    if (line.startsWith('NODE_REQUIRED:')) {
+      return line.replace('NODE_REQUIRED:', '').trim();
+    }
+  }
+  throw new Error('Unable to locate NODE_REQUIRED declaration inside .nvmrc');
+}
+
+/**
+ * Attempts to load the “semver” package.  Falls back to a minimal comparator
+ * when the dependency is missing (e.g., first checkout before `npm install`).
+ */
+function loadSemver() {
+  try {
+    return require('semver');             // Preferred: full semantic handling
+  } catch (_err) {
+    return {                              // Fallback: equality + >= patch
+      valid:   v => /^\d+\.\d+\.\d+$/.test(v),
+      clean:   v => v.replace(/^v/, ''),
+      satisfies(candidate, range) {
+        const [wantMaj, wantMin, wantPat] = range.split('.').map(Number);
+        const [hasMaj,  hasMin,  hasPat ] = candidate.replace(/^v/,'')
+                                                     .split('.')
+                                                     .map(Number);
+        return (
+          hasMaj === wantMaj &&
+          (hasMin >  wantMin || (hasMin === wantMin && hasPat >= wantPat))
+        );
+      }
+    };
+  }
+}
+
+/**
+ * Verifies that the running Node.js engine matches the required version.
+ * Exits the process with code 1 when the check fails.
+ */
+function verifyNodeVersion(required) {
+  semver = loadSemver();
+
+  const running = process.version.replace(/^v/, '');
+  const ok = semver.satisfies(running, required);
+
+  if (!ok) {
+    console.error('\n❌  StreamPulse Nexus – Incorrect Node.js version');
+    console.error(`   Required: ${required}`);
+    console.error(`   Current : ${running}\n`);
+    console.error('➡  Fix it with:  nvm install && nvm use\n');
+    process.exitCode = 1;
+    return false;
+  }
+
+  return true;
+}
+
+/**
+ * Emits helpful diagnostics for bug reports and CI visibility.
+ */
+function printDiagnostics(required) {
+  const pad = txt => txt.padEnd(16, ' ');
+  const rows = {
+    'Status':          'OK – environment validated',
+    'Node Required':   required,
+    'Node Running':    process.version.replace(/^v/, ''),
+    'Platform':        `${process.platform} ${process.arch}`,
+    'CPU Cores':       os.cpus().length,
+    'Total Memory':    `${(os.totalmem() / (1024**3)).toFixed(1)} GiB`,
+    'Git Branch':      safeCommand('git rev-parse --abbrev-ref HEAD'),
+    'Git Commit':      safeCommand('git rev-parse --short HEAD'),
+    'NVM Active':      process.env.NVM_BIN ? 'yes' : 'no'
+  };
+
+  console.log('\nStreamPulse Nexus – Environment Diagnostics');
+  console.log('────────────────────────────────────────────');
+  for (const [key, val] of Object.entries(rows)) {
+    console.log(`• ${pad(key)} ${val}`);
+  }
+  console.log('────────────────────────────────────────────\n');
+}
+
+/*───────────────────────────  Utility Functions  ─────────────────────────────*/
+function safeCommand(cmd) {
+  try {
+    return execSync(cmd, { stdio: ['ignore', 'pipe', 'ignore'] })
+            .toString().trim();
+  } catch {
+    return 'n/a';
+  }
+}
+
+/*───────────────────────────────  Main Flow  ─────────────────────────────────*/
+(function main() {
+  const required = readRequiredVersion();
+  if (verifyNodeVersion(required) && require.main === module) {
+    printDiagnostics(required);
+  }
+})();
+
+/*───────────────────────────────  Exports  ───────────────────────────────────
+ * Allow other tooling (e.g., Jest, Mocha, custom CLIs) to programmatically
+ * verify the Node.js version without duplicating logic.
+ */
+module.exports = {
+  requiredVersion : readRequiredVersion(),
+  isSatisfied     : () => verifyNodeVersion(readRequiredVersion())
+};

@@ -1,0 +1,56 @@
+{
+  "scenario_id": "c_system_automation_medium_062_multi_session_development_expert_01",
+  "case_id": "c_system_automation_medium_062",
+  "category": "extended_development_projects",
+  "original_task_category": "multi_session_development",
+  "project_source": "cases/c_system_automation_medium_062_multi_session_development_expert_01/project",
+  "project_name": "LambdaUtility Orchestrator",
+  "language": "c",
+  "complexity": "medium",
+  "session_count": 4,
+  "turns": [
+    {
+      "session": 1,
+      "file": "turns/session_1.jsonl",
+      "turn_count": 2
+    },
+    {
+      "session": 2,
+      "file": "turns/session_2.jsonl",
+      "turn_count": 1
+    },
+    {
+      "session": 3,
+      "file": "turns/session_3.jsonl",
+      "turn_count": 1
+    },
+    {
+      "session": 4,
+      "file": "turns/session_4.jsonl",
+      "turn_count": 1
+    }
+  ],
+  "prompts_for_review": [
+    {
+      "session": 1,
+      "file": "prompts/session_1.txt"
+    },
+    {
+      "session": 2,
+      "file": "prompts/session_2.txt"
+    },
+    {
+      "session": 3,
+      "file": "prompts/session_3.txt"
+    },
+    {
+      "session": 4,
+      "file": "prompts/session_4.txt"
+    }
+  ],
+  "hashes": {
+    "scenario_json_sha256": "85b2ed6ffe843d023c2df6be396d1b4f1e16eeb75e7e7844a9b89b5ed7ae71e6",
+    "project_tree_sha256": "9cd5c6e7c642f7f9bfb329a7da9981543abb32aef700095722880d806657df4d",
+    "prepared_case_sha256": "9a7cc84baff5abc46964b12b12bcda2c44efca36db822941642affc9eb6ba934"
+  }
+}

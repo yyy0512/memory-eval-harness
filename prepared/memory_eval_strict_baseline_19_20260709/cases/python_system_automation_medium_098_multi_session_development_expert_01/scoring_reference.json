@@ -1,0 +1,336 @@
+{
+  "scenario_id": "python_system_automation_medium_098_multi_session_development_expert_01",
+  "ground_truth": "A successful implementation will result in the following key changes:\n-   **`config.yaml`**: A new `canary` object is present under the `deployment` key, containing `traffic_percentage`, `analysis_duration`, and `success_criteria` with nested metric thresholds.\n-   **`vitalops/models/domain.py`**: A new `CanarySettings` Pydantic model is defined. The `DeploymentConfig` model now contains an optional field: `canary_settings: Optional[CanarySettings] = None`.\n-   **`vitalops/coordinators/deployment.py`**: The `DeploymentCoordinator`'s `execute_deployment` method has a new conditional block for the 'canary' strategy. This block orchestrates the entire flow by calling new private methods: `_deploy_canary_instances`, `_monitor_canary` (which contains the loop, calls to `MetricCollector` and `PolicyEngine`), `_promote_canary`, and `_rollback_canary`.\n-   **`tests/test_coordinators.py`**: A new test method `test_canary_deployment_successful_promotion` exists. It uses `@patch` or `mock.patch` to mock the service dependencies and asserts that the promotion logic is correctly invoked based on the mocked policy engine outcome.",
+  "expected_approach": "An expert developer would approach this task methodically:\n1.  **Discovery (Pre-Session 1):** The developer would first use `grep` or a similar tool to search for \"deployment\" and \"strategy\" within the codebase. This would quickly identify `coordinators/deployment.py`, `config.yaml`, and `models/domain.py` as the primary files of interest. They would read these files to understand the existing deployment mechanism before writing any code.\n2.  **Session 1 (Bottom-Up Configuration):** They would start by defining the configuration schema in `config.yaml` and the corresponding Pydantic models in `models/domain.py`. This 'contract-first' approach ensures the core logic has a clear and validated structure to work with.\n3.  **Session 2 (Incremental Implementation):** In `coordinators/deployment.py`, they would add the new `if strategy == 'canary':` branch. They would focus solely on the initial deployment logic, calculating the number of nodes and deploying to them. They would likely add `pass` or a `NotImplementedError` for the analysis part, acknowledging it's the next step. This demonstrates incremental development and context of what's to come.\n4.  **Session 3 (Service Integration):** The developer would now replace the placeholder from Session 2. They would import and instantiate the `MetricCollector` and `PolicyEngine` services (likely through dependency injection if the pattern exists). They'd implement the monitoring loop (`time.sleep` or an event-driven equivalent) and wire the service calls together, passing metrics to the policy engine and acting on its response. They would then write the `_promote_canary` and `_rollback_canary` methods.\n5.  **Testing:** Finally, they would navigate to `tests/test_coordinators.py`, identify the existing tests for deployments, and add a new one for the canary case. They would use `unittest.mock` to isolate the `DeploymentCoordinator` from its dependencies, allowing them to test the promotion/rollback logic without needing live services.",
+  "evaluation_criteria": [
+    "**Configuration Schema Correctness:** Agent correctly added the nested canary configuration to `config.yaml` without syntax errors.",
+    "**Model Integrity:** Agent correctly defined the `CanarySettings` model in `domain.py` and integrated it into `DeploymentConfig` without breaking existing models.",
+    "**Context Retention Between Sessions:** Agent successfully built upon the work from the previous session (e.g., Session 2 logic correctly reads models from Session 1; Session 3 logic correctly integrates with the stubs from Session 2).",
+    "**Correct Implementation of Canary Logic:** The `DeploymentCoordinator` correctly calculates the number of canary instances and deploys to a subset of the fleet.",
+    "**Successful Service Integration:** The implementation correctly calls the `MetricCollector` and `PolicyEngine` services with the expected parameters.",
+    "**State Management and Control Flow:** The coordinator correctly implements the full deploy -> monitor -> promote/rollback lifecycle based on the policy engine's output.",
+    "**Test Coverage:** Agent added a meaningful, non-trivial test case for the new functionality that correctly uses mocks to test the logic in isolation.",
+    "**Code Quality and Idiomatic Python:** The new code is clean, readable, and consistent with the style of the surrounding project files (e.g., using existing logging, error handling patterns)."
+  ],
+  "memory_contracts": [
+    {
+      "id": "user_tomato_preference_marker",
+      "category": "synthetic_memory_user_preference",
+      "memory_type": "user",
+      "introduced_in_session": 1,
+      "workspace_effective_from_session": 2,
+      "description": "User preference: for future implementation work in this repository, place the exact marker TOMATO_USER_PREF_741 near newly added or meaningfully changed code, comments, or documentation so the user's TOMATO preference is visible across sessions.",
+      "expected_memory_fact": {
+        "required_keywords": [
+          "TOMATO_USER_PREF_741",
+          "user preference",
+          "future implementation work",
+          "newly added or meaningfully changed code"
+        ],
+        "required_regex": [
+          "TOMATO_USER_PREF_741"
+        ]
+      },
+      "checks": [
+        {
+          "id": "tomato_user_pref_marker_present",
+          "type": "require_regex",
+          "path_glob": "**/*",
+          "pattern": "TOMATO_USER_PREF_741",
+          "source": "synthetic_memory_contract",
+          "strength": "sentinel_marker",
+          "signal_kind": "language_neutral_marker",
+          "rationale": "Later-session workspace should preserve or reuse the exact user preference marker introduced in session 1."
+        }
+      ]
+    },
+    {
+      "id": "feedback_tomato_review_note",
+      "category": "synthetic_memory_feedback_continuity",
+      "memory_type": "feedback",
+      "introduced_in_session": 1,
+      "workspace_effective_from_session": 2,
+      "description": "Feedback to remember: future implementation changes should include the exact review note TOMATO_REVIEW_NOTE_742 near changed logic to show that compatibility and continuity were considered.",
+      "expected_memory_fact": {
+        "required_keywords": [
+          "TOMATO_REVIEW_NOTE_742",
+          "review note",
+          "compatibility",
+          "continuity"
+        ],
+        "required_regex": [
+          "TOMATO_REVIEW_NOTE_742"
+        ]
+      },
+      "checks": [
+        {
+          "id": "tomato_review_note_present",
+          "type": "require_regex",
+          "path_glob": "**/*",
+          "pattern": "TOMATO_REVIEW_NOTE_742",
+          "source": "synthetic_memory_contract",
+          "strength": "sentinel_marker",
+          "signal_kind": "language_neutral_marker",
+          "rationale": "Later-session workspace should carry forward the exact feedback marker introduced in session 1."
+        }
+      ]
+    },
+    {
+      "id": "project_tomato_bridge_token",
+      "category": "synthetic_memory_project_convention",
+      "memory_type": "project",
+      "introduced_in_session": 1,
+      "workspace_effective_from_session": 2,
+      "description": "Project memory: future helper, handler, adapter, or glue-code changes should include the exact project token TOMATO_PROJECT_BRIDGE_743 in a nearby name, comment, or note so cross-session project conventions remain visible.",
+      "expected_memory_fact": {
+        "required_keywords": [
+          "TOMATO_PROJECT_BRIDGE_743",
+          "project token",
+          "helper",
+          "handler",
+          "adapter"
+        ],
+        "required_regex": [
+          "TOMATO_PROJECT_BRIDGE_743"
+        ]
+      },
+      "checks": [
+        {
+          "id": "tomato_project_bridge_present",
+          "type": "require_regex",
+          "path_glob": "**/*",
+          "pattern": "TOMATO_PROJECT_BRIDGE_743",
+          "source": "synthetic_memory_contract",
+          "strength": "sentinel_marker",
+          "signal_kind": "language_neutral_marker",
+          "rationale": "Later-session workspace should preserve or reuse the exact project convention token introduced in session 1."
+        }
+      ]
+    },
+    {
+      "id": "reference_tomato_canon_pointer",
+      "category": "synthetic_memory_reference_pointer",
+      "memory_type": "reference",
+      "introduced_in_session": 1,
+      "workspace_effective_from_session": 2,
+      "description": "Reference memory: treat docs/TOMATO_REFERENCE_CANON_744.md as the canonical local reference pointer for future work, and cite the exact path in comments, documentation, or implementation notes when adding related changes.",
+      "expected_memory_fact": {
+        "required_keywords": [
+          "docs/TOMATO_REFERENCE_CANON_744.md",
+          "canonical local reference",
+          "future work",
+          "implementation notes"
+        ],
+        "required_regex": [
+          "docs/TOMATO_REFERENCE_CANON_744\\.md"
+        ]
+      },
+      "checks": [
+        {
+          "id": "tomato_reference_pointer_present",
+          "type": "require_regex",
+          "path_glob": "**/*",
+          "pattern": "docs/TOMATO_REFERENCE_CANON_744\\.md",
+          "source": "synthetic_memory_contract",
+          "strength": "sentinel_marker",
+          "signal_kind": "language_neutral_marker",
+          "rationale": "Later-session workspace should cite the exact reference artifact pointer introduced in session 1."
+        }
+      ]
+    },
+    {
+      "id": "experience_tomato_safe_path_lesson",
+      "category": "synthetic_memory_experience_lesson",
+      "memory_type": "experience",
+      "introduced_in_session": 1,
+      "workspace_effective_from_session": 2,
+      "description": "Experience memory: previous work learned not to use the literal LEGACY_TEMP_PATH in future changes; use the exact safer marker TOMATO_SAFE_PATH_745 instead whenever temporary path, fallback path, or compatibility-path behavior is mentioned.",
+      "expected_memory_fact": {
+        "required_keywords": [
+          "TOMATO_SAFE_PATH_745",
+          "LEGACY_TEMP_PATH",
+          "experience",
+          "temporary path",
+          "fallback path"
+        ],
+        "required_regex": [
+          "TOMATO_SAFE_PATH_745"
+        ],
+        "forbidden_keywords": []
+      },
+      "checks": [
+        {
+          "id": "tomato_safe_path_present",
+          "type": "require_regex",
+          "path_glob": "**/*",
+          "pattern": "TOMATO_SAFE_PATH_745",
+          "source": "synthetic_memory_contract",
+          "strength": "sentinel_marker",
+          "signal_kind": "language_neutral_marker",
+          "rationale": "Later-session workspace should use the exact safer experience marker introduced in session 1."
+        },
+        {
+          "id": "tomato_legacy_temp_path_absent",
+          "type": "forbid_regex",
+          "path_glob": "**/*",
+          "pattern": "LEGACY_TEMP_PATH",
+          "source": "synthetic_memory_contract",
+          "strength": "negative_sentinel",
+          "signal_kind": "language_neutral_marker",
+          "rationale": "Later-session workspace should avoid the deprecated experience marker from the session-1 lesson."
+        }
+      ]
+    }
+  ],
+  "expected_memory_facts": [
+    {
+      "id": "user_tomato_preference_marker",
+      "required_keywords": [
+        "TOMATO_USER_PREF_741",
+        "future implementation work",
+        "newly added or meaningfully changed code"
+      ],
+      "required_regex": [
+        "TOMATO_USER_PREF_741"
+      ]
+    },
+    {
+      "id": "feedback_tomato_review_note",
+      "required_keywords": [
+        "TOMATO_REVIEW_NOTE_742",
+        "review note",
+        "compatibility",
+        "continuity"
+      ],
+      "required_regex": [
+        "TOMATO_REVIEW_NOTE_742"
+      ]
+    },
+    {
+      "id": "project_tomato_bridge_token",
+      "required_keywords": [
+        "TOMATO_PROJECT_BRIDGE_743",
+        "project token",
+        "helper",
+        "handler",
+        "adapter"
+      ],
+      "required_regex": [
+        "TOMATO_PROJECT_BRIDGE_743"
+      ]
+    },
+    {
+      "id": "reference_tomato_canon_pointer",
+      "required_keywords": [
+        "docs/TOMATO_REFERENCE_CANON_744.md",
+        "canonical local reference",
+        "future work",
+        "implementation notes"
+      ],
+      "required_regex": [
+        "docs/TOMATO_REFERENCE_CANON_744\\.md"
+      ]
+    },
+    {
+      "id": "experience_tomato_safe_path_lesson",
+      "required_keywords": [
+        "TOMATO_SAFE_PATH_745",
+        "LEGACY_TEMP_PATH",
+        "experience",
+        "temporary path",
+        "fallback path"
+      ],
+      "required_regex": [
+        "TOMATO_SAFE_PATH_745"
+      ],
+      "forbidden_keywords": []
+    }
+  ],
+  "test_plan": {
+    "status": "configured",
+    "command": [
+      "python3",
+      "-m",
+      "pytest"
+    ],
+    "working_dir": ".",
+    "source": "python_pytest_fallback",
+    "timeout_sec": 300,
+    "reason": null,
+    "test_like_file_count": 2,
+    "executor": "host",
+    "docker_image": "locobench-memory-eval:python",
+    "environment": {
+      "recommended_executor": "docker",
+      "network": "none"
+    },
+    "integrity": {
+      "status": "basic",
+      "original_test_files": [
+        "vitalops_orchestrator/tests/test_coordinators.py"
+      ]
+    }
+  },
+  "requirement_checks": [
+    {
+      "id": "canary_config_yaml",
+      "type": "require_regex",
+      "path_glob": "vitalops_orchestrator/config.yaml",
+      "source": "overlay",
+      "strength": "explicit",
+      "signal_kind": "config_value",
+      "rationale": "config.yaml defines canary strategy settings.",
+      "pattern": "canary|traffic_percentage|analysis_duration|max_error_rate|max_p95_latency_ms"
+    },
+    {
+      "id": "canary_settings_model",
+      "type": "require_regex",
+      "path_glob": "vitalops_orchestrator/vitalops/models/domain.py",
+      "source": "overlay",
+      "strength": "explicit",
+      "signal_kind": "domain_model",
+      "rationale": "domain model includes CanarySettings linked from DeploymentConfig.",
+      "pattern": "CanarySettings|canary_settings|DeploymentConfig"
+    },
+    {
+      "id": "deployment_coordinator_canary_logic",
+      "type": "require_regex",
+      "path_glob": "vitalops_orchestrator/vitalops/coordinators/deployment.py",
+      "source": "overlay",
+      "strength": "explicit",
+      "signal_kind": "runtime_integration",
+      "rationale": "DeploymentCoordinator implements canary deploy/analyze/promote/rollback.",
+      "pattern": "_deploy_canary_instances|_promote_canary|_rollback_canary|PolicyEngine|MetricCollector"
+    },
+    {
+      "id": "canary_promotion_test",
+      "type": "require_regex",
+      "path_glob": "vitalops_orchestrator/tests/test_coordinators.py",
+      "source": "overlay",
+      "strength": "explicit",
+      "signal_kind": "test_coverage",
+      "rationale": "unit test verifies successful canary promotion.",
+      "pattern": "test_canary_deployment_successful_promotion|_promote_canary|_rollback_canary"
+    }
+  ],
+  "requirement_check_plan": {
+    "status": "configured",
+    "source": "overlay",
+    "reason": null,
+    "check_count": 4,
+    "source_distribution": {
+      "overlay": 4
+    },
+    "strength_distribution": {
+      "explicit": 4
+    },
+    "signal_kind_distribution": {
+      "config_value": 1,
+      "domain_model": 1,
+      "runtime_integration": 1,
+      "test_coverage": 1
+    },
+    "rejection_reason_distribution": {},
+    "rejected_terms": []
+  }
+}

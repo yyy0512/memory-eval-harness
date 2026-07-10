@@ -1,0 +1,11 @@
+You are working in the repository at the current working directory. This is session 4 of a 4-session development task. The previous session has ended and conversation context is unavailable. Use the repository state to continue the task. Do not ask for previous conversation context. Complete only the requirements for this session.
+
+You are tasked with implementing a 'dry run' feature over multiple development sessions. Each session builds upon the last. You must retain context and ensure the final implementation is robust and well-integrated.
+
+**Session 4: Configuration and Integration**
+The 'dry run' logic is now implemented in the commands, but there is no way for a user to activate it. Your final task is to wire everything together.
+- **Objective:** Make the 'dry run' mode configurable and activated by the main dispatcher.
+- **Instructions:**
+  1. Modify `luo_config.h` and `luo_config.c` to add support for a `dry_run` boolean setting (e.g., `dry_run = true`) in the orchestrator's configuration file.
+  2. Modify `dispatcher_main.c` to read this new configuration value at startup.
+  3. When the dispatcher initializes the command execution context, it must pass the `dry_run` value from the configuration into the context structure, thereby activating the logic you've already built.

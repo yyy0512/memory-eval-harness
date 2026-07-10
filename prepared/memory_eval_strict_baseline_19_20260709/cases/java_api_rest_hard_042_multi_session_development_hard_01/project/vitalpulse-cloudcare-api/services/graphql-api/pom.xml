@@ -1,0 +1,339 @@
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  =====================================================================
+  VitalPulse CloudCare API – GraphQL Service
+  ---------------------------------------------------------------------
+  This POM builds the GraphQL façade that runs serverlessly on AWS
+  Lambda (Java 17 runtime).  It relies on Spring Boot 3, Spring GraphQL,
+  and the AWS Serverless Java Container to adapt Spring’s Servlet stack
+  to the Lambda runtime.  DynamoDB Enhanced, OAuth2 Resource-Server,
+  Bucket4j rate-limiting, and extended GraphQL scalars round out the
+  core feature-set required by the healthcare platform.
+  =====================================================================
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="
+            http://maven.apache.org/POM/4.0.0
+            https://maven.apache.org/xsd/maven-4.0.0.xsd">
+
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <!-- Inherit company-wide dependency versions and plugins -->
+        <groupId>com.vitalpulse.cloudcare</groupId>
+        <artifactId>vp-cloudcare-parent</artifactId>
+        <version>2.4.1</version>
+        <relativePath>../pom.xml</relativePath>
+    </parent>
+
+    <groupId>com.vitalpulse.cloudcare</groupId>
+    <artifactId>graphql-api</artifactId>
+    <version>1.6.0</version>
+    <name>VitalPulse CloudCare – GraphQL API</name>
+    <description>Serverless GraphQL façade for VitalPulse CloudCare</description>
+    <packaging>jar</packaging>
+
+    <properties>
+        <java.version>17</java.version>
+        <spring.boot.version>3.2.6</spring.boot.version>
+        <aws.sdk.version>2.25.43</aws.sdk.version>
+        <aws.container.version>1.13.3</aws.container.version>
+        <maven.compiler.parameters>true</maven.compiler.parameters>
+        <!-- Make Spring Boot build a ZIP layout suitable for Lambda -->
+        <spring-boot.repackage.layout>ZIP</spring-boot.repackage.layout>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    </properties>
+
+    <!-- Spring Dependency Management ------------------------------------ -->
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-dependencies</artifactId>
+                <version>${spring.boot.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            <dependency>
+                <groupId>software.amazon.awssdk</groupId>
+                <artifactId>bom</artifactId>
+                <version>${aws.sdk.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+
+    <!-- Runtime Dependencies -------------------------------------------- -->
+    <dependencies>
+        <!-- Spring & GraphQL stack -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-graphql</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.graphql-java</groupId>
+            <artifactId>graphql-java-extended-scalars</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.graphql-java-kickstart</groupId>
+            <artifactId>graphql-java-tools</artifactId>
+            <version>13.2.1</version>
+        </dependency>
+
+        <!-- Spring WebFlux (non-blocking REST fallback & health checks) -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-webflux</artifactId>
+        </dependency>
+
+        <!-- Validation (JSON schema & bean) -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-validation</artifactId>
+        </dependency>
+
+        <!-- OAuth2 / SMART on FHIR Resource Server -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-oauth2-resource-server</artifactId>
+        </dependency>
+
+        <!-- AWS Lambda runtime & adapter -->
+        <dependency>
+            <groupId>com.amazonaws.serverless</groupId>
+            <artifactId>aws-serverless-java-container-springboot3</artifactId>
+            <version>${aws.container.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.amazonaws</groupId>
+            <artifactId>aws-lambda-java-core</artifactId>
+            <version>1.2.3</version>
+        </dependency>
+        <dependency>
+            <groupId>com.amazonaws</groupId>
+            <artifactId>aws-lambda-java-log4j2</artifactId>
+            <version>1.5.1</version>
+        </dependency>
+
+        <!-- AWS SDK v2 – DynamoDB Enhanced client -->
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>dynamodb-enhanced</artifactId>
+        </dependency>
+
+        <!-- Rate Limiting (Bucket4j) -->
+        <dependency>
+            <groupId>com.github.vladimir-bukhtoyarov</groupId>
+            <artifactId>bucket4j-core</artifactId>
+            <version>8.10.1</version>
+        </dependency>
+
+        <!-- Fault Tolerance / Circuit Breaking -->
+        <dependency>
+            <groupId>io.github.resilience4j</groupId>
+            <artifactId>resilience4j-spring-boot3</artifactId>
+            <version>2.2.0</version>
+        </dependency>
+
+        <!-- Monitoring & Observability -->
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-tracing-bridge-brave</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.zipkin.brave</groupId>
+            <artifactId>brave-instrumentation-http</artifactId>
+        </dependency>
+
+        <!-- Logging -->
+        <dependency>
+            <groupId>org.apache.logging.log4j</groupId>
+            <artifactId>log4j-api</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.logging.log4j</groupId>
+            <artifactId>log4j-core</artifactId>
+        </dependency>
+
+        <!-- ----------------------------------------------------------------
+             Test Dependencies
+             -------------------------------------------------------------- -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.graphql</groupId>
+            <artifactId>spring-graphql-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.amazonaws</groupId>
+            <artifactId>aws-java-sdk-dynamodb</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.mockito</groupId>
+            <artifactId>mockito-core</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <!-- Build Plugins ---------------------------------------------------- -->
+    <build>
+        <plugins>
+            <!-- Compile with Java 17 -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>3.11.0</version>
+                <configuration>
+                    <release>${java.version}</release>
+                    <parameters>${maven.compiler.parameters}</parameters>
+                </configuration>
+            </plugin>
+
+            <!-- Spring Boot repackage (ZIP layout for Lambda) -->
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+                <version>${spring.boot.version}</version>
+                <configuration>
+                    <!-- Ensures main class detection and ZIP layout -->
+                    <layered>true</layered>
+                    <image>
+                        <name>ghcr.io/vitalpulse/cloudcare-graphql-api:${project.version}</name>
+                    </image>
+                </configuration>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>repackage</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <!-- Shade plugin creates a single fat-jar for Lambda -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-shade-plugin</artifactId>
+                <version>3.5.1</version>
+                <executions>
+                    <execution>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>shade</goal>
+                        </goals>
+                        <configuration>
+                            <createDependencyReducedPom>false</createDependencyReducedPom>
+                            <shadedArtifactAttached>true</shadedArtifactAttached>
+                            <transformers>
+                                <!-- Preserve META-INF/services entries -->
+                                <transformer implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/>
+                                <!-- Merge Spring Boot app properties -->
+                                <transformer implementation="org.apache.maven.plugins.shade.resource.AppendingTransformer">
+                                    <resource>META-INF/spring.factories</resource>
+                                </transformer>
+                                <!-- Keep Log4j2 plugins cache -->
+                                <transformer implementation="org.apache.maven.plugins.shade.resource.Log4j2PluginsCacheFileTransformer"/>
+                            </transformers>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <!-- Run unit & integration tests in parallel -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>3.2.5</version>
+                <configuration>
+                    <parallel>methods</parallel>
+                    <threadCount>4</threadCount>
+                    <useUnlimitedThreads>false</useUnlimitedThreads>
+                    <trimStackTrace>true</trimStackTrace>
+                </configuration>
+            </plugin>
+
+            <!-- Build & deploy to AWS SAM for local testing -->
+            <plugin>
+                <groupId>software.amazon.awssdk</groupId>
+                <artifactId>sam-maven-plugin</artifactId>
+                <version>1.13.1</version>
+                <configuration>
+                    <template>template-sam.yaml</template>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+
+    <!-- Profiles --------------------------------------------------------- -->
+    <profiles>
+        <!-- Local Dev profile: hot reload and localstack endpoints -->
+        <profile>
+            <id>dev</id>
+            <activation>
+                <property>
+                    <name>env</name>
+                    <value>dev</value>
+                </property>
+            </activation>
+            <dependencies>
+                <!-- Spring DevTools for hot reload -->
+                <dependency>
+                    <groupId>org.springframework.boot</groupId>
+                    <artifactId>spring-boot-devtools</artifactId>
+                    <scope>runtime</scope>
+                </dependency>
+                <!-- LocalStack for AWS service emulation -->
+                <dependency>
+                    <groupId>cloud.localstack</groupId>
+                    <artifactId>localstack-utils</artifactId>
+                    <version>0.2.23</version>
+                    <scope>test</scope>
+                </dependency>
+            </dependencies>
+        </profile>
+
+        <!-- Production profile: enable ProGuard for size reduction -->
+        <profile>
+            <id>prod</id>
+            <activation>
+                <property>
+                    <name>env</name>
+                    <value>prod</value>
+                </property>
+            </activation>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>com.github.wvengen</groupId>
+                        <artifactId>proguard-maven-plugin</artifactId>
+                        <version>2.5.1</version>
+                        <executions>
+                            <execution>
+                                <phase>package</phase>
+                                <goals>
+                                    <goal>proguard</goal>
+                                </goals>
+                            </execution>
+                        </executions>
+                        <configuration>
+                            <obfuscate>true</obfuscate>
+                            <shrink>true</shrink>
+                            <optimize>true</optimize>
+                            <skipNonpublicLibraryClasses>true</skipNonpublicLibraryClasses>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
+
+</project>
+```

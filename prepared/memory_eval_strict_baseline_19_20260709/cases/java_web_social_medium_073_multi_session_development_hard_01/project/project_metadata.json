@@ -1,0 +1,144 @@
+{
+  "specification": {
+    "unique_id": "java_web_social_medium_073",
+    "name": "EduPulse Live Learning Hub",
+    "description": "EduPulse Live Learning Hub is a medium-scale, event-driven social-learning platform where students and instructors interact in real time through micro-learning \u2018pulses\u2019\u2014short lessons, quizzes, and peer feedback loops. Each user action (posting a pulse, submitting an answer, uploading an assignment, reacting to a peer\u2019s work, or initiating a payment for premium courses) emits domain events that ripple through the system to drive notifications, progress analytics, and adaptive content recommendations.\n\nBuilt on an event-driven backbone, EduPulse decouples core education workflows\u2014content delivery, assessment, collaboration, and credentialing\u2014into independent services that communicate via a message broker. This allows the platform to scale classroom-like interactions (live Q&A, badge awarding, group challenges) without tight coupling, ensuring responsive design on any device, seamless file uploads (assignments, project videos), automated email notifications, and secure payment processing for course bundles. The architecture also supports rich logging, granular error handling, and robust data validation, all while adhering to MVC with a dedicated service layer and ORM-backed persistence.",
+    "domain": "web_social",
+    "complexity": "medium",
+    "language": "java",
+    "architecture": "event_driven",
+    "theme": "education",
+    "target_file_count": 22,
+    "target_token_count": 185951,
+    "features": [
+      "responsive_design",
+      "email_notifications",
+      "file_upload",
+      "logging_system",
+      "error_handling",
+      "data_validation",
+      "payment_processing",
+      "database_integration",
+      "session_management",
+      "frontend_interface",
+      "api_endpoints"
+    ],
+    "architecture_patterns": [
+      "Service_Layer",
+      "MVC",
+      "Database_ORM",
+      "Authentication_Middleware"
+    ],
+    "dependencies": [
+      "Spring Boot 3.x (core framework, MVC, validation, actuator)",
+      "Spring WebFlux (reactive, non-blocking controllers)",
+      "Project Reactor (reactive streams backbone)",
+      "Apache Kafka or Redpanda (event bus for domain events)",
+      "Spring for Apache Kafka (message serialization, consumer/producer management)",
+      "Spring Security (session management, authentication middleware)",
+      "Hibernate / Spring Data JPA (Database_ORM layer)",
+      "Flyway (database migrations)",
+      "Thymeleaf + Bootstrap 5 (responsive frontend templates)",
+      "Jakarta Bean Validation (data validation annotations)",
+      "JavaMail / Spring Mail (email notifications)",
+      "AWS S3 SDK or MinIO (file upload storage)",
+      "Stripe Java SDK (payment processing)",
+      "SLF4J + Logback (logging system)",
+      "OpenAPI / SpringDoc (interactive API endpoints documentation)"
+    ],
+    "seed": 288794
+  },
+  "generated_timestamp": 1754355541.53527,
+  "phase_1_complete": true,
+  "uniqueness_factors": {
+    "domain": "web_social",
+    "complexity": "medium",
+    "architecture": "event_driven",
+    "theme": "education",
+    "seed": 288794
+  },
+  "files": [
+    {
+      "path": "src/utils.java",
+      "type": "source"
+    },
+    {
+      "path": "src/config.java",
+      "type": "config"
+    },
+    {
+      "path": "src/constants.java",
+      "type": "source"
+    },
+    {
+      "path": "tests/test_main.java",
+      "type": "test"
+    },
+    {
+      "path": "tests/test_utils.java",
+      "type": "test"
+    },
+    {
+      "path": "README.md",
+      "type": "documentation"
+    },
+    {
+      "path": "package.json",
+      "type": "config"
+    },
+    {
+      "path": ".gitignore",
+      "type": "source"
+    },
+    {
+      "path": "Dockerfile",
+      "type": "documentation"
+    },
+    {
+      "path": "docs/api.md",
+      "type": "documentation"
+    },
+    {
+      "path": "src/module_1.java",
+      "type": "source"
+    },
+    {
+      "path": "src/module_2.java",
+      "type": "source"
+    },
+    {
+      "path": "src/module_3.java",
+      "type": "source"
+    },
+    {
+      "path": "src/module_4.java",
+      "type": "source"
+    },
+    {
+      "path": "src/module_5.java",
+      "type": "source"
+    },
+    {
+      "path": "src/module_6.java",
+      "type": "source"
+    },
+    {
+      "path": "src/module_7.java",
+      "type": "source"
+    },
+    {
+      "path": "src/module_8.java",
+      "type": "source"
+    },
+    {
+      "path": "src/module_9.java",
+      "type": "source"
+    }
+  ],
+  "generated_stats": {
+    "files_count": 22,
+    "lines_count": 6438,
+    "generation_time": 2398.4145028591156,
+    "timestamp": 1754375110.333386
+  }
+}

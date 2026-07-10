@@ -1,0 +1,194 @@
+package com.circleconnect.nexus.domain.shared;
+
+import com.fasterxml.jackson.annotation.JsonCreator;
+import com.fasterxml.jackson.annotation.JsonValue;
+import org.springframework.util.Assert;
+import org.springframework.util.StringUtils;
+
+import javax.persistence.AttributeConverter;
+import javax.persistence.Converter;
+import java.io.Serial;
+import java.io.Serializable;
+import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
+
+/**
+ * A flexible, runtime–extensible classification of platform artefacts.
+ *
+ * <p>The built-in {@code Type} constants (e.g. {@link #CIRCLE}, {@link #POST}) cover
+ * the majority of domain concepts shipped with CircleConnect Nexus, but the class
+ * intentionally supports dynamic registration so that future modules or plugins
+ * can contribute their own types without having to modify the core codebase.</p>
+ *
+ * <p>Instances are cached and guaranteed to be singletons per slug value to
+ * maintain reference equality across the JVM.</p>
+ */
+@SuppressWarnings("unused")
+public final class Type implements Comparable<Type>, Serializable {
+
+    @Serial
+    private static final long serialVersionUID = 5312498143593711848L;
+
+    /* ────────────────────────────────────────────────────────────────────────────
+     * Pre-defined platform types
+     * ──────────────────────────────────────────────────────────────────────────── */
+    public static final Type CIRCLE   = builtIn("circle",   "Circle",       Category.DOMAIN);
+    public static final Type EVENT    = builtIn("event",    "Event",        Category.DOMAIN);
+    public static final Type POST     = builtIn("post",     "Post",         Category.CONTENT);
+    public static final Type COMMENT  = builtIn("comment",  "Comment",      Category.CONTENT);
+    public static final Type PLEDGE   = builtIn("pledge",   "Pledge",       Category.PAYMENT);
+    public static final Type PAYMENT  = builtIn("payment",  "Payment",      Category.PAYMENT);
+    public static final Type SYSTEM   = builtIn("system",   "System Event", Category.SYSTEM);
+
+    /* ────────────────────────────────────────────────────────────────────────────
+     * Factory & registry
+     * ──────────────────────────────────────────────────────────────────────────── */
+    private static final Map<String, Type> REGISTRY = new ConcurrentHashMap<>(16);
+
+    private static Type builtIn(String slug, String displayName, Category category) {
+        Type t = new Type(slug, displayName, category, true);
+        REGISTRY.put(slug, t);
+        return t;
+    }
+
+    /**
+     * Registers (or returns an already-registered) {@code Type}.
+     *
+     * @param slug         a unique, URL-friendly identifier (lower-case kebab case)
+     * @param displayName  human-readable representation
+     * @param category     semantic grouping for UI/analytics
+     * @return the cached singleton instance
+     * @throws IllegalArgumentException if the slug is malformed or collides with an existing <em>different</em> type
+     */
+    public static Type register(String slug, String displayName, Category category) {
+        validateSlug(slug);
+        Objects.requireNonNull(displayName, "displayName must not be null");
+        Objects.requireNonNull(category, "category must not be null");
+
+        return REGISTRY.compute(slug, (key, existing) -> {
+            if (existing != null) {
+                // If an equal Type already exists, simply return it, else fail fast.
+                if (!existing.displayName.equals(displayName) || existing.category != category) {
+                    throw new IllegalStateException("Slug '" + slug + "' already registered with different attributes.");
+                }
+                return existing;
+            }
+            return new Type(slug, displayName, category, false);
+        });
+    }
+
+    /**
+     * Looks up a {@code Type} by slug.
+     *
+     * @param slug the slug to resolve
+     * @return an {@code Optional} containing the matching {@code Type} or empty
+     */
+    public static Optional<Type> of(String slug) {
+        if (!StringUtils.hasText(slug)) {
+            return Optional.empty();
+        }
+        return Optional.ofNullable(REGISTRY.get(slug.toLowerCase(Locale.ROOT)));
+    }
+
+    @JsonCreator
+    public static Type fromJson(String slug) {
+        return of(slug).orElseThrow(() -> new IllegalArgumentException("Unknown type slug: " + slug));
+    }
+
+    /* ────────────────────────────────────────────────────────────────────────────
+     * Instance state
+     * ──────────────────────────────────────────────────────────────────────────── */
+    private final String   slug;
+    private final String   displayName;
+    private final Category category;
+    private final boolean  builtIn;
+
+    private Type(String slug, String displayName, Category category, boolean builtIn) {
+        this.slug        = slug;
+        this.displayName = displayName;
+        this.category    = category;
+        this.builtIn     = builtIn;
+    }
+
+    @JsonValue
+    public String getSlug() {
+        return slug;
+    }
+
+    public String getDisplayName() {
+        return displayName;
+    }
+
+    public Category getCategory() {
+        return category;
+    }
+
+    public boolean isBuiltIn() {
+        return builtIn;
+    }
+
+    /* ────────────────────────────────────────────────────────────────────────────
+     * Object overrides
+     * ──────────────────────────────────────────────────────────────────────────── */
+    @Override
+    public int compareTo(Type other) {
+        return this.slug.compareTo(other.slug);
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        return this == o; // Singletons per slug make reference equality sufficient
+    }
+
+    @Override
+    public int hashCode() {
+        return slug.hashCode();
+    }
+
+    @Override
+    public String toString() {
+        return slug;
+    }
+
+    /* ────────────────────────────────────────────────────────────────────────────
+     * JPA Converter
+     * ──────────────────────────────────────────────────────────────────────────── */
+    @Converter(autoApply = true)
+    public static final class JpaConverter implements AttributeConverter<Type, String> {
+
+        @Override
+        public String convertToDatabaseColumn(Type attribute) {
+            return attribute == null ? null : attribute.slug;
+        }
+
+        @Override
+        public Type convertToEntityAttribute(String dbData) {
+            if (dbData == null) {
+                return null;
+            }
+            return Type.of(dbData)
+                       .orElseThrow(() -> new IllegalStateException("Unknown type slug in DB: " + dbData));
+        }
+    }
+
+    /* ────────────────────────────────────────────────────────────────────────────
+     * helpers
+     * ──────────────────────────────────────────────────────────────────────────── */
+    private static void validateSlug(String slug) {
+        Assert.hasText(slug, "slug must not be empty");
+        if (!slug.matches("[a-z][a-z0-9\\-]{0,31}")) {
+            throw new IllegalArgumentException("Invalid slug format: " + slug +
+                    ". Expected lower-case kebab case, max 32 chars.");
+        }
+    }
+
+    /* ────────────────────────────────────────────────────────────────────────────
+     * Categorisation enum
+     * ──────────────────────────────────────────────────────────────────────────── */
+    public enum Category {
+        DOMAIN,      // core domain aggregates (Circle, Event …)
+        CONTENT,     // user-authored content (Post, Comment …)
+        PAYMENT,     // financial artefacts (Pledge, Payment …)
+        SYSTEM       // platform or infra messages
+    }
+}

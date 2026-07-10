@@ -1,1 +1,0 @@
-- [Conditional cache bypass plan](conditional_cache_bypass_plan.md) — implementation targets and test plan for X-Cache-Bypass work

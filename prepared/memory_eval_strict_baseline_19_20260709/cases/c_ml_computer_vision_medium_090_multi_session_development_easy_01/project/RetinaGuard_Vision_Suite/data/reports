@@ -1,0 +1,522 @@
+/*
+ * RetinaGuard Vision Suite
+ * Module: Data Reports
+ * File  : report_generator.c
+ *
+ * Description
+ * -----------------------------------------------------------------------------
+ * Generates risk–stratified evaluation reports for the diabetic-retinopathy
+ * inference pipeline.  The module produces both CSV and JSON artefacts that are
+ * consumed by the real-time monitoring dashboard and archived for longitudinal
+ * outcomes tracking.  It also broadcasts a “report-generated” event to any
+ * in-process observers (e.g., model registry, monitoring dashboards) via a
+ * lightweight Observer pattern implementation.
+ *
+ * Public API
+ * -----------------------------------------------------------------------------
+ *  RG_Report            *rg_report_create(const char *model_version);
+ *  int                   rg_report_add_entry(RG_Report *rep,
+ *                                            const char *image_id,
+ *                                            int        dr_grade,
+ *                                            double     confidence,
+ *                                            time_t     capture_ts);
+ *  int                   rg_report_save(const RG_Report *rep,
+ *                                        const char     *directory,
+ *                                        int             formats);  // bitmask
+ *  void                  rg_report_destroy(RG_Report *rep);
+ *  int                   rg_report_register_observer(rg_report_observer cb);
+ *  int                   rg_report_unregister_observer(rg_report_observer cb);
+ *
+ * Build
+ * -----------------------------------------------------------------------------
+ *  gcc -std=c99 -Wall -Wextra -pedantic -O2 -c report_generator.c
+ *
+ * Notes
+ * -----------------------------------------------------------------------------
+ *  • No third-party dependencies are required; the code relies solely on the
+ *    ISO C99 standard library.
+ *  • Thread-safety: The observer list is protected by a simple mutex to permit
+ *    concurrent report generation in multi-threaded deployments.
+ */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
+#include <errno.h>
+#include <stdint.h>
+#include <inttypes.h>
+#include <pthread.h>
+
+/* -------------------------------------------------------------------------- */
+/*                                Public Types                                */
+/* -------------------------------------------------------------------------- */
+
+/* Risk level enumeration aligned with ophthalmology triage guidelines. */
+typedef enum {
+    RG_RISK_LOW = 0,
+    RG_RISK_MODERATE,
+    RG_RISK_HIGH,
+    RG_RISK_CRITICAL
+} RG_RiskLevel;
+
+/* Bitmask flags that control which report(s) will be generated. */
+#define RG_FMT_CSV   0x01
+#define RG_FMT_JSON  0x02
+#define RG_FMT_ALL   (RG_FMT_CSV | RG_FMT_JSON)
+
+/* Forward declaration of opaque report handle. */
+typedef struct RG_Report RG_Report;
+
+/* Observer callback signature. */
+typedef void (*rg_report_observer)(const char *filepath, const RG_Report *report);
+
+/* -------------------------------------------------------------------------- */
+/*                               Private Macros                               */
+/* -------------------------------------------------------------------------- */
+
+#define RG_INITIAL_CAPACITY 128      /* Initial capacity for report entries. */
+#define RG_MAX_OBSERVERS    32       /* Hard limit for observer callbacks.   */
+#define RG_ISO_TS_LEN       32       /* yyyy-mm-ddThh:mm:ssZ                */
+
+/* Convenience macro for safe memory allocation. */
+#define RG_ALLOC(ptr, nmemb, type)                              \
+    do {                                                        \
+        (ptr) = (type *)calloc((nmemb), sizeof(type));          \
+        if (!(ptr)) {                                           \
+            perror("calloc");                                   \
+            goto error;                                         \
+        }                                                       \
+    } while (0)
+
+/* -------------------------------------------------------------------------- */
+/*                               Private Types                                */
+/* -------------------------------------------------------------------------- */
+
+typedef struct {
+    char        *image_id;      /* Unique identifier for the image.          */
+    time_t       capture_ts;    /* When the fundus image was captured.       */
+    int          dr_grade;      /* Inference grade (0–4).                    */
+    double       confidence;    /* Softmax probability of the predicted grade*/
+    RG_RiskLevel risk;          /* Mapped risk level.                        */
+} RG_Entry;
+
+struct RG_Report {
+    char   created_ts[RG_ISO_TS_LEN]; /* ISO-8601 timestamp of report creation*/
+    char  *model_version;             /* e.g., "v1.2.5"                      */
+    RG_Entry *entries;                /* Dynamic array of entries.           */
+    size_t    len;                    /* Number of entries.                  */
+    size_t    capacity;               /* Allocated capacity.                 */
+};
+
+/* -------------------------------------------------------------------------- */
+/*                            Observer Infrastructure                         */
+/* -------------------------------------------------------------------------- */
+
+static rg_report_observer g_observers[RG_MAX_OBSERVERS];
+static size_t             g_observer_cnt = 0;
+static pthread_mutex_t    g_obs_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+/* Register an observer. Returns 0 on success, -1 otherwise. */
+int rg_report_register_observer(rg_report_observer cb)
+{
+    if (!cb) return -1;
+
+    pthread_mutex_lock(&g_obs_mutex);
+
+    for (size_t i = 0; i < g_observer_cnt; ++i) {
+        if (g_observers[i] == cb) {   /* Already registered. */
+            pthread_mutex_unlock(&g_obs_mutex);
+            return 0;
+        }
+    }
+
+    if (g_observer_cnt == RG_MAX_OBSERVERS) {
+        pthread_mutex_unlock(&g_obs_mutex);
+        return -1;
+    }
+
+    g_observers[g_observer_cnt++] = cb;
+
+    pthread_mutex_unlock(&g_obs_mutex);
+    return 0;
+}
+
+/* Unregister an observer. Returns 0 on success, -1 otherwise. */
+int rg_report_unregister_observer(rg_report_observer cb)
+{
+    if (!cb) return -1;
+
+    pthread_mutex_lock(&g_obs_mutex);
+
+    size_t i;
+    for (i = 0; i < g_observer_cnt; ++i) {
+        if (g_observers[i] == cb) break;
+    }
+    if (i == g_observer_cnt) {
+        pthread_mutex_unlock(&g_obs_mutex);
+        return -1;  /* Not found. */
+    }
+    /* Shift remaining observers down. */
+    for (; i + 1 < g_observer_cnt; ++i) {
+        g_observers[i] = g_observers[i + 1];
+    }
+    --g_observer_cnt;
+
+    pthread_mutex_unlock(&g_obs_mutex);
+    return 0;
+}
+
+/* Broadcast helper (non-public). */
+static void rg_broadcast_event(const char *filepath, const RG_Report *rep)
+{
+    pthread_mutex_lock(&g_obs_mutex);
+
+    for (size_t i = 0; i < g_observer_cnt; ++i) {
+        g_observers[i](filepath, rep);
+    }
+
+    pthread_mutex_unlock(&g_obs_mutex);
+}
+
+/* -------------------------------------------------------------------------- */
+/*                          Internal Utility Helpers                          */
+/* -------------------------------------------------------------------------- */
+
+/* Map graded severity & confidence to risk category. */
+static RG_RiskLevel
+rg_classify_risk(int dr_grade, double confidence)
+{
+    if (dr_grade <= 0) return RG_RISK_LOW;
+
+    if (dr_grade == 1) {
+        return confidence >= 0.85 ? RG_RISK_MODERATE : RG_RISK_LOW;
+    }
+    if (dr_grade == 2) {
+        return RG_RISK_MODERATE;
+    }
+    if (dr_grade == 3) {
+        return confidence >= 0.60 ? RG_RISK_HIGH : RG_RISK_MODERATE;
+    }
+    /* dr_grade >= 4 */
+    return RG_RISK_CRITICAL;
+}
+
+/* Convert risk to printable string. */
+static const char *
+rg_risk_to_str(RG_RiskLevel r)
+{
+    switch (r) {
+        case RG_RISK_LOW:      return "LOW";
+        case RG_RISK_MODERATE: return "MODERATE";
+        case RG_RISK_HIGH:     return "HIGH";
+        case RG_RISK_CRITICAL: return "CRITICAL";
+        default:               return "UNKNOWN";
+    }
+}
+
+/* Format a time_t into ISO-8601 "YYYY-MM-DDThh:mm:ssZ". */
+static void
+rg_ts_iso8601(time_t ts, char out[RG_ISO_TS_LEN])
+{
+    struct tm gmt;
+    gmtime_r(&ts, &gmt);
+    strftime(out, RG_ISO_TS_LEN, "%Y-%m-%dT%H:%M:%SZ", &gmt);
+}
+
+/* Ensure the dynamic array can hold at least `needed` elements. */
+static int
+rg_reserve(RG_Report *rep, size_t needed)
+{
+    if (needed <= rep->capacity)
+        return 0;
+
+    size_t new_cap = rep->capacity ? rep->capacity * 2 : RG_INITIAL_CAPACITY;
+    while (new_cap < needed)
+        new_cap *= 2;
+
+    RG_Entry *new_entries = realloc(rep->entries, new_cap * sizeof(*new_entries));
+    if (!new_entries) return -1;
+
+    rep->entries  = new_entries;
+    rep->capacity = new_cap;
+    return 0;
+}
+
+/* -------------------------------------------------------------------------- */
+/*                           Public API - Creation                            */
+/* -------------------------------------------------------------------------- */
+
+/*
+ * Allocate and initialise a new report instance.
+ * The caller must release the structure via rg_report_destroy().
+ */
+RG_Report *
+rg_report_create(const char *model_version)
+{
+    RG_Report *rep = NULL;
+    RG_ALLOC(rep, 1, RG_Report);
+
+    rep->capacity = RG_INITIAL_CAPACITY;
+    RG_ALLOC(rep->entries, rep->capacity, RG_Entry);
+
+    time_t now = time(NULL);
+    rg_ts_iso8601(now, rep->created_ts);
+
+    if (model_version) {
+        rep->model_version = strdup(model_version);
+        if (!rep->model_version) {
+            perror("strdup");
+            goto error;
+        }
+    }
+
+    return rep;
+
+error:
+    if (rep) {
+        free(rep->entries);
+        free(rep->model_version);
+    }
+    free(rep);
+    return NULL;
+}
+
+/* -------------------------------------------------------------------------- */
+/*                         Public API - Add an Entry                          */
+/* -------------------------------------------------------------------------- */
+
+int
+rg_report_add_entry(RG_Report *rep, const char *image_id,
+                    int dr_grade, double confidence, time_t capture_ts)
+{
+    if (!rep || !image_id) return -1;
+    if (dr_grade < 0 || dr_grade > 4) return -1;
+    if (confidence < 0.0 || confidence > 1.0) return -1;
+
+    if (rg_reserve(rep, rep->len + 1) != 0) {
+        perror("realloc");
+        return -1;
+    }
+
+    RG_Entry *e = &rep->entries[rep->len];
+
+    e->image_id = strdup(image_id);
+    if (!e->image_id) {
+        perror("strdup");
+        return -1;
+    }
+
+    e->capture_ts = capture_ts;
+    e->dr_grade   = dr_grade;
+    e->confidence = confidence;
+    e->risk       = rg_classify_risk(dr_grade, confidence);
+
+    rep->len++;
+
+    return 0;
+}
+
+/* -------------------------------------------------------------------------- */
+/*                      Internal Report-Generation Routines                   */
+/* -------------------------------------------------------------------------- */
+
+static int
+rg_emit_csv(const RG_Report *rep, const char *filepath)
+{
+    FILE *fp = fopen(filepath, "w");
+    if (!fp) {
+        perror(filepath);
+        return -1;
+    }
+
+    /* Header */
+    fprintf(fp,
+        "# RetinaGuard Vision Suite ‑ Evaluation Report\n"
+        "# Created: %s\n"
+        "# Model  : %s\n"
+        "\n"
+        "image_id,capture_ts,dr_grade,confidence,risk\n",
+        rep->created_ts,
+        rep->model_version ? rep->model_version : "N/A");
+
+    /* Rows */
+    char tsbuf[RG_ISO_TS_LEN];
+    for (size_t i = 0; i < rep->len; ++i) {
+        const RG_Entry *e = &rep->entries[i];
+        rg_ts_iso8601(e->capture_ts, tsbuf);
+        fprintf(fp, "%s,%s,%d,%.3f,%s\n",
+                e->image_id, tsbuf, e->dr_grade, e->confidence,
+                rg_risk_to_str(e->risk));
+    }
+
+    if (fclose(fp) != 0) {
+        perror("fclose");
+        return -1;
+    }
+    return 0;
+}
+
+static int
+rg_emit_json(const RG_Report *rep, const char *filepath)
+{
+    FILE *fp = fopen(filepath, "w");
+    if (!fp) {
+        perror(filepath);
+        return -1;
+    }
+
+    fprintf(fp, "{\n");
+    fprintf(fp, "  \"created_ts\": \"%s\",\n", rep->created_ts);
+    fprintf(fp, "  \"model_version\": \"%s\",\n",
+            rep->model_version ? rep->model_version : "N/A");
+    fprintf(fp, "  \"entries\": [\n");
+
+    char tsbuf[RG_ISO_TS_LEN];
+    for (size_t i = 0; i < rep->len; ++i) {
+        const RG_Entry *e = &rep->entries[i];
+        rg_ts_iso8601(e->capture_ts, tsbuf);
+
+        fprintf(fp,
+            "    {\n"
+            "      \"image_id\": \"%s\",\n"
+            "      \"capture_ts\": \"%s\",\n"
+            "      \"dr_grade\": %d,\n"
+            "      \"confidence\": %.3f,\n"
+            "      \"risk\": \"%s\"\n"
+            "    }%s\n",
+            e->image_id, tsbuf, e->dr_grade, e->confidence,
+            rg_risk_to_str(e->risk),
+            (i + 1 < rep->len) ? "," : "");
+    }
+
+    fprintf(fp, "  ]\n}\n");
+
+    if (fclose(fp) != 0) {
+        perror("fclose");
+        return -1;
+    }
+    return 0;
+}
+
+/* -------------------------------------------------------------------------- */
+/*                        Public API - Persist Report                         */
+/* -------------------------------------------------------------------------- */
+
+static int
+rg_build_filepath(const char *dir, const char *prefix,
+                  const char *ext, char **out_path)
+{
+    if (!dir || !prefix || !ext || !out_path) return -1;
+
+    size_t len = strlen(dir) + strlen(prefix) + strlen(ext) + 4; /* '/', '.', '\0' */
+    char *path = malloc(len);
+    if (!path) {
+        perror("malloc");
+        return -1;
+    }
+
+    snprintf(path, len, "%s/%s.%s", dir, prefix, ext);
+    *out_path = path;
+    return 0;
+}
+
+/* Persist the report and broadcast event(s). */
+int
+rg_report_save(const RG_Report *rep, const char *directory, int formats)
+{
+    if (!rep || !directory) return -1;
+
+    char iso_now[RG_ISO_TS_LEN];
+    rg_ts_iso8601(time(NULL), iso_now);
+
+    /* Basename: report_<timestamp>_<pid> */
+    char basename[64];
+    snprintf(basename, sizeof(basename),
+             "report_%s_%" PRIdMAX, iso_now, (intmax_t)getpid());
+
+    int rc = 0;
+
+    if (formats & RG_FMT_CSV) {
+        char *csv_path = NULL;
+        if (rg_build_filepath(directory, basename, "csv", &csv_path) != 0)
+            return -1;
+
+        if (rg_emit_csv(rep, csv_path) == 0)
+            rg_broadcast_event(csv_path, rep);
+        else
+            rc = -1;
+
+        free(csv_path);
+    }
+
+    if (formats & RG_FMT_JSON) {
+        char *json_path = NULL;
+        if (rg_build_filepath(directory, basename, "json", &json_path) != 0)
+            return -1;
+
+        if (rg_emit_json(rep, json_path) == 0)
+            rg_broadcast_event(json_path, rep);
+        else
+            rc = -1;
+
+        free(json_path);
+    }
+
+    return rc;
+}
+
+/* -------------------------------------------------------------------------- */
+/*                        Public API - Destroy Report                         */
+/* -------------------------------------------------------------------------- */
+
+void
+rg_report_destroy(RG_Report *rep)
+{
+    if (!rep) return;
+
+    for (size_t i = 0; i < rep->len; ++i) {
+        free(rep->entries[i].image_id);
+    }
+    free(rep->entries);
+    free(rep->model_version);
+    free(rep);
+}
+
+/* -------------------------------------------------------------------------- */
+/*                           Self-Test / Example                              */
+/* -------------------------------------------------------------------------- */
+
+#ifdef RG_REPORT_GENERATOR_TEST
+
+/* Simple observer that logs generated report paths to stdout. */
+static void
+observer_logger(const char *path, const RG_Report *rep)
+{
+    (void)rep;
+    printf("[observer] New report generated: %s\n", path);
+}
+
+int main(void)
+{
+    /* Register example observer. */
+    rg_report_register_observer(observer_logger);
+
+    /* Create report. */
+    RG_Report *rep = rg_report_create("v2.0.1");
+    if (!rep) return EXIT_FAILURE;
+
+    /* Add dummy entries. */
+    rg_report_add_entry(rep, "IMG_0001", 2, 0.92, time(NULL) - 3600);
+    rg_report_add_entry(rep, "IMG_0002", 4, 0.87, time(NULL) - 7200);
+    rg_report_add_entry(rep, "IMG_0003", 1, 0.65, time(NULL) - 1800);
+
+    /* Persist to ./output (ensure directory exists) */
+    if (rg_report_save(rep, "./output", RG_FMT_ALL) != 0) {
+        fprintf(stderr, "Failed to save report\n");
+    }
+
+    rg_report_destroy(rep);
+    return 0;
+}
+#endif /* RG_REPORT_GENERATOR_TEST */

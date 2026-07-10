@@ -1,0 +1,124 @@
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  ProdSecure Orchestrator – PHPUnit configuration
+  ------------------------------------------------
+  This configuration is optimized for a modern, CI-driven workflow.
+  It enables strict test execution, code-coverage generation, and
+  integrates seamlessly with popular CI servers (GitHub Actions,
+  GitLab CI, Jenkins) out of the box.
+
+  © 2024 Acme Security Solutions. All rights reserved.
+-->
+<phpunit
+        bootstrap="tests/bootstrap.php"
+        colors="true"
+        verbose="true"
+        convertDeprecationsToExceptions="true"
+        failOnIncomplete="true"
+        failOnRisky="true"
+        failOnWarning="true"
+        executionOrder="depends,defects"
+        cacheDirectory=".build/.phpunit.cache"
+>
+    <!-- ----------------------------------------------------------------
+         1. PHP Settings & ENV
+         ---------------------------------------------------------------- -->
+    <php>
+        <!-- Force strict types and full error reporting inside test runs -->
+        <ini name="assert.active" value="1"/>
+        <ini name="assert.exception" value="1"/>
+        <ini name="display_errors" value="1"/>
+        <ini name="memory_limit" value="-1"/>
+
+        <!-- Framework-wide feature flags -->
+        <const name="PSO_FEATURE_FLAG_SERVICE_MESH" value="true"/>
+        <const name="PSO_FEATURE_FLAG_CHAIN_OF_RESP" value="true"/>
+
+        <!-- The test database runs in an isolated Docker container -->
+        <env name="DB_DSN" value="pgsql:host=127.0.0.1;port=55432;dbname=pso_test"/>
+        <env name="DB_USER" value="pso_ci"/>
+        <env name="DB_PASSWORD" value="ci_secret"/>
+
+        <!-- Toggle third-party integrations for unit tests -->
+        <env name="SENTRY_DSN" value=""/>
+        <env name="ELK_ENDPOINT" value=""/>
+    </php>
+
+    <!-- ----------------------------------------------------------------
+         2. Coverage Configuration
+         ---------------------------------------------------------------- -->
+    <coverage processUncoveredFiles="true">
+        <include>
+            <directory suffix=".php">src/</directory>
+        </include>
+        <exclude>
+            <directory suffix=".php">src/Infrastructure/ThirdParty/</directory>
+            <directory suffix=".php">src/UI/</directory>
+            <directory suffix=".php">vendor/</directory>
+        </exclude>
+
+        <report>
+            <clover outputFile=".build/reports/coverage/clover.xml"/>
+            <html outputDirectory=".build/reports/coverage/html"/>
+            <text outputFile=".build/reports/coverage/coverage.txt"/>
+        </report>
+    </coverage>
+
+    <!-- ----------------------------------------------------------------
+         3. Logging
+         ---------------------------------------------------------------- -->
+    <logging>
+        <junit outputFile=".build/reports/unit.junit.xml" logIncompleteSkipped="true"/>
+        <teamcity outputFile=".build/reports/unit.teamcity.xml"/>
+        <testdoxHtml outputFile=".build/reports/testdox/index.html"/>
+        <coverageCrap4j outputFile=".build/reports/coverage/crap4j.xml" threshold="30"/>
+    </logging>
+
+    <!-- ----------------------------------------------------------------
+         4. Test Suites
+         ---------------------------------------------------------------- -->
+    <testsuites>
+        <testsuite name="Unit">
+            <directory suffix="Test.php">tests/Unit</directory>
+        </testsuite>
+
+        <testsuite name="Integration">
+            <!-- Integration tests may rely on Docker-ized services -->
+            <directory suffix="Test.php">tests/Integration</directory>
+        </testsuite>
+
+        <testsuite name="E2E">
+            <!-- End-to-end tests run via Codeception or Behat; disabled by default -->
+            <directory suffix="Cept.php">tests/E2E</directory>
+            <exclude>
+                <file>tests/E2E/README.md</file>
+            </exclude>
+        </testsuite>
+    </testsuites>
+
+    <!-- ----------------------------------------------------------------
+         5. Extensions
+         ---------------------------------------------------------------- -->
+    <extensions>
+        <!-- Generates pretty CLI output and timing statistics -->
+        <bootstrap class="Psr\Log\NullLogger"/>
+        <!-- Enforce architecture rules (Hexagonal, Layered) if available -->
+        <!-- e.g., <extension class="DeptracPHPUnit\DeptracExtension"/> -->
+    </extensions>
+
+    <!-- ----------------------------------------------------------------
+         6. Listeners (optional)
+         ---------------------------------------------------------------- -->
+    <listeners>
+        <!-- Sends notifications to Slack when tests fail -->
+        <!-- 
+        <listener class="App\Tests\Infrastructure\SlackTestListener">
+            <arguments>
+                <string>${SLACK_WEBHOOK_URL}</string>
+            </arguments>
+        </listener>
+        -->
+    </listeners>
+</phpunit>
+```

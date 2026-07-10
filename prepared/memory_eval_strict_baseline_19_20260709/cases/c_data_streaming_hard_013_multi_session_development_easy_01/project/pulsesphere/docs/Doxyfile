@@ -1,0 +1,158 @@
+#---------------------------------------------------------------------------
+# Project-related configuration options
+#---------------------------------------------------------------------------
+
+DOXYFILE_ENCODING      = UTF-8
+PROJECT_NAME           = "PulseSphere"
+PROJECT_BRIEF          = "Real-Time Social Pulse Streaming Platform"
+PROJECT_NUMBER         = "v1.6.2"
+OUTPUT_DIRECTORY       = docs/api
+CREATE_SUBDIRS         = YES
+OUTPUT_LANGUAGE        = English
+GENERATE_TAGFILE       = docs/api/PulseSphere.tag
+OPTIMIZE_OUTPUT_FOR_C  = YES
+OPTIMIZE_OUTPUT_JAVA   = NO
+OPTIMIZE_FOR_FORTRAN   = NO
+OPTIMIZE_OUTPUT_VHDL   = NO
+MARKDOWN_SUPPORT       = YES
+EXTENSION_MAPPING      = c=C h=C
+TAB_SIZE               = 4
+
+#---------------------------------------------------------------------------
+# Build-related configuration options
+#---------------------------------------------------------------------------
+
+EXTRACT_ALL            = YES
+EXTRACT_PRIVATE        = YES
+EXTRACT_STATIC         = YES
+EXTRACT_LOCAL_CLASSES  = YES
+EXTRACT_LOCAL_METHODS  = YES
+EXTRACT_ANON_NSPACES   = YES
+SOURCE_BROWSER         = YES
+INLINE_SOURCES         = YES
+STRIP_CODE_COMMENTS    = NO
+
+#---------------------------------------------------------------------------
+# Configuration options related to the input files
+#---------------------------------------------------------------------------
+
+INPUT                  = src include tests examples README.md CHANGELOG.md
+FILE_PATTERNS          = *.c *.h *.md
+RECURSIVE              = YES
+EXCLUDE                = build external
+EXCLUDE_SYMLINKS       = NO
+EXCLUDE_PATTERNS       = */generated/* */.git/*
+
+FULL_PATH_NAMES        = YES
+STRIP_FROM_PATH        = /usr/include;/opt
+STRIP_FROM_INC_PATH    = include
+
+#---------------------------------------------------------------------------
+# Configuration options related to the graphical hierarchy
+#---------------------------------------------------------------------------
+
+REFERENCES_LINK_SOURCE = YES
+REFERENCES_RELATION    = YES
+CALL_GRAPH             = YES
+CALLER_GRAPH           = YES
+GRAPHICAL_HIERARCHY    = YES
+DOT_GRAPH_MAX_NODES    = 75
+DOT_CLEANUP            = YES
+
+#---------------------------------------------------------------------------
+# Configuration options related to the alphabetical class index
+#---------------------------------------------------------------------------
+
+ALPHABETICAL_INDEX     = YES
+COLS_IN_ALPHA_INDEX    = 3
+
+#---------------------------------------------------------------------------
+# Output formats
+#---------------------------------------------------------------------------
+
+GENERATE_HTML          = YES
+HTML_TIMESTAMP         = YES
+HTML_DYNAMIC_SECTIONS  = YES
+GENERATE_TREEVIEW      = YES
+GENERATE_DOCSET        = NO
+
+GENERATE_LATEX         = NO
+GENERATE_MAN           = NO
+GENERATE_RTF           = NO
+GENERATE_XML           = YES
+XML_PROGRAMLISTING     = YES
+
+#---------------------------------------------------------------------------
+# Diagram generation
+#---------------------------------------------------------------------------
+
+HAVE_DOT               = YES
+DOT_NUM_THREADS        = 2
+CLASS_DIAGRAMS         = YES
+COLLABORATION_GRAPH    = YES
+UML_LOOK               = YES
+DIA_PATH               =
+PLANTUML_JAR_PATH      = /usr/share/plantuml/plantuml.jar
+PLANTUML_CFG_FILE      =
+PLANTUML_INCLUDE_PATH  =
+PLANTUML_INCLUDE_FILES =
+
+#---------------------------------------------------------------------------
+# Preprocessor & macro handling
+#---------------------------------------------------------------------------
+
+ENABLE_PREPROCESSING   = YES
+MACRO_EXPANSION        = YES
+EXPAND_ONLY_PREDEF     = NO
+SEARCH_INCLUDES        = YES
+INCLUDE_PATH           = include;src
+INCLUDE_FILE_PATTERNS  = *.h
+PREDEFINED             =\
+    NDEBUG\
+    __linux__\
+    PULSESPHERE_API_PUBLIC(x)=x\
+    PULSESPHERE_NO_DISCARD=[[nodiscard]]\
+    PULSESPHERE_NONNULL(x)=__attribute__((nonnull(x)))
+
+#---------------------------------------------------------------------------
+# Advanced configuration
+#---------------------------------------------------------------------------
+
+ALIASES                =\
+    "event=\xrefitem event \"Event\" \"Events\""\
+    "service=\xrefitem service \"Service\" \"Services\""\
+    "strategy=\xrefitem strategy \"Strategy\" \"Strategies\""\
+    "todo=\xrefitem todo \"To Do\" \"To Do List\""\
+    "note=\par\emph{Note: }\n"
+
+PROJECT_LOGO           = docs/logo/pulsesphere_logo.svg
+HTML_EXTRA_STYLESHEET  = docs/theme/pulsesphere_doxygen.css
+HTML_EXTRA_FILES       = docs/theme/pulsesphere_doxygen.js
+
+#---------------------------------------------------------------------------
+# Warnings & diagnostics
+#---------------------------------------------------------------------------
+
+QUIET                  = NO
+WARNINGS               = YES
+WARN_IF_UNDOCUMENTED   = YES
+WARN_IF_DOC_ERROR      = YES
+WARN_NO_PARAMDOC       = YES
+WARN_LOGFILE           = docs/api/doxygen_warnings.log
+
+#---------------------------------------------------------------------------
+# Miscellaneous
+#---------------------------------------------------------------------------
+
+GENERATE_PERLMOD       = NO
+MSCGEN_PATH            =
+FILTER_PATTERNS        =
+FILTER_SOURCE_FILES    = NO
+INPUT_FILTER           =
+USE_MDFILE_AS_MAINPAGE = README.md
+HTML_COLORSTYLE_HUE    = 210
+HTML_COLORSTYLE_SAT    = 160
+HTML_COLORSTYLE_GAMMA  = 100
+HTML_EXTRA_STYLESHEET  += docs/theme/syntax_highlight.css
+
+# End of Doxyfile

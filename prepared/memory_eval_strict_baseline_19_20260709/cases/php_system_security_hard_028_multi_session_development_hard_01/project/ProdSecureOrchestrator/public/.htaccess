@@ -1,0 +1,150 @@
+# ----------------------------------------------------------------------
+# ProdSecure Orchestrator – Public Entrypoint Security Configuration
+# File: /public/.htaccess
+#
+# This .htaccess is responsible for hardening the public directory,
+# enforcing HTTPS, routing clean URLs to the front-controller, enabling
+# HSTS, adding strict security headers, and optimizing performance
+# (caching + compression).  Tested on Apache 2.4+
+# ----------------------------------------------------------------------
+
+# Use UTF-8 as default charset for text assets
+AddDefaultCharset utf-8
+
+# ----------------------------------------------------------------------
+# 1. Apache Configuration Prerequisites
+# ----------------------------------------------------------------------
+# We require the following modules.  If you control httpd.conf, prefer
+# loading them there to avoid per-dir overhead.
+<IfModule !mod_rewrite.c>
+    # Abort early when mod_rewrite is not available.
+    ErrorDocument 500 "Server mis-configuration: mod_rewrite is required."
+</IfModule>
+
+# Enable FollowSymLinks & SymLinksIfOwnerMatch to allow clean URLs while
+# preventing potential privilege escalation.
+Options -Indexes +FollowSymLinks +SymLinksIfOwnerMatch
+
+# ----------------------------------------------------------------------
+# 2. Redirect all requests to HTTPS (force TLS v1.2+)
+# ----------------------------------------------------------------------
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+
+    # Preserve canonical host (no "www.")
+    RewriteCond %{HTTP_HOST} ^www\.(.*)$ [NC]
+    RewriteRule ^ https://%1%{REQUEST_URI} [R=301,L]
+
+    # Enforce HTTPS
+    RewriteCond %{HTTPS} !=on
+    RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [R=301,L]
+</IfModule>
+
+# ----------------------------------------------------------------------
+# 3. Security Headers
+# ----------------------------------------------------------------------
+<IfModule mod_headers.c>
+    # Protect against MIME sniffing
+    Header always set X-Content-Type-Options "nosniff"
+    # Click-jacking protection
+    Header always set X-Frame-Options "SAMEORIGIN"
+    # Cross-site scripting filter
+    Header always set X-XSS-Protection "1; mode=block"
+    # HSTS – 365 days; includeSubDomains; preload
+    Header always set Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+    # Referrer policy
+    Header always set Referrer-Policy "strict-origin-when-cross-origin"
+    # Permissions Policy (formerly Feature Policy)
+    Header always set Permissions-Policy "geolocation=(), microphone=(), camera=()"
+    # Content Security Policy – adapt if you allow inline scripts/styles
+    Header always set Content-Security-Policy "default-src 'self'; img-src 'self' data:; object-src 'none'; frame-ancestors 'self'; base-uri 'self'; form-action 'self'"
+    # Server disclosure obfuscation
+    Header always unset X-Powered-By
+</IfModule>
+
+# ----------------------------------------------------------------------
+# 4. Disable HTTP Trace/Track methods (cross-site tracing)
+# ----------------------------------------------------------------------
+RewriteCond %{REQUEST_METHOD} ^(TRACE|TRACK)$ [NC]
+RewriteRule .* - [F,L]
+
+# ----------------------------------------------------------------------
+# 5. Restrict Access to Sensitive Files & Directories
+# ----------------------------------------------------------------------
+# Deny .git, .env, composer.*, lock files, logs, cache, vendor mapping, etc.
+<FilesMatch "(^\.|composer\.(json|lock)|package\.json|yarn\.lock|\/config\.|\/\.env|\/\.htaccess|\/Dockerfile|\/docker-compose\.yml)$">
+    Require all denied
+</FilesMatch>
+
+# Prevent directory traversal to /private and /config outside public dir
+RedirectMatch 404 ^/(config|private|tests|tools|dev|docs)(/.*)?$
+
+# Block access to PHP files within storage & assets
+<DirectoryMatch "(^|/)(storage|assets)/">
+    <FilesMatch "\.php$">
+        Require all denied
+    </FilesMatch>
+</DirectoryMatch>
+
+# ----------------------------------------------------------------------
+# 6. Front-Controller Routing (MVVM Entry)
+# ----------------------------------------------------------------------
+<IfModule mod_rewrite.c>
+    # Skip rewrites for existing files/directories
+    RewriteCond %{REQUEST_FILENAME} -f [OR]
+    RewriteCond %{REQUEST_FILENAME} -d
+    RewriteRule ^ - [L]
+
+    # Forward the request to index.php (bootstrap)
+    RewriteRule ^ index.php [L]
+</IfModule>
+
+# ----------------------------------------------------------------------
+# 7. Caching & Compression
+# ----------------------------------------------------------------------
+# Enable compression for text assets
+<IfModule mod_deflate.c>
+    AddOutputFilterByType DEFLATE text/plain text/css text/javascript application/javascript application/json application/ld+json application/xml application/rss+xml image/svg+xml
+</IfModule>
+
+# Cache static assets with far-future expires headers
+<IfModule mod_expires.c>
+    ExpiresActive On
+    # Images
+    ExpiresByType image/svg+xml "access plus 1 year"
+    ExpiresByType image/gif      "access plus 1 year"
+    ExpiresByType image/png      "access plus 1 year"
+    ExpiresByType image/jpeg     "access plus 1 year"
+    # Fonts
+    ExpiresByType application/font-woff2 "access plus 1 year"
+    ExpiresByType application/font-woff  "access plus 1 year"
+    # CSS & JS
+    ExpiresByType text/css  "access plus 7 days"
+    ExpiresByType application/javascript "access plus 7 days"
+    # JSON, XML
+    ExpiresByType application/json "access plus 1 hour"
+    ExpiresByType application/xml  "access plus 1 hour"
+</IfModule>
+
+# ----------------------------------------------------------------------
+# 8. PHP Configuration Overrides (if using mod_php, not PHP-FPM)
+# ----------------------------------------------------------------------
+<IfModule mod_php7.c>
+    php_flag  display_errors        Off
+    php_value max_execution_time    60
+    php_value memory_limit          256M
+    php_value upload_max_filesize   20M
+    php_value post_max_size         25M
+    php_value session.cookie_httponly  On
+    php_value session.cookie_secure    On
+    php_value session.cookie_samesite  "Strict"
+</IfModule>
+
+# ----------------------------------------------------------------------
+# 9. ETag Optimization (disable if behind CDN)
+# ----------------------------------------------------------------------
+FileETag None
+
+# ----------------------------------------------------------------------
+# End of /public/.htaccess
+# ----------------------------------------------------------------------

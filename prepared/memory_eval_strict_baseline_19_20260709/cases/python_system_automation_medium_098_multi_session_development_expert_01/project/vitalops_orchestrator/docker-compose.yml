@@ -1,0 +1,275 @@
+```yaml
+#
+#  VitalOps Orchestrator — Reference Deployment
+#
+#  This docker-compose stack bootstraps the minimum set of containers that
+#  power the VitalOps Orchestrator in a non-production, single-node setting.
+#  ───────────────────────────────────────────────────────────────────────────
+#  NOT FOR DIRECT PRODUCTION USE
+#  In production, each service would be deployed to its own dedicated node
+#  (Kubernetes, Nomad, Swarm, or bare-metal) with hardened IAM, encrypted
+#  secrets, and audited network policies.  The compose file below is designed
+#  for local development, CI pipelines, and demo environments.
+#
+#  Services:
+#    • orchestrator-api        — FastAPI façade exposing REST/GraphQL APIs
+#    • orchestrator-worker     — Celery worker executing automation tasks
+#    • sidecar-proxy           — Envoy service-mesh sidecar for Zero-Trust
+#    • rabbitmq                — AMQP event bus (internal events)
+#    • redis                   — Celery broker & results backend (high-speed)
+#    • postgres                — RDBMS storing configuration & audit entries
+#    • prometheus              — Metrics aggregator/scraper
+#    • grafana                 — Dashboards for SREs and clinicians
+#
+#  Networking:
+#    The stack defines two overlay networks:
+#      * backend    — internal RPC traffic (no external exposure)
+#      * frontend   — user-facing ports (HTTP/HTTPS, dashboards)
+#
+#  Persistent Volumes:
+#    Named volumes are defined for Postgres, RabbitMQ, and Prometheus in
+#    order to keep state outside the lifecycle of the containers.
+#
+#  ───────────────────────────────────────────────────────────────────────────
+version: "3.9"
+
+x-common-env: &common-env
+  PYTHONUNBUFFERED: "1"
+  LOG_LEVEL: "${LOG_LEVEL:-INFO}"
+  TZ: "UTC"
+
+x-healthcheck: &default-healthcheck
+  interval: 30s
+  timeout: 3s
+  retries: 5
+  start_period: 10s
+
+x-resource-limits: &default-resources
+  cpus: "1.0"
+  memory: "512M"
+
+networks:
+  backend:
+    driver: bridge
+  frontend:
+    driver: bridge
+
+volumes:
+  pgdata:
+  rabbitmq-data:
+  prometheus-data:
+  grafana-data:
+
+services:
+  orchestrator-api:
+    image: ghcr.io/vitalops/orchestrator:${ORCH_VERSION:-latest}
+    container_name: orchestrator-api
+    command: >
+      uvicorn vitalops_orchestrator.main:app
+      --host 0.0.0.0
+      --port 8000
+    environment:
+      <<: *common-env
+      DATABASE_URL: postgres://${POSTGRES_USER:-vitalops}:${POSTGRES_PASSWORD:-vitalpass}@postgres:5432/vitalops
+      RABBITMQ_URL: amqp://rabbitmq:5672
+      REDIS_URL: redis://redis:6379/0
+      PROMETHEUS_PUSHGATEWAY: http://prometheus:9091/
+      HIPAA_AUDIT_MODE: "${HIPAA_AUDIT_MODE:-true}"
+    ports:
+      - "8080:8000"   # REST/GraphQL
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      <<: *default-healthcheck
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+    deploy:
+      resources:
+        limits: *default-resources
+    networks:
+      - backend
+      - frontend
+
+  orchestrator-worker:
+    image: ghcr.io/vitalops/orchestrator:${ORCH_VERSION:-latest}
+    container_name: orchestrator-worker
+    command: >
+      celery -A vitalops_orchestrator.tasks.celery_app
+      worker --loglevel=${LOG_LEVEL:-INFO} -Q default,critical
+    environment:
+      <<: *common-env
+      DATABASE_URL: postgres://${POSTGRES_USER:-vitalops}:${POSTGRES_PASSWORD:-vitalpass}@postgres:5432/vitalops
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      <<: *default-healthcheck
+      test: ["CMD-SHELL", "celery -A vitalops_orchestrator.tasks.celery_app inspect ping -d self@$$HOSTNAME || exit 1"]
+    deploy:
+      resources:
+        limits: *default-resources
+    networks:
+      - backend
+
+  sidecar-proxy:
+    image: envoyproxy/envoy:v1.28.0
+    container_name: sidecar-proxy
+    volumes:
+      - ./deploy/envoy/envoy.yaml:/etc/envoy/envoy.yaml:ro
+    command: ["envoy", "-c", "/etc/envoy/envoy.yaml", "--service-node", "orchestrator"]
+    depends_on:
+      - orchestrator-api
+    ports:
+      - "8443:8443"  # mTLS ingress
+    networks:
+      - frontend
+      - backend
+    healthcheck:
+      <<: *default-healthcheck
+      test: ["CMD-SHELL", "curl -f http://localhost:9901/ready || exit 1"]
+
+  rabbitmq:
+    image: rabbitmq:3.12-management
+    container_name: rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: "${RABBITMQ_USER:-vitalops}"
+      RABBITMQ_DEFAULT_PASS: "${RABBITMQ_PASS:-vitalpass}"
+    ports:
+      - "15672:15672"   # Management UI
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      <<: *default-healthcheck
+      test: ["CMD-SHELL", "rabbitmq-diagnostics -q check_running && rabbitmq-diagnostics -q check_port_connectivity"]
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: "256M"
+    networks:
+      - backend
+
+  redis:
+    image: redis:7.2-alpine
+    container_name: redis
+    command: ["redis-server", "--save", "", "--appendonly", "no"]  # ephemeral
+    ports:
+      - "6379:6379"
+    healthcheck:
+      <<: *default-healthcheck
+      test: ["CMD", "redis-cli", "ping"]
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: "128M"
+    networks:
+      - backend
+
+  postgres:
+    image: postgres:15-alpine
+    container_name: postgres
+    environment:
+      POSTGRES_DB: vitalops
+      POSTGRES_USER: "${POSTGRES_USER:-vitalops}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-vitalpass}"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      <<: *default-healthcheck
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: "1G"
+    networks:
+      - backend
+
+  prometheus:
+    image: prom/prometheus:v2.50.0
+    container_name: prometheus
+    volumes:
+      - ./deploy/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--web.enable-lifecycle"
+    ports:
+      - "9090:9090"
+    healthcheck:
+      <<: *default-healthcheck
+      test: ["CMD-SHELL", "wget -qO- http://localhost:9090/-/healthy"]
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: "512M"
+    networks:
+      - monitoring
+      - backend
+
+  grafana:
+    image: grafana/grafana:10.2.3
+    container_name: grafana
+    environment:
+      GF_SECURITY_ADMIN_USER: "${GRAFANA_USER:-admin}"
+      GF_SECURITY_ADMIN_PASSWORD: "${GRAFANA_PASSWORD:-admin}"
+      GF_PATHS_PROVISIONING: /etc/grafana/provisioning
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./deploy/grafana/provisioning:/etc/grafana/provisioning:ro
+    ports:
+      - "3000:3000"
+    depends_on:
+      prometheus:
+        condition: service_healthy
+    healthcheck:
+      <<: *default-healthcheck
+      test: ["CMD-SHELL", "curl -f http://localhost:3000/api/health || exit 1"]
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: "256M"
+    networks:
+      - frontend
+      - monitoring
+
+#
+#  Helper Service for local e-mail testing (optional)
+#
+  mailhog:
+    image: mailhog/mailhog:v1.0.1
+    container_name: mailhog
+    ports:
+      - "8025:8025"
+    networks:
+      - backend
+      - frontend
+    deploy:
+      resources:
+        limits:
+          cpus: "0.2"
+          memory: "128M"
+
+#
+#  Network aliases for monitoring plane
+#
+networks:
+  backend:
+    driver: bridge
+  frontend:
+    driver: bridge
+  monitoring:
+    driver: bridge
+```

@@ -1,0 +1,408 @@
+```typescript
+/* ------------------------------------------------------------------
+   MediTrade Pulse – Core Domain & Event Typings
+   File: type.ts
+   Description:
+     Strongly-typed primitives, domain entities, event/command contracts,
+     and helper utilities that back the CQRS / Event-Sourcing engine.
+   ------------------------------------------------------------------ */
+
+import { v4 as uuidv4 } from 'uuid';
+
+/* ==================================================================
+   GLOBAL PRIMITIVES
+   ================================================================== */
+
+/**
+ * ISO-4217 currency code (multi-currency support).
+ * Example: 'USD', 'EUR', 'JPY', 'GBP', 'CHF', 'AED', 'CNY'
+ */
+export type CurrencyCode =
+  | 'USD'
+  | 'EUR'
+  | 'JPY'
+  | 'GBP'
+  | 'CHF'
+  | 'AED'
+  | 'CNY'
+  | 'AUD'
+  | 'CAD'
+  | 'INR'
+  | (string & { readonly __brand: 'CurrencyCode' }); // Extendability for exotic currencies
+
+/**
+ * Monetary value wrapper.  We avoid floating-point by using integers
+ * representing the minor unit (cents, pence, etc.).
+ */
+export interface Money {
+  readonly currency: CurrencyCode;
+  readonly amountMinor: bigint; // e.g., $10.23 => 1023n when currency exponent = 2
+}
+
+/* ------------------------------------------------------------------ */
+/* ID Helpers                                                         */
+/* ------------------------------------------------------------------ */
+
+type Brand<T, B extends string> = T & { readonly __brand: B };
+
+export type Uuid = Brand<string, 'Uuid'>;
+export const uuid = (): Uuid => uuidv4() as Uuid;
+
+/* ==================================================================
+   CLINICAL & RISK CONSTRAINTS
+   ================================================================== */
+
+/**
+ * FDA-grade product integrity indicators. If any flag is raised
+ * the trade cannot be cleared until manually overridden by
+ * compliance officers.
+ */
+export enum ClinicalComplianceFlag {
+  TemperatureExcursion = 'TemperatureExcursion',
+  BatchRecall = 'BatchRecall',
+  ExpiredProduct = 'ExpiredProduct',
+  MissingCertificate = 'MissingCertificate',
+  BrokenSeal = 'BrokenSeal',
+}
+
+/**
+ * Basel-like risk buckets reflecting both financial volatility
+ * AND clinical volatility (e.g., urgent demand spikes).
+ */
+export enum RiskScore {
+  Low = 1,
+  Moderate = 2,
+  Elevated = 3,
+  High = 4,
+  Critical = 5,
+}
+
+/* ==================================================================
+   ORDERS & PORTFOLIOS (Domain Aggregates)
+   ================================================================== */
+
+export enum OrderSide {
+  Buy = 'Buy',
+  Sell = 'Sell',
+}
+
+export enum OrderType {
+  Market = 'Market',
+  Limit = 'Limit',
+  Stop = 'Stop',
+}
+
+export enum OrderStatus {
+  New = 'New',
+  PartiallyFilled = 'PartiallyFilled',
+  Filled = 'Filled',
+  Cancelled = 'Cancelled',
+  Rejected = 'Rejected',
+}
+
+/**
+ * Core trading order used by the domain aggregate.
+ * Serialized snapshots are saved to the event store.
+ */
+export interface Order {
+  readonly id: Uuid;
+  readonly portfolioId: Uuid;
+  readonly instrumentSymbol: string; // PPE_FUT_JAN24, PHARMA_OPT_PCR02, etc.
+  readonly side: OrderSide;
+  readonly type: OrderType;
+  readonly quantity: bigint; // Units (e.g., mask boxes, vaccine vials)
+  readonly price?: Money; // Undefined when type === Market
+  readonly createdAt: Date;
+  readonly status: OrderStatus;
+  readonly riskScore: RiskScore;
+  readonly complianceFlags: ReadonlySet<ClinicalComplianceFlag>;
+}
+
+/**
+ * Portfolio for a hospital group, insurer, or pharmacy franchise.
+ */
+export interface Portfolio {
+  readonly id: Uuid;
+  readonly displayName: string;
+  readonly baseCurrency: CurrencyCode;
+  readonly currentRiskScore: RiskScore;
+  readonly complianceFlags: ReadonlySet<ClinicalComplianceFlag>;
+  readonly positions: Readonly<Record<string, bigint>>; // Symbol → net quantity
+  readonly createdAt: Date;
+}
+
+/* ==================================================================
+   EVENT SOURCING CONTRACTS
+   ================================================================== */
+
+/**
+ * Generic interface for all domain events.
+ * AggregateName and EventName aid stream partitioning.
+ */
+export interface DomainEvent<
+  AggregateName extends string = string,
+  EventName extends string = string,
+  Payload extends object = object,
+> {
+  readonly id: Uuid;
+  readonly aggregateId: Uuid;
+  readonly aggregate: AggregateName;
+  readonly type: EventName;
+  readonly timestamp: Date;
+  readonly payload: Payload;
+  readonly meta?: Readonly<Record<string, unknown>>; // audit, tracing, HIPAA tags, etc.
+}
+
+/* ------------------------------------------------------------------ */
+/* Order Events                                                       */
+/* ------------------------------------------------------------------ */
+
+export type OrderPlaced = DomainEvent<
+  'Order',
+  'OrderPlaced',
+  {
+    order: Order;
+  }
+>;
+
+export type OrderCancelled = DomainEvent<
+  'Order',
+  'OrderCancelled',
+  {
+    orderId: Uuid;
+    reason: string;
+  }
+>;
+
+export type OrderFilled = DomainEvent<
+  'Order',
+  'OrderFilled',
+  {
+    orderId: Uuid;
+    fillQuantity: bigint;
+    fillPrice: Money;
+  }
+>;
+
+export type OrderRejected = DomainEvent<
+  'Order',
+  'OrderRejected',
+  {
+    orderId: Uuid;
+    reason: string;
+    complianceFlags?: ReadonlyArray<ClinicalComplianceFlag>;
+  }
+>;
+
+export type OrderEvents =
+  | OrderPlaced
+  | OrderCancelled
+  | OrderFilled
+  | OrderRejected;
+
+/* ------------------------------------------------------------------ */
+/* Portfolio Events                                                   */
+/* ------------------------------------------------------------------ */
+
+export type PortfolioCreated = DomainEvent<
+  'Portfolio',
+  'PortfolioCreated',
+  {
+    portfolio: Portfolio;
+  }
+>;
+
+export type PortfolioRiskAdjusted = DomainEvent<
+  'Portfolio',
+  'PortfolioRiskAdjusted',
+  {
+    portfolioId: Uuid;
+    newRiskScore: RiskScore;
+    reason: string;
+  }
+>;
+
+export type PortfolioComplianceFlagRaised = DomainEvent<
+  'Portfolio',
+  'PortfolioComplianceFlagRaised',
+  {
+    portfolioId: Uuid;
+    flag: ClinicalComplianceFlag;
+    description?: string;
+  }
+>;
+
+export type PortfolioEvents =
+  | PortfolioCreated
+  | PortfolioRiskAdjusted
+  | PortfolioComplianceFlagRaised;
+
+/* ==================================================================
+   COMMANDS (CQRS)
+   ================================================================== */
+
+export interface Command<
+  AggregateName extends string = string,
+  CommandName extends string = string,
+  Payload extends object = object,
+> {
+  readonly id: Uuid;
+  readonly aggregate: AggregateName;
+  readonly type: CommandName;
+  readonly payload: Payload;
+  readonly expectedVersion?: number; // Optimistic concurrency
+  readonly meta?: Readonly<Record<string, unknown>>;
+}
+
+/* Order Commands */
+export type PlaceOrderCmd = Command<
+  'Order',
+  'PlaceOrder',
+  {
+    portfolioId: Uuid;
+    instruction: Omit<Order, 'id' | 'createdAt' | 'status'>;
+  }
+>;
+
+export type CancelOrderCmd = Command<
+  'Order',
+  'CancelOrder',
+  {
+    orderId: Uuid;
+    reason: string;
+  }
+>;
+
+export type Commands = PlaceOrderCmd | CancelOrderCmd;
+
+/* ==================================================================
+   SAGA (TRANSACTION ORCHESTRATION) TYPES
+   ================================================================== */
+
+export enum SagaStatus {
+  Pending = 'Pending',
+  Completed = 'Completed',
+  Failed = 'Failed',
+  Compensating = 'Compensating',
+}
+
+export interface SagaStep<T extends DomainEvent = DomainEvent> {
+  readonly name: string;
+  readonly onEvent: (event: T) => Promise<void>;
+  readonly compensate?: (event: T) => Promise<void>;
+}
+
+export interface SagaState {
+  readonly id: Uuid;
+  readonly name: string;
+  readonly status: SagaStatus;
+  readonly currentStep: number;
+  readonly createdAt: Date;
+  readonly updatedAt: Date;
+  readonly error?: string;
+}
+
+/* ==================================================================
+   DOMAIN UTILITIES
+   ================================================================== */
+
+/**
+ * Utility: Create an immutable Money object.
+ * Performs minimal runtime checks to prevent invalid states.
+ */
+export function money(
+  amountMinor: bigint | number,
+  currency: CurrencyCode,
+): Money {
+  if (
+    typeof amountMinor !== 'bigint' &&
+    (typeof amountMinor !== 'number' || !Number.isInteger(amountMinor))
+  ) {
+    throw new TypeError('amountMinor must be an integer or bigint');
+  }
+  if (!currency || typeof currency !== 'string') {
+    throw new TypeError('currency must be a valid ISO-4217 string');
+  }
+
+  return Object.freeze({
+    amountMinor: BigInt(amountMinor),
+    currency,
+  });
+}
+
+/**
+ * Type guard verifying an object is a DomainEvent.
+ */
+export function isDomainEvent(obj: unknown): obj is DomainEvent {
+  return (
+    typeof obj === 'object' &&
+    obj !== null &&
+    typeof (obj as DomainEvent).id === 'string' &&
+    typeof (obj as DomainEvent).aggregate === 'string' &&
+    typeof (obj as DomainEvent).type === 'string' &&
+    (obj as DomainEvent).timestamp instanceof Date
+  );
+}
+
+/**
+ * Deep readonly utility using conditional mapped types.
+ */
+export type DeepReadonly<T> = {
+  readonly [K in keyof T]: T[K] extends Record<string, unknown>
+    ? DeepReadonly<T[K]>
+    : T[K];
+};
+
+/* ==================================================================
+   AUDIT TRAIL (Minimal Metadata Helpers)
+   ================================================================== */
+
+export interface AuditMetadata {
+  readonly actor: string; // e.g., service name or user email
+  readonly traceId?: string;
+  readonly ipAddress?: string;
+  readonly userAgent?: string;
+}
+
+export const withAuditMeta = <
+  T extends DomainEvent | Command,
+  M extends AuditMetadata,
+>(
+  item: T,
+  meta: M,
+): T & { meta: M } => ({
+  ...item,
+  meta,
+});
+
+/* ==================================================================
+   EXAMPLE FACTORIES (Used by application services / tests)
+   ================================================================== */
+
+/** Create a new Order aggregate (initial state). */
+export function createOrder(props: Omit<Order, 'id' | 'createdAt' | 'status'>): Order {
+  // Domain-level invariant checks
+  if (props.quantity <= 0n) {
+    throw new RangeError('Quantity must be positive');
+  }
+  if (props.type !== OrderType.Market && !props.price) {
+    throw new Error('Limit and Stop orders require a price');
+  }
+
+  return Object.freeze({
+    ...props,
+    id: uuid(),
+    createdAt: new Date(),
+    status: OrderStatus.New,
+  });
+}
+
+/** Create a Portfolio aggregate. */
+export function createPortfolio(props: Omit<Portfolio, 'id' | 'createdAt'>): Portfolio {
+  return Object.freeze({
+    ...props,
+    id: uuid(),
+    createdAt: new Date(),
+  });
+}
+```

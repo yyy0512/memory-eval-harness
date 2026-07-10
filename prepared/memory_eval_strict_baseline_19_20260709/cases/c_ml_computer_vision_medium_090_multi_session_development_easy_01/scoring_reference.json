@@ -1,0 +1,341 @@
+{
+  "scenario_id": "c_ml_computer_vision_medium_090_multi_session_development_easy_01",
+  "ground_truth": "The following code snippets represent the expected final state of the modified sections.\n\n**File: `src/common.h`**\n```c\n// Inside the PipelineConfig struct\ntypedef struct {\n    // ... other config options\n    bool enable_denoising;\n    bool enable_grayscale; // <-- ADDED LINE\n    float sharpening_factor;\n} PipelineConfig;\n```\n\n**File: `src/core/image_processing.h`**\n```c\n// Inside the ImageFilterType enum\ntypedef enum {\n    DENOISE,\n    SHARPEN,\n    EDGE_DETECTION,\n    GRAYSCALE // <-- ADDED LINE\n} ImageFilterType;\n\n// ... other function declarations\n\n// Declaration for the new filter\nvoid apply_grayscale_filter(Image* image); // <-- ADDED LINE\n```\n\n**File: `src/core/image_processing.c`**\n```c\n// ... other function implementations\n\n// Added function implementation\nvoid apply_grayscale_filter(Image* image) {\n    if (image == NULL) return;\n    // TODO: Implement grayscale conversion logic.\n    printf(\"DEBUG: Applying grayscale filter.\\n\");\n}\n```\n\n**File: `src/core/pipeline.c`**\n```c\n#include \"pipeline.h\"\n#include \"image_processing.h\" // <-- ADDED OR CONFIRMED INCLUDE\n#include <stdio.h>\n\n// ...\n\nvoid run_processing_pipeline(PipelineConfig* config, Image* image_batch[], int batch_size) {\n    for (int i = 0; i < batch_size; ++i) {\n        Image* current_image = image_batch[i];\n        // ... image loading/validation logic ...\n\n        // Integrate the new grayscale filter\n        if (config->enable_grayscale) { // <-- ADDED BLOCK\n            apply_grayscale_filter(current_image);\n        }\n\n        // ... existing calls to other filters like apply_denoising_filter, etc.\n    }\n}\n```",
+  "expected_approach": "An expert developer would approach this incrementally, mirroring the two-session structure.\n\n**Session 1 Analysis & Implementation:**\n1.  The developer would first identify the files related to configuration (`common.h`), image processing interfaces (`image_processing.h`), and implementations (`image_processing.c`).\n2.  They would add the `enable_grayscale` flag to the `PipelineConfig` struct in `common.h`. This is the standard place for such settings.\n3.  They would then add the `GRAYSCALE` enum member and the `apply_grayscale_filter` function prototype to `image_processing.h`, correctly updating the public API for the image processing module.\n4.  Finally, they would create the stub implementation in `image_processing.c`, ensuring the project still compiles after these initial changes. This completes the foundational work.\n\n**Session 2 Analysis & Integration:**\n1.  The developer would recall the new function `apply_grayscale_filter` and the config flag `enable_grayscale`.\n2.  They would navigate to `pipeline.c` to find the core application logic.\n3.  They would add `#include \"image_processing.h\"` at the top of `pipeline.c` to make the new function visible.\n4.  They would scan the `run_processing_pipeline` function to find the most logical insertion point – typically early in the processing sequence.\n5.  They would write a simple `if (config->enable_grayscale)` block and place the call to `apply_grayscale_filter()` inside it, passing the correct image variable used in that scope.",
+  "evaluation_criteria": [
+    "**Session 1 Correctness:** Agent correctly adds the boolean flag to `PipelineConfig`, the `GRAYSCALE` enum to `ImageFilterType`, the function prototype to `image_processing.h`, and the stub implementation to `image_processing.c`.",
+    "**Session 2 Correctness:** Agent correctly adds the conditional block in `run_processing_pipeline` to call the new function, based on the config flag.",
+    "**Context Retention:** Agent successfully uses the function name (`apply_grayscale_filter`) and config flag (`enable_grayscale`) from Session 1 in Session 2 without being re-prompted.",
+    "**File Navigation:** Agent correctly identifies, opens, and modifies all four required files (`common.h`, `image_processing.h`, `image_processing.c`, `pipeline.c`) across the two sessions.",
+    "**Code Integrity:** The added code is syntactically correct C and does not break the compilation of the project.",
+    "**Minimalism of Edits:** Agent modifies only the necessary code sections and does not introduce unrelated or unnecessary changes."
+  ],
+  "memory_contracts": [
+    {
+      "id": "user_tomato_preference_marker",
+      "category": "synthetic_memory_user_preference",
+      "memory_type": "user",
+      "introduced_in_session": 1,
+      "workspace_effective_from_session": 2,
+      "description": "User preference: for future implementation work in this repository, place the exact marker TOMATO_USER_PREF_741 near newly added or meaningfully changed code, comments, or documentation so the user's TOMATO preference is visible across sessions.",
+      "expected_memory_fact": {
+        "required_keywords": [
+          "TOMATO_USER_PREF_741",
+          "user preference",
+          "future implementation work",
+          "newly added or meaningfully changed code"
+        ],
+        "required_regex": [
+          "TOMATO_USER_PREF_741"
+        ]
+      },
+      "checks": [
+        {
+          "id": "tomato_user_pref_marker_present",
+          "type": "require_regex",
+          "path_glob": "**/*",
+          "pattern": "TOMATO_USER_PREF_741",
+          "source": "synthetic_memory_contract",
+          "strength": "sentinel_marker",
+          "signal_kind": "language_neutral_marker",
+          "rationale": "Later-session workspace should preserve or reuse the exact user preference marker introduced in session 1."
+        }
+      ]
+    },
+    {
+      "id": "feedback_tomato_review_note",
+      "category": "synthetic_memory_feedback_continuity",
+      "memory_type": "feedback",
+      "introduced_in_session": 1,
+      "workspace_effective_from_session": 2,
+      "description": "Feedback to remember: future implementation changes should include the exact review note TOMATO_REVIEW_NOTE_742 near changed logic to show that compatibility and continuity were considered.",
+      "expected_memory_fact": {
+        "required_keywords": [
+          "TOMATO_REVIEW_NOTE_742",
+          "review note",
+          "compatibility",
+          "continuity"
+        ],
+        "required_regex": [
+          "TOMATO_REVIEW_NOTE_742"
+        ]
+      },
+      "checks": [
+        {
+          "id": "tomato_review_note_present",
+          "type": "require_regex",
+          "path_glob": "**/*",
+          "pattern": "TOMATO_REVIEW_NOTE_742",
+          "source": "synthetic_memory_contract",
+          "strength": "sentinel_marker",
+          "signal_kind": "language_neutral_marker",
+          "rationale": "Later-session workspace should carry forward the exact feedback marker introduced in session 1."
+        }
+      ]
+    },
+    {
+      "id": "project_tomato_bridge_token",
+      "category": "synthetic_memory_project_convention",
+      "memory_type": "project",
+      "introduced_in_session": 1,
+      "workspace_effective_from_session": 2,
+      "description": "Project memory: future helper, handler, adapter, or glue-code changes should include the exact project token TOMATO_PROJECT_BRIDGE_743 in a nearby name, comment, or note so cross-session project conventions remain visible.",
+      "expected_memory_fact": {
+        "required_keywords": [
+          "TOMATO_PROJECT_BRIDGE_743",
+          "project token",
+          "helper",
+          "handler",
+          "adapter"
+        ],
+        "required_regex": [
+          "TOMATO_PROJECT_BRIDGE_743"
+        ]
+      },
+      "checks": [
+        {
+          "id": "tomato_project_bridge_present",
+          "type": "require_regex",
+          "path_glob": "**/*",
+          "pattern": "TOMATO_PROJECT_BRIDGE_743",
+          "source": "synthetic_memory_contract",
+          "strength": "sentinel_marker",
+          "signal_kind": "language_neutral_marker",
+          "rationale": "Later-session workspace should preserve or reuse the exact project convention token introduced in session 1."
+        }
+      ]
+    },
+    {
+      "id": "reference_tomato_canon_pointer",
+      "category": "synthetic_memory_reference_pointer",
+      "memory_type": "reference",
+      "introduced_in_session": 1,
+      "workspace_effective_from_session": 2,
+      "description": "Reference memory: treat docs/TOMATO_REFERENCE_CANON_744.md as the canonical local reference pointer for future work, and cite the exact path in comments, documentation, or implementation notes when adding related changes.",
+      "expected_memory_fact": {
+        "required_keywords": [
+          "docs/TOMATO_REFERENCE_CANON_744.md",
+          "canonical local reference",
+          "future work",
+          "implementation notes"
+        ],
+        "required_regex": [
+          "docs/TOMATO_REFERENCE_CANON_744\\.md"
+        ]
+      },
+      "checks": [
+        {
+          "id": "tomato_reference_pointer_present",
+          "type": "require_regex",
+          "path_glob": "**/*",
+          "pattern": "docs/TOMATO_REFERENCE_CANON_744\\.md",
+          "source": "synthetic_memory_contract",
+          "strength": "sentinel_marker",
+          "signal_kind": "language_neutral_marker",
+          "rationale": "Later-session workspace should cite the exact reference artifact pointer introduced in session 1."
+        }
+      ]
+    },
+    {
+      "id": "experience_tomato_safe_path_lesson",
+      "category": "synthetic_memory_experience_lesson",
+      "memory_type": "experience",
+      "introduced_in_session": 1,
+      "workspace_effective_from_session": 2,
+      "description": "Experience memory: previous work learned not to use the literal LEGACY_TEMP_PATH in future changes; use the exact safer marker TOMATO_SAFE_PATH_745 instead whenever temporary path, fallback path, or compatibility-path behavior is mentioned.",
+      "expected_memory_fact": {
+        "required_keywords": [
+          "TOMATO_SAFE_PATH_745",
+          "LEGACY_TEMP_PATH",
+          "experience",
+          "temporary path",
+          "fallback path"
+        ],
+        "required_regex": [
+          "TOMATO_SAFE_PATH_745"
+        ],
+        "forbidden_keywords": []
+      },
+      "checks": [
+        {
+          "id": "tomato_safe_path_present",
+          "type": "require_regex",
+          "path_glob": "**/*",
+          "pattern": "TOMATO_SAFE_PATH_745",
+          "source": "synthetic_memory_contract",
+          "strength": "sentinel_marker",
+          "signal_kind": "language_neutral_marker",
+          "rationale": "Later-session workspace should use the exact safer experience marker introduced in session 1."
+        },
+        {
+          "id": "tomato_legacy_temp_path_absent",
+          "type": "forbid_regex",
+          "path_glob": "**/*",
+          "pattern": "LEGACY_TEMP_PATH",
+          "source": "synthetic_memory_contract",
+          "strength": "negative_sentinel",
+          "signal_kind": "language_neutral_marker",
+          "rationale": "Later-session workspace should avoid the deprecated experience marker from the session-1 lesson."
+        }
+      ]
+    }
+  ],
+  "expected_memory_facts": [
+    {
+      "id": "user_tomato_preference_marker",
+      "required_keywords": [
+        "TOMATO_USER_PREF_741",
+        "future implementation work",
+        "newly added or meaningfully changed code"
+      ],
+      "required_regex": [
+        "TOMATO_USER_PREF_741"
+      ]
+    },
+    {
+      "id": "feedback_tomato_review_note",
+      "required_keywords": [
+        "TOMATO_REVIEW_NOTE_742",
+        "review note",
+        "compatibility",
+        "continuity"
+      ],
+      "required_regex": [
+        "TOMATO_REVIEW_NOTE_742"
+      ]
+    },
+    {
+      "id": "project_tomato_bridge_token",
+      "required_keywords": [
+        "TOMATO_PROJECT_BRIDGE_743",
+        "project token",
+        "helper",
+        "handler",
+        "adapter"
+      ],
+      "required_regex": [
+        "TOMATO_PROJECT_BRIDGE_743"
+      ]
+    },
+    {
+      "id": "reference_tomato_canon_pointer",
+      "required_keywords": [
+        "docs/TOMATO_REFERENCE_CANON_744.md",
+        "canonical local reference",
+        "future work",
+        "implementation notes"
+      ],
+      "required_regex": [
+        "docs/TOMATO_REFERENCE_CANON_744\\.md"
+      ]
+    },
+    {
+      "id": "experience_tomato_safe_path_lesson",
+      "required_keywords": [
+        "TOMATO_SAFE_PATH_745",
+        "LEGACY_TEMP_PATH",
+        "experience",
+        "temporary path",
+        "fallback path"
+      ],
+      "required_regex": [
+        "TOMATO_SAFE_PATH_745"
+      ],
+      "forbidden_keywords": []
+    }
+  ],
+  "test_plan": {
+    "status": "configured",
+    "command": [
+      "make",
+      "test"
+    ],
+    "working_dir": "RetinaGuard_Vision_Suite",
+    "source": "makefile_test_target",
+    "timeout_sec": 300,
+    "reason": null,
+    "test_like_file_count": 0,
+    "executor": "host",
+    "docker_image": "locobench-memory-eval:c",
+    "environment": {
+      "recommended_executor": "docker",
+      "network": "none"
+    },
+    "integrity": {
+      "status": "checkable",
+      "original_command": [
+        "make",
+        "test"
+      ],
+      "original_test_files": [],
+      "required_patterns": [
+        "test",
+        "$(TEST_BIN)"
+      ],
+      "makefile_path": "RetinaGuard_Vision_Suite/Makefile",
+      "makefile_test_target_fingerprint": "sha256:a11a3e60b7617e9963fa79aa08470bb4033985eb5c031239f328c4db9abc7744"
+    }
+  },
+  "requirement_checks": [
+    {
+      "id": "pipeline_config_enable_grayscale",
+      "type": "require_regex",
+      "path_glob": "**/src/common.h",
+      "source": "overlay",
+      "strength": "explicit",
+      "signal_kind": "config_schema",
+      "rationale": "PipelineConfig includes enable_grayscale.",
+      "pattern": "enable_grayscale"
+    },
+    {
+      "id": "image_filter_type_grayscale",
+      "type": "require_regex",
+      "path_glob": "**/src/core/image_processing.h",
+      "source": "overlay",
+      "strength": "explicit",
+      "signal_kind": "api_contract",
+      "rationale": "image processing API exposes grayscale filter type/function.",
+      "pattern": "GRAYSCALE|apply_grayscale_filter"
+    },
+    {
+      "id": "grayscale_filter_stub_implemented",
+      "type": "require_regex",
+      "path_glob": "**/src/core/image_processing.c",
+      "source": "overlay",
+      "strength": "explicit",
+      "signal_kind": "implementation_signal",
+      "rationale": "grayscale filter stub exists.",
+      "pattern": "apply_grayscale_filter|Applying grayscale filter"
+    },
+    {
+      "id": "pipeline_calls_grayscale_conditionally",
+      "type": "require_regex",
+      "path_glob": "**/src/core/pipeline.c",
+      "source": "overlay",
+      "strength": "explicit",
+      "signal_kind": "runtime_integration",
+      "rationale": "pipeline uses enable_grayscale to call grayscale filter.",
+      "pattern": "enable_grayscale|apply_grayscale_filter"
+    }
+  ],
+  "requirement_check_plan": {
+    "status": "configured",
+    "source": "overlay",
+    "reason": null,
+    "check_count": 4,
+    "source_distribution": {
+      "overlay": 4
+    },
+    "strength_distribution": {
+      "explicit": 4
+    },
+    "signal_kind_distribution": {
+      "api_contract": 1,
+      "config_schema": 1,
+      "implementation_signal": 1,
+      "runtime_integration": 1
+    },
+    "rejection_reason_distribution": {},
+    "rejected_terms": []
+  }
+}

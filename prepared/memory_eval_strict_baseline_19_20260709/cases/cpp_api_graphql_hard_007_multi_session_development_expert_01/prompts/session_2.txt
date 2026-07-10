@@ -1,0 +1,16 @@
+You are working in the repository at the current working directory. This is session 2 of a 3-session development task. The previous session has ended and conversation context is unavailable. Use the repository state to continue the task. Do not ask for previous conversation context. Complete only the requirements for this session.
+
+This is a multi-session task. I will provide instructions for each session. You are expected to complete the work for one session and then await the prompt for the next.
+
+**Session 2: Command and Business Logic Implementation**
+(This prompt is given after the agent successfully completes Session 1.)
+
+Excellent, the foundational changes are in place. Now, let's implement the core logic. Following the existing CQRS pattern, you must create and implement a new `ArchiveAssetCommand` and its corresponding handler.
+1. Create the necessary files: `src/core/services/commands/ArchiveAssetCommand.h`, `src/core/services/commands/ArchiveAssetCommandHandler.h`, and their `.cpp` counterparts. Use existing commands like `CreateAssetCommand` as a template.
+2. Implement the business logic within the `ArchiveAssetCommandHandler`. The handler must:
+   a. Verify the asset exists using the `AssetRepository`.
+   b. **Crucially, prevent archiving an asset that is currently referenced by any `SceneGraph`.** You will need to use the `SceneRepository` or a relevant query service to check for this dependency.
+   c. If the checks pass, update the asset's status to 'archived' and persist the change via the `AssetRepository`.
+3. Wire this new command into the `GraphQLHandler` (`src/api/v1/graphql/GraphQLHandler.cpp`) for the `archiveAsset` mutation resolver you defined in the previous session.
+
+After implementing and wiring the command, confirm your work and await the final session's instructions.

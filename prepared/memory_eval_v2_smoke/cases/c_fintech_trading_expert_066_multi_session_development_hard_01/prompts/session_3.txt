@@ -1,9 +1,0 @@
-You are working in the repository at the current working directory. This is session 3 of a 4-session development task. The previous session has ended and conversation context is unavailable. Use the repository state and your persistent memory if available. Do not ask for previous conversation context. Complete only the requirements for this session. At the end, update memory with decisions and remaining work.
-
-You are a senior engineer on the PulseTrade Nexus team. Your task is to implement the new 'Cooling-Off Period' feature. This will be done over several sessions.
-
-**Session 3: Saga Orchestration for Time Delay**
-Now, focus on the `settlement-orchestrator-service` to manage the waiting period.
-1.  Modify the saga state machine defined in `services/settlement-orchestrator-service/src/core/saga.h` to include a new step that represents waiting for the cooling-off period to expire.
-2.  In `services/settlement-orchestrator-service/src/core/saga.c`, implement the logic for this new step. When the saga consumes the `TradeInCoolingOff` event, it should enter this waiting state. The logic must handle a time delay. A robust implementation would schedule a future 'resume' command/event rather than using a simple `sleep()` call, which would block the service. 
-3.  The saga must also be updated to handle a potential `TradeCancelled` event while in the cooling-off state, leading to a compensatory action that terminates the saga.

@@ -1,0 +1,187 @@
+```rust
+// tests/test_utils.rs
+//
+// Integration–level tests for common utilities that power the
+// ChromaticCanvas Control Center.  These tests exercise critical
+// invariants around identifier generation, color–palette merging,
+// and session-token lifecycles.
+//
+// Note: the tests depend on the *public* API of the root crate.  When
+// run with `cargo test`, Cargo automatically builds the library crate
+// in test mode and links it here, so we can simply `use` the types
+// we want to test.
+
+use std::time::{Duration, SystemTime};
+
+use chromatic_canvas::{
+    palette::{Color, Palette},
+    session::{SessionToken, SessionTokenError},
+    utils::{random_id, sanitize_filename, slugify},
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  SLUG / FILE-NAME SANITISATION
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn slugify_handles_whitespace_and_unicode() {
+    // Given: a user-supplied string containing whitespace, mixed case,
+    //        punctuation, and extended Unicode characters.
+    let raw = " Café-à la créme — Portfolio #42 ";
+
+    // When: we slugify the string for use in URLs.
+    let slug = slugify(raw);
+
+    // Then: the slug matches the expected kebab-case ASCII-only pattern
+    // (`cafe-a-la-creme-portfolio-42`) and is safe for URLs.
+    assert_eq!(slug, "cafe-a-la-creme-portfolio-42");
+    assert!(
+        slug.chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-'),
+        "slug contains illegal characters: {slug}"
+    );
+}
+
+#[test]
+fn sanitize_filename_strips_forbidden_chars() {
+    // Windows forbids the following characters in file names:
+    //  < > : " / \ | ? *
+    //
+    // We supply all of them in one go to make sure the sanitizer holds up.
+    let raw = r#"<icon>* "logo" ? hero: / \ | > <"#;
+    let sanitized = sanitize_filename(raw);
+
+    // Should keep alphanumerics and replace separators with underscores.
+    assert_eq!(sanitized, "icon_logo_hero");
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  RANDOM ID GENERATION
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn random_id_is_unique_and_ascii() {
+    const SAMPLE: usize = 10_000;
+    use std::collections::HashSet;
+
+    let mut seen = HashSet::with_capacity(SAMPLE);
+
+    for _ in 0..SAMPLE {
+        let id = random_id();
+        assert!(
+            id.chars().all(|c| c.is_ascii_alphanumeric()),
+            "id '{id}' contains non-ascii alphanumeric characters"
+        );
+        assert!(
+            seen.insert(id.clone()),
+            "duplicate id '{id}' detected in {SAMPLE} samples"
+        );
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  COLOR PALETTE MERGING
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn palette_merge_overrides_and_preserves() {
+    // Arrange
+    let base = Palette::from(vec![
+        ("primary", Color::hex("#1d4ed8")), // blue-700
+        ("neutral", Color::hex("#374151")), // gray-700
+        ("error", Color::hex("#dc2626")),   // red-600
+    ]);
+
+    let overrides = Palette::from(vec![
+        // new value for "primary"
+        ("primary", Color::hex("#9333ea")), // purple-600
+        // new swatch altogether
+        ("success", Color::hex("#16a34a")), // green-600
+    ]);
+
+    // Act
+    let merged = base.merge(&overrides);
+
+    // Assert
+    // 1. Overridden
+    assert_eq!(merged.get("primary").unwrap().hex(), "#9333ea");
+    // 2. Preserved
+    assert_eq!(merged.get("error").unwrap().hex(), "#dc2626");
+    // 3. Newly introduced
+    assert_eq!(merged.get("success").unwrap().hex(), "#16a34a");
+    // 4. Size check
+    assert_eq!(merged.len(), 4);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  SESSION-TOKEN LIFECYCLE (async)
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn session_token_refresh_extends_expiration() -> Result<(), SessionTokenError> {
+    // Arrange
+    let mut token = SessionToken::new(
+        "user-123",
+        Duration::from_secs(60), // 60-second TTL
+    );
+
+    let issued_at = token.issued_at();
+    let initial_exp = token.expires_at();
+
+    // Simulate that *half* the TTL has elapsed.
+    tokio::time::pause(); // enable time control
+    tokio::time::advance(Duration::from_secs(30)).await;
+
+    // Act
+    token.refresh().await?;
+
+    let refreshed_exp = token.expires_at();
+
+    // Assert
+    assert!(
+        refreshed_exp > initial_exp,
+        "refreshed expiration must be in the future"
+    );
+    assert_eq!(
+        token.issued_at(),
+        issued_at,
+        "issued_at should never change on refresh"
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn session_token_fails_with_invalid_signature() {
+    // Arrange
+    let token = SessionToken::from_tampered_jwt("invalid.jwt.signature".into());
+
+    // Act
+    let result = token.verify().await;
+
+    // Assert
+    assert!(matches!(result, Err(SessionTokenError::InvalidSignature)));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  PROPERTY-BASED TESTING FOR SLUGIFY
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// We verify that `slugify` always produces lower-case ASCII sequences when
+// fed arbitrary Unicode strings.
+
+#[cfg(feature = "property-tests")]
+mod property_based {
+    use super::*;
+    use proptest::prelude::*;
+
+    proptest! {
+        #[test]
+        fn slug_is_always_ascii(s in ".*") {
+            let slug = slugify(&s);
+            prop_assert!(slug.chars().all(|c| c.is_ascii() && !c.is_ascii_control()));
+            prop_assert!(slug == slug.to_ascii_lowercase(), "slug must be lower-case");
+        }
+    }
+}
+```

@@ -1,0 +1,367 @@
+```python
+"""
+QuestSmith - Event Bus
+======================
+
+A thread-safe, Observer-pattern event bus that propagates domain events
+(QuestCompleted, LocationEntered, etc.) to any number of observers.
+The bus is tightly integrated with Kivy’s main loop while remaining
+UI-toolkit agnostic, which makes it test-friendly and suitable for
+headless unit testing.
+
+Key features
+------------
+* Thread-safe publish / subscribe with weak-refs to avoid leaks.
+* Main-thread marshaling for UI safety via `kivy.clock.Clock`.
+* Optional sticky events (new subscribers instantly receive latest state).
+* Pluggable crash-reporter via Factory pattern (no hard dependency).
+* Background consumer pool for long-running subscribers.
+* Internal metrics for basic diagnostics.
+
+The module purposefully contains **no** Kivy imports at the top-level
+to avoid issues during CLI / test runs; imports are performed lazily.
+"""
+from __future__ import annotations
+
+import enum
+import functools
+import logging
+import threading
+import traceback
+import weakref
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
+from datetime import datetime
+from typing import Any, Callable, Dict, Generic, Optional, Protocol, Type, TypeVar
+
+# --------------------------------------------------------------------------- #
+# Crash-reporter Factory
+# --------------------------------------------------------------------------- #
+# The app’s bootstrapper is expected to call `CrashReporterFactory.register(...)`
+# early during start-up so the EventBus can report uncaught subscriber errors.
+
+class ICrashReporter(Protocol):
+    """Minimal interface implemented by platform-specific crash reporters."""
+
+    def report_exception(self, exc: Exception, context: str = "") -> None: ...
+
+
+class CrashReporterFactory:
+    """Factory that returns a crash-reporter instance or a no-op stub."""
+    _instance: Optional[ICrashReporter] = None
+    _lock = threading.Lock()
+
+    @classmethod
+    def register(cls, reporter: ICrashReporter) -> None:
+        with cls._lock:
+            cls._instance = reporter
+
+    @classmethod
+    def get(cls) -> ICrashReporter:
+        with cls._lock:
+            if cls._instance is None:  # Late import to keep dep optional
+                class _NoOp(ICrashReporter):  # type: ignore
+                    def report_exception(self, exc: Exception, context: str = "") -> None:
+                        logging.debug("No crash reporter registered; swallowed exception.", exc_info=exc)
+
+                cls._instance = _NoOp()
+            return cls._instance
+
+
+# --------------------------------------------------------------------------- #
+# Event Bus Implementation
+# --------------------------------------------------------------------------- #
+
+_LOG = logging.getLogger("questsmith.eventbus")
+_T = TypeVar("_T")
+
+
+class ThreadMode(enum.Enum):
+    """Defines where the subscriber callback will execute."""
+    MAIN = enum.auto()     # Marshalled to Kivy’s main thread
+    BACKGROUND = enum.auto()  # Submitted to shared background pool
+    IMMEDIATE = enum.auto()   # Runs on current thread (caller beware)
+
+
+class Event(Generic[_T]):
+    """Base class for all events, can be extended to add custom fields."""
+
+    timestamp: datetime
+
+    def __init__(self) -> None:
+        self.timestamp = datetime.utcnow()
+
+
+@dataclass(frozen=True, slots=True)
+class Subscription:
+    """Token returned by `subscribe`; used later for unsubscription."""
+    event_type: Type[Event[Any]]
+    observer_id: int
+
+
+class _Subscriber(Generic[_T]):
+    """Internal container to keep weak ref & meta info for each observer."""
+
+    __slots__ = (
+        "ref",
+        "thread_mode",
+        "receive_sticky",
+        "one_shot",
+    )
+
+    def __init__(
+        self,
+        callback: Callable[[_T], None],
+        thread_mode: ThreadMode,
+        receive_sticky: bool,
+        one_shot: bool,
+    ) -> None:
+        self.ref: weakref.ReferenceType[Callable[[_T], None]] = weakref.ref(callback)
+        self.thread_mode = thread_mode
+        self.receive_sticky = receive_sticky
+        self.one_shot = one_shot
+
+
+class EventBus:
+    """
+    A singleton event mediator used across the QuestSmith application.
+
+    Direct instantiation is supported (e.g. for tests), but production
+    code should rely on the module-level `event_bus` instance.
+    """
+
+    _bg_pool = ThreadPoolExecutor(
+        thread_name_prefix="QuestSmithEventBus",
+        max_workers=4,
+    )
+
+    def __init__(self) -> None:
+        self._subs: Dict[Type[Event[Any]], Dict[int, _Subscriber[Any]]] = {}
+        self._sticky: Dict[Type[Event[Any]], Event[Any]] = {}
+        self._sub_lock = threading.RLock()
+        self._observer_counter = 0
+
+    # --------------------------------------------------------------------- #
+    # Subscription API
+    # --------------------------------------------------------------------- #
+    def subscribe(
+        self,
+        event_type: Type[_T],
+        callback: Callable[[_T], None],
+        *,
+        thread_mode: ThreadMode = ThreadMode.MAIN,
+        receive_sticky: bool = True,
+        one_shot: bool = False,
+    ) -> Subscription:
+        """
+        Registers `callback` for events of type `event_type`.
+
+        Parameters
+        ----------
+        event_type:
+            Concrete `Event` subclass to listen for.
+        callback:
+            Function with a single event arg. Do NOT block the main thread.
+        thread_mode:
+            Where to execute the callback.
+        receive_sticky:
+            If True and a sticky event exists, it will be dispatched instantly.
+        one_shot:
+            Auto-unregister after first invocation.
+
+        Returns
+        -------
+        Subscription
+            A token used to later `unsubscribe`.
+        """
+        with self._sub_lock:
+            self._observer_counter += 1
+            sub = _Subscriber(callback, thread_mode, receive_sticky, one_shot)
+            self._subs.setdefault(event_type, {})[self._observer_counter] = sub
+            token = Subscription(event_type, self._observer_counter)
+
+            if receive_sticky and event_type in self._sticky:
+                self._dispatch_single(
+                    sub,
+                    self._sticky[event_type],  # type: ignore[arg-type]
+                    token,
+                )
+            _LOG.debug(
+                "Subscribed %s to %s (token=%s)", callback, event_type.__name__, token
+            )
+            return token
+
+    def unsubscribe(self, token: Subscription) -> None:
+        """Unregister a previously subscribed callback using its token."""
+        with self._sub_lock:
+            bucket = self._subs.get(token.event_type)
+            if bucket and bucket.pop(token.observer_id, None):
+                _LOG.debug("Unsubscribed token=%s", token)
+
+    # --------------------------------------------------------------------- #
+    # Publish API
+    # --------------------------------------------------------------------- #
+    def publish(self, event: Event[Any], *, sticky: bool = False) -> None:
+        """
+        Schedules dispatching of `event` to all current subscribers.
+
+        When `sticky=True`, the event will be re-emitted to *future* subscribers
+        that request sticky delivery.
+        """
+        event_type = type(event)
+
+        if sticky:
+            _LOG.debug("Stored sticky event for %s", event_type.__name__)
+            self._sticky[event_type] = event
+
+        # Clone snapshot to avoid deadlocks & allow mutation while iterating
+        with self._sub_lock:
+            subs_snapshot = list(self._subs.get(event_type, {}).items())
+
+        for observer_id, sub in subs_snapshot:
+            token = Subscription(event_type, observer_id)
+            self._dispatch_single(sub, event, token)
+
+    # --------------------------------------------------------------------- #
+    # Internal helpers
+    # --------------------------------------------------------------------- #
+    def _dispatch_single(
+        self,
+        sub: _Subscriber[Any],
+        event: Event[Any],
+        token: Subscription,
+    ) -> None:
+        """Dispatches a single event to a single subscriber."""
+        callback = sub.ref()
+        if callback is None:
+            # Auto-clean garbage-collected observers
+            self.unsubscribe(token)
+            return
+
+        # Wrap call to capture & forward exceptions
+        @functools.wraps(callback)
+        def safe_call() -> None:
+            try:
+                callback(event)  # type: ignore[arg-type]
+            except Exception as exc:  # pylint: disable=broad-except
+                CrashReporterFactory.get().report_exception(
+                    exc, context=f"EventBus dispatch of {type(event).__name__}"
+                )
+                _LOG.error(
+                    "Uncaught error in subscriber %s: %s\n%s",
+                    callback,
+                    exc,
+                    traceback.format_exc(),
+                )
+            finally:
+                if sub.one_shot:
+                    self.unsubscribe(token)
+
+        # Dispatch based on thread mode
+        if sub.thread_mode is ThreadMode.IMMEDIATE:
+            safe_call()
+        elif sub.thread_mode is ThreadMode.BACKGROUND:
+            self._bg_pool.submit(safe_call)
+        else:  # MAIN
+            try:
+                from kivy.clock import Clock  # Lazy import
+                Clock.schedule_once(lambda *_: safe_call(), 0)
+            except ImportError:  # Fallback when Kivy not available (unit tests)
+                _LOG.warning(
+                    "Kivy not available; running MAIN subscriber on current thread."
+                )
+                safe_call()
+
+    # --------------------------------------------------------------------- #
+    # Diagnostics
+    # --------------------------------------------------------------------- #
+    def introspect(self) -> Dict[str, Any]:
+        """Returns read-only diagnostic data useful for debug UIs & analytics."""
+        with self._sub_lock:
+            return {
+                "subscribers": {
+                    et.__name__: len(bucket) for et, bucket in self._subs.items()
+                },
+                "sticky_events": [et.__name__ for et in self._sticky],
+            }
+
+    # --------------------------------------------------------------------- #
+    # Convenience decorator
+    # --------------------------------------------------------------------- #
+    def listener(
+        self,
+        event_type: Type[_T],
+        *,
+        thread_mode: ThreadMode = ThreadMode.MAIN,
+        receive_sticky: bool = True,
+        one_shot: bool = False,
+    ) -> Callable[[Callable[[_T], None]], Callable[[_T], None]]:
+        """
+        Decorator for quickly registering free functions as listeners.
+
+        Usage
+        -----
+        @event_bus.listener(QuestCompletedEvent)
+        def _on_quest_completed(evt): ...
+        """
+
+        def decorator(func: Callable[[_T], None]) -> Callable[[_T], None]:
+            self.subscribe(
+                event_type,
+                func,
+                thread_mode=thread_mode,
+                receive_sticky=receive_sticky,
+                one_shot=one_shot,
+            )
+            return func
+
+        return decorator
+
+
+# --------------------------------------------------------------------------- #
+# Example domain events
+# --------------------------------------------------------------------------- #
+class QuestCompletedEvent(Event["QuestCompletedEvent"]):
+    quest_id: str
+    xp_earned: int
+
+    def __init__(self, quest_id: str, xp_earned: int) -> None:
+        super().__init__()
+        self.quest_id = quest_id
+        self.xp_earned = xp_earned
+
+
+class LocationEnteredEvent(Event["LocationEnteredEvent"]):
+    location_name: str
+
+    def __init__(self, location_name: str) -> None:
+        super().__init__()
+        self.location_name = location_name
+
+
+# --------------------------------------------------------------------------- #
+# Module-level singleton
+# --------------------------------------------------------------------------- #
+event_bus: EventBus = EventBus()
+
+# --------------------------------------------------------------------------- #
+# Self-test (executed only when run directly)
+# --------------------------------------------------------------------------- #
+if __name__ == "__main__":  # pragma: no cover
+    logging.basicConfig(level=logging.DEBUG)
+
+    @event_bus.listener(QuestCompletedEvent)
+    def _cheer(evt: QuestCompletedEvent) -> None:
+        print(f"🎉 Quest {evt.quest_id} completed! +{evt.xp_earned} XP")
+
+    # Publish some events from a background thread
+    def _simulate():
+        event_bus.publish(QuestCompletedEvent("slay-dragon", 150), sticky=False)
+
+    threading.Thread(target=_simulate, daemon=True).start()
+
+    # Keep the script alive a bit so background threads log their output
+    import time
+
+    time.sleep(1)
+```

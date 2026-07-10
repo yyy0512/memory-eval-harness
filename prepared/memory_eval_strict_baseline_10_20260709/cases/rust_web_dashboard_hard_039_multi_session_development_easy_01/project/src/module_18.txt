@@ -1,0 +1,508 @@
+```rust
+//! src/module_18.rs
+//!
+//! ChromaticCanvas Control Center – Session & CSRF Management
+//! =========================================================
+//! This module provides a production-ready implementation of session handling
+//! and CSRF protection.  It is designed to be mounted as Actix-web middleware
+//! so that every incoming request is automatically authenticated (if possible)
+//! and guarded against cross-site request forgery.
+//!
+//! The code demonstrates the following patterns:
+//!   • Service layer abstraction (`SessionStore` trait)
+//!   • JWT-backed, stateless sessions
+//!   • Secure, HttpOnly cookies
+//!   • Double-submit cookie pattern for CSRF tokens
+//!   • Actix-web `Transform` middleware with async/await
+//!   • Strong error typing
+//!   • Unit tests & property-based tests (quickcheck)
+//!
+//! Dependencies (add to Cargo.toml):
+//! ----------------------------------
+//! [dependencies]
+//! actix-web      = "4"
+//! actix-utils    = "3"
+//! chrono         = { version = "0.4", features = ["serde"] }
+//! jsonwebtoken   = "9"
+//! rand           = "0.8"
+//! serde          = { version = "1", features = ["derive"] }
+//! serde_json     = "1"
+//! thiserror      = "1"
+//! uuid           = { version = "1", features = ["v4"] }
+//!
+//! [dev-dependencies]
+//! quickcheck     = "1"
+//! tokio          = { version = "1", features = ["macros", "rt-multi-thread"] }
+
+use std::{
+    future::{ready, Future, Ready},
+    pin::Pin,
+    rc::Rc,
+    task::{Context, Poll},
+    time::Duration,
+};
+
+use actix_utils::future::{self, LocalBoxFuture};
+use actix_web::{
+    cookie::{Cookie, SameSite},
+    dev::{Service, ServiceRequest, ServiceResponse, Transform},
+    http::header,
+    Error, HttpMessage, HttpResponse,
+};
+use chrono::{DateTime, Duration as ChronoDuration, Utc};
+use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
+use rand::{distributions::Alphanumeric, Rng};
+use serde::{Deserialize, Serialize};
+use thiserror::Error;
+use uuid::Uuid;
+
+// ------------------------------------------------------------------------------------------------
+// Constants
+// ------------------------------------------------------------------------------------------------
+const SESSION_COOKIE_NAME: &str = "cc_session";
+const CSRF_COOKIE_NAME: &str = "cc_csrf";
+const CSRF_HEADER_NAME: &str = "x-cc-csrf-token";
+const DEFAULT_SESSION_TTL_MINUTES: i64 = 60;
+
+// ------------------------------------------------------------------------------------------------
+// Domain Types
+// ------------------------------------------------------------------------------------------------
+
+/// Public session representation attached to the Actix `Extensions` bag.
+#[derive(Debug, Clone)]
+pub struct Session {
+    pub user_id: Uuid,
+    pub issued_at: DateTime<Utc>,
+    pub expires_at: DateTime<Utc>,
+}
+
+impl Session {
+    /// Returns `true` if the session has expired.
+    pub fn is_expired(&self) -> bool {
+        Utc::now() > self.expires_at
+    }
+}
+
+/// Claims stored inside the JWT.
+/// We deliberately do NOT include any further user PII here.
+#[derive(Debug, Serialize, Deserialize)]
+struct Claims {
+    sub: String, // user_id
+    iat: i64,
+    exp: i64,
+}
+
+/// Errors produced by the session layer.
+#[derive(Debug, Error)]
+pub enum SessionError {
+    #[error("invalid or missing session")]
+    InvalidSession,
+    #[error("expired session")]
+    ExpiredSession,
+    #[error("csrf token mismatch")]
+    CsrfMismatch,
+    #[error("internal session error: {0}")]
+    Internal(String),
+}
+
+impl actix_web::ResponseError for SessionError {
+    fn error_response(&self) -> HttpResponse {
+        match self {
+            SessionError::InvalidSession | SessionError::CsrfMismatch => {
+                HttpResponse::Unauthorized().finish()
+            }
+            SessionError::ExpiredSession => HttpResponse::Forbidden().finish(),
+            SessionError::Internal(_) => HttpResponse::InternalServerError().finish(),
+        }
+    }
+}
+
+pub type SessionResult<T> = Result<T, SessionError>;
+
+// ------------------------------------------------------------------------------------------------
+// Session Store Abstraction (so we can switch to Redis, Postgres, etc. later)
+// ------------------------------------------------------------------------------------------------
+
+/// At the moment we rely on JWT, so the store is stateless, but the trait allows
+/// us to swap implementations easily.
+pub trait SessionStore: Send + Sync + 'static {
+    fn create_session(&self, user_id: Uuid) -> SessionResult<(Session, String /*jwt*/)>;
+
+    fn validate_jwt(&self, token: &str) -> SessionResult<Session>;
+}
+
+/// Default, JWT-backed implementation.
+#[derive(Clone)]
+pub struct JwtSessionStore {
+    encoding_key: EncodingKey,
+    decoding_key: DecodingKey,
+    ttl: ChronoDuration,
+}
+
+impl JwtSessionStore {
+    pub fn new<H: Into<String>>(secret: H, ttl_minutes: Option<i64>) -> Self {
+        let secret = secret.into();
+        Self {
+            encoding_key: EncodingKey::from_secret(secret.as_bytes()),
+            decoding_key: DecodingKey::from_secret(secret.as_bytes()),
+            ttl: ChronoDuration::minutes(ttl_minutes.unwrap_or(DEFAULT_SESSION_TTL_MINUTES)),
+        }
+    }
+}
+
+impl SessionStore for JwtSessionStore {
+    fn create_session(&self, user_id: Uuid) -> SessionResult<(Session, String)> {
+        let now = Utc::now();
+        let exp = now + self.ttl;
+
+        let claims = Claims {
+            sub: user_id.to_string(),
+            iat: now.timestamp(),
+            exp: exp.timestamp(),
+        };
+
+        let jwt = encode(&Header::default(), &claims, &self.encoding_key)
+            .map_err(|e| SessionError::Internal(e.to_string()))?;
+
+        Ok((
+            Session {
+                user_id,
+                issued_at: now,
+                expires_at: exp,
+            },
+            jwt,
+        ))
+    }
+
+    fn validate_jwt(&self, token: &str) -> SessionResult<Session> {
+        let token_data = decode::<Claims>(token, &self.decoding_key, &Validation::default())
+            .map_err(|_| SessionError::InvalidSession)?;
+
+        let claims = token_data.claims;
+
+        let session = Session {
+            user_id: Uuid::parse_str(&claims.sub).map_err(|_| SessionError::InvalidSession)?,
+            issued_at: DateTime::<Utc>::from_utc(
+                chrono::NaiveDateTime::from_timestamp_opt(claims.iat, 0)
+                    .ok_or(SessionError::InvalidSession)?,
+                Utc,
+            ),
+            expires_at: DateTime::<Utc>::from_utc(
+                chrono::NaiveDateTime::from_timestamp_opt(claims.exp, 0)
+                    .ok_or(SessionError::InvalidSession)?,
+                Utc,
+            ),
+        };
+
+        if session.is_expired() {
+            return Err(SessionError::ExpiredSession);
+        }
+
+        Ok(session)
+    }
+}
+
+// ------------------------------------------------------------------------------------------------
+// Middleware Implementation
+// ------------------------------------------------------------------------------------------------
+
+pub struct SessionMiddleware<S> {
+    store: Rc<dyn SessionStore>,
+    service: S,
+}
+
+impl<S, B> Service<ServiceRequest> for SessionMiddleware<S>
+where
+    S: Service<ServiceRequest, Response = ServiceResponse<B>, Error = Error> + 'static,
+    S::Future: 'static,
+    B: 'static,
+{
+    type Response = ServiceResponse<B>;
+    type Error = Error;
+    type Future = LocalBoxFuture<'static, Result<Self::Response, Self::Error>>;
+
+    fn poll_ready(&self, ctx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.service.poll_ready(ctx)
+    }
+
+    fn call(&self, mut req: ServiceRequest) -> Self::Future {
+        let store = Rc::clone(&self.store);
+        let fut = self.service.call(req.clone());
+
+        Box::pin(async move {
+            // Extract JWT from cookie or Authorization header
+            let jwt = extract_jwt(&req);
+
+            // Validate JWT if present
+            match jwt
+                .as_deref()
+                .map(|token| store.validate_jwt(token))
+                .transpose()
+            {
+                Ok(Some(session)) => {
+                    // Attach to request extensions so handlers can access it
+                    req.extensions_mut().insert(session);
+                }
+                Ok(None) => {
+                    // No session present -> public access
+                }
+                Err(e) => return Err(e.into()),
+            }
+
+            // CSRF enforcement on mutation requests (anything except GET/HEAD/OPTIONS)
+            if requires_csrf_protection(req.method().as_str()) {
+                if let Err(e) = csrf_check(&req) {
+                    return Err(e.into());
+                }
+            }
+
+            // Continue down the chain
+            let mut res = fut.await?;
+
+            // If we just attached a session (e.g. on login route), set cookies
+            if let Some(new_session) = req.extensions_mut().remove::<NewSessionMarker>() {
+                set_session_cookies(&mut res, new_session)?;
+            }
+
+            Ok(res)
+        })
+    }
+}
+
+// Marker used to stash the newly issued JWT & CSRF in extensions.
+#[derive(Debug)]
+struct NewSessionMarker {
+    jwt: String,
+    csrf: String,
+}
+
+// Transform wrapper to create middleware instances.
+pub struct SessionMiddlewareFactory {
+    store: Rc<dyn SessionStore>,
+}
+
+impl SessionMiddlewareFactory {
+    pub fn new(store: impl SessionStore) -> Self {
+        Self {
+            store: Rc::new(store),
+        }
+    }
+}
+
+impl<S, B> Transform<S, ServiceRequest> for SessionMiddlewareFactory
+where
+    S: Service<ServiceRequest, Response = ServiceResponse<B>, Error = Error> + 'static,
+    B: 'static,
+{
+    type Response = ServiceResponse<B>;
+    type Error = Error;
+    type Transform = SessionMiddleware<S>;
+    type InitError = ();
+    type Future = Ready<Result<Self::Transform, Self::InitError>>;
+
+    fn new_transform(&self, service: S) -> Self::Future {
+        ready(Ok(SessionMiddleware {
+            store: Rc::clone(&self.store),
+            service,
+        }))
+    }
+}
+
+// ------------------------------------------------------------------------------------------------
+// Helper functions
+// ------------------------------------------------------------------------------------------------
+
+fn extract_jwt(req: &ServiceRequest) -> Option<String> {
+    // Take from cookie
+    if let Some(cookie) = req.cookie(SESSION_COOKIE_NAME) {
+        return Some(cookie.value().to_owned());
+    }
+
+    // Fallback: Authorization header
+    if let Some(hdr_val) = req.headers().get(header::AUTHORIZATION) {
+        if let Ok(hdr_str) = hdr_val.to_str() {
+            if let Some(token) = hdr_str.strip_prefix("Bearer ") {
+                return Some(token.to_owned());
+            }
+        }
+    }
+
+    None
+}
+
+fn requires_csrf_protection(method: &str) -> bool {
+    !matches!(method, "GET" | "HEAD" | "OPTIONS" | "TRACE")
+}
+
+fn csrf_check(req: &ServiceRequest) -> SessionResult<()> {
+    let cookie = req
+        .cookie(CSRF_COOKIE_NAME)
+        .ok_or(SessionError::CsrfMismatch)?;
+
+    let header_val = req
+        .headers()
+        .get(CSRF_HEADER_NAME)
+        .ok_or(SessionError::CsrfMismatch)?
+        .to_str()
+        .map_err(|_| SessionError::CsrfMismatch)?;
+
+    if cookie.value() != header_val {
+        return Err(SessionError::CsrfMismatch);
+    }
+
+    Ok(())
+}
+
+/// Generate a cryptographically strong CSRF value.
+fn generate_csrf() -> String {
+    rand::thread_rng()
+        .sample_iter(&Alphanumeric)
+        .take(32)
+        .map(char::from)
+        .collect()
+}
+
+fn set_session_cookies<B>(
+    res: &mut ServiceResponse<B>,
+    new_session: NewSessionMarker,
+) -> Result<(), Error> {
+    let mut session_cookie = Cookie::build(SESSION_COOKIE_NAME, new_session.jwt)
+        .http_only(true)
+        .secure(true)
+        .same_site(SameSite::Lax) // Lax is sufficient for session, but Strict for CSRF
+        .path("/")
+        .max_age(Duration::from_secs((DEFAULT_SESSION_TTL_MINUTES * 60) as u64))
+        .finish();
+
+    let mut csrf_cookie = Cookie::build(CSRF_COOKIE_NAME, new_session.csrf)
+        .http_only(false)
+        .secure(true)
+        .same_site(SameSite::Strict)
+        .path("/")
+        .max_age(Duration::from_secs((DEFAULT_SESSION_TTL_MINUTES * 60) as u64))
+        .finish();
+
+    res.response_mut()
+        .add_cookie(&session_cookie)
+        .map_err(actix_web::error::ErrorInternalServerError)?;
+    res.response_mut()
+        .add_cookie(&csrf_cookie)
+        .map_err(actix_web::error::ErrorInternalServerError)?;
+
+    Ok(())
+}
+
+// ------------------------------------------------------------------------------------------------
+// Public API helpers for handlers
+// ------------------------------------------------------------------------------------------------
+
+/// Issue a brand-new session for the given user and attach it to the response.
+///
+/// Example usage inside an Actix handler:
+/// ```ignore
+/// let user_id = db::users::get_id(&credentials)?;
+/// session::issue(&req, &mut resp, user_id)?;
+/// ```
+pub mod api {
+    use super::*;
+
+    /// Creates a session and marks the request so the middleware can set cookies.
+    pub fn issue<B>(
+        req: &ServiceRequest,
+        user_id: Uuid,
+    ) -> Result<Session, actix_web::Error> {
+        let store = req
+            .app_data::<Rc<dyn SessionStore>>()
+            .ok_or_else(|| actix_web::error::ErrorInternalServerError("missing SessionStore"))?
+            .clone();
+
+        let (session, jwt) = store
+            .create_session(user_id)
+            .map_err(actix_web::error::ErrorInternalServerError)?;
+
+        // Generate CSRF
+        let csrf = generate_csrf();
+
+        // Stash marker so middleware can set cookies
+        req.extensions_mut().insert(NewSessionMarker { jwt, csrf });
+
+        Ok(session)
+    }
+
+    /// Extracts the already validated session from request extensions.
+    /// Returns `None` when user is not authenticated.
+    pub fn current(req: &ServiceRequest) -> Option<Session> {
+        req.extensions().get::<Session>().cloned()
+    }
+}
+
+// ------------------------------------------------------------------------------------------------
+// Unit Tests
+// ------------------------------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use actix_web::{
+        dev::ServiceResponse,
+        http::Method,
+        test::{call_service, init_service, read_body, TestRequest},
+        web, App,
+    };
+    use quickcheck::QuickCheck;
+
+    async fn build_app() -> impl Service<
+        ServiceRequest,
+        Response = ServiceResponse,
+        Error = Error,
+    > {
+        let store = JwtSessionStore::new("test-secret", Some(1));
+        let middleware = SessionMiddlewareFactory::new(store.clone());
+
+        App::new()
+            .app_data(Rc::new(store) as Rc<dyn SessionStore>)
+            .wrap(middleware)
+            .route(
+                "/private",
+                web::get().to(|req: ServiceRequest| async move {
+                    if api::current(&req).is_some() {
+                        Ok(HttpResponse::Ok())
+                    } else {
+                        Err(SessionError::InvalidSession)
+                    }
+                }),
+            )
+    }
+
+    #[actix_web::test]
+    async fn unauthenticated_access_denied() {
+        let app = init_service(build_app().await).await;
+
+        let req = TestRequest::get().uri("/private").to_request();
+        let resp = call_service(&app, req).await;
+        assert_eq!(resp.status(), 401);
+    }
+
+    #[actix_web::test]
+    async fn jwt_roundtrip() {
+        let store = JwtSessionStore::new("other-secret", Some(1));
+        let (session, token) = store.create_session(Uuid::new_v4()).unwrap();
+        let validated = store.validate_jwt(&token).unwrap();
+        assert_eq!(session.user_id, validated.user_id);
+    }
+
+    #[test]
+    fn csrf_randomness() {
+        // Basic property test: tokens must be unique with high probability
+        QuickCheck::new()
+            .tests(1000)
+            .quickcheck(prop as fn() -> bool);
+
+        fn prop() -> bool {
+            let a = generate_csrf();
+            let b = generate_csrf();
+            a != b && a.len() == 32 && b.len() == 32
+        }
+    }
+}
+```

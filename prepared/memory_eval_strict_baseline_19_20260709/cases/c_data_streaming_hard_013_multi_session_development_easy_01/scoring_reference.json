@@ -1,0 +1,340 @@
+{
+  "scenario_id": "c_data_streaming_hard_013_multi_session_development_easy_01",
+  "ground_truth": "The solution requires modifications to four specific files.\n\n1.  **`pulsesphere/lib/common/include/ps_config.h`:**\n    ```c\n    // Inside a relevant config struct, e.g., ps_service_config_t\n    // ... other fields\n    int max_retries;\n    int heartbeat_interval_ms; // <<< ADDED LINE\n    char* log_file;\n    // ... other fields\n    ```\n\n2.  **`pulsesphere/lib/common/src/ps_config.c`:**\n    ```c\n    // Inside the config parsing handler function, e.g., config_handler()\n    // ... other strcmp checks\n    } else if (strcmp(name, \"heartbeat_interval_ms\") == 0) {\n        pconfig->heartbeat_interval_ms = atoi(value); // <<< ADDED BLOCK\n    } else {\n        return 0;  /* unknown section/name, error */\n    }\n    ```\n\n3.  **`pulsesphere/config/ingestion_service.conf`:**\n    ```ini\n    # ... other config lines\n    log_level = info\n    \n    # Interval in milliseconds for the main processing loop heartbeat\n    heartbeat_interval_ms = 5000 # <<< ADDED LINE\n    ```\n\n4.  **`pulsesphere/services/ingestion_service/src/main.c`:**\n    ```c\n    // Near the top of main(), after config is loaded\n    ps_config_t config;\n    if (ps_config_load(&config, \"../config/ingestion_service.conf\") != 0) {\n        ps_log_fatal(\"Failed to load configuration.\");\n        return 1;\n    }\n    ps_log_info(\"Ingestion service configured with heartbeat interval: %d ms\", config.heartbeat_interval_ms); // <<< ADDED LINE\n\n    // ... further down, inside the main while loop\n    while (1) {\n        process_pending_messages();\n        // Old line: sleep(5); // Sleep for 5 seconds\n        usleep(config.heartbeat_interval_ms * 1000); // <<< MODIFIED LINE\n    }\n    ```",
+  "expected_approach": "An expert developer would approach this incrementally:\n\n1.  **Exploration & Scoping (Session 1):**\n    - The developer would first identify the core files for configuration. They would likely search for `config` in the codebase.\n    - This would lead them to `ps_config.h` (for data structures) and `ps_config.c` (for parsing logic).\n    - They would examine `ps_config.h` to find the primary configuration struct, likely named something like `ps_config_t` or `ps_service_config_t`.\n    - They would then analyze `ps_config.c` to understand how configuration files are parsed, looking for the parsing function (e.g., `ps_config_load`) and the handler that processes key-value pairs.\n\n2.  **Implementation (Session 1):**\n    - **`ps_config.h`:** Add `int heartbeat_interval_ms;` to the relevant configuration struct.\n    - **`ps_config.c`:** In the configuration parsing handler, add a new `if/else if` condition to check for the string \"heartbeat_interval_ms\" and use `atoi()` or `strtol()` to convert the value and assign it to the newly created struct field.\n    - **`ingestion_service.conf`:** Open the file and add a new line: `heartbeat_interval_ms = 5000`.\n\n3.  **Context Carry-over (Between Sessions):** The developer would mentally (or in notes) keep track of the new variable name (`heartbeat_interval_ms`) and the struct it belongs to.\n\n4.  **Integration (Session 2):**\n    - **`ingestion_service/src/main.c`:**\n        - The developer would open this file and locate the `main` function.\n        - They would add a `ps_log_info()` call right after the configuration is successfully loaded to log the `config.heartbeat_interval_ms` value.\n        - They would then find the main `while` loop and locate the `sleep()` or `usleep()` call that controls the loop's frequency.\n        - They would replace the hardcoded value (e.g., `sleep(5)`) with a call that uses the new configuration value, ensuring units are correct (e.g., `usleep(config.heartbeat_interval_ms * 1000)` since `usleep` takes microseconds).\n\n5.  **Verification:** The developer would mentally review the changes to ensure they are correct, consistent, and don't introduce side effects.",
+  "evaluation_criteria": [
+    "**Session 1 Correctness:** The agent correctly modified `ps_config.h`, `ps_config.c`, and `ingestion_service.conf` as required.",
+    "**Session 2 Correctness:** The agent correctly modified `ingestion_service/src/main.c` to both log and use the new configuration value.",
+    "**Context Retention:** The agent successfully used the exact variable name (`heartbeat_interval_ms`) and its value from the config struct in Session 2 without needing to re-read or re-discover the changes made in Session 1.",
+    "**Code Quality & Accuracy:** The agent correctly converted milliseconds to microseconds for the `usleep` function and added clear, well-formatted code.",
+    "**File Navigation:** The agent efficiently located the four required files without unnecessary exploration of unrelated files.",
+    "**Minimalism:** The agent modified only the necessary lines of code to achieve the goal and did not introduce any unrelated or extraneous changes."
+  ],
+  "memory_contracts": [
+    {
+      "id": "user_tomato_preference_marker",
+      "category": "synthetic_memory_user_preference",
+      "memory_type": "user",
+      "introduced_in_session": 1,
+      "workspace_effective_from_session": 2,
+      "description": "User preference: for future implementation work in this repository, place the exact marker TOMATO_USER_PREF_741 near newly added or meaningfully changed code, comments, or documentation so the user's TOMATO preference is visible across sessions.",
+      "expected_memory_fact": {
+        "required_keywords": [
+          "TOMATO_USER_PREF_741",
+          "user preference",
+          "future implementation work",
+          "newly added or meaningfully changed code"
+        ],
+        "required_regex": [
+          "TOMATO_USER_PREF_741"
+        ]
+      },
+      "checks": [
+        {
+          "id": "tomato_user_pref_marker_present",
+          "type": "require_regex",
+          "path_glob": "**/*",
+          "pattern": "TOMATO_USER_PREF_741",
+          "source": "synthetic_memory_contract",
+          "strength": "sentinel_marker",
+          "signal_kind": "language_neutral_marker",
+          "rationale": "Later-session workspace should preserve or reuse the exact user preference marker introduced in session 1."
+        }
+      ]
+    },
+    {
+      "id": "feedback_tomato_review_note",
+      "category": "synthetic_memory_feedback_continuity",
+      "memory_type": "feedback",
+      "introduced_in_session": 1,
+      "workspace_effective_from_session": 2,
+      "description": "Feedback to remember: future implementation changes should include the exact review note TOMATO_REVIEW_NOTE_742 near changed logic to show that compatibility and continuity were considered.",
+      "expected_memory_fact": {
+        "required_keywords": [
+          "TOMATO_REVIEW_NOTE_742",
+          "review note",
+          "compatibility",
+          "continuity"
+        ],
+        "required_regex": [
+          "TOMATO_REVIEW_NOTE_742"
+        ]
+      },
+      "checks": [
+        {
+          "id": "tomato_review_note_present",
+          "type": "require_regex",
+          "path_glob": "**/*",
+          "pattern": "TOMATO_REVIEW_NOTE_742",
+          "source": "synthetic_memory_contract",
+          "strength": "sentinel_marker",
+          "signal_kind": "language_neutral_marker",
+          "rationale": "Later-session workspace should carry forward the exact feedback marker introduced in session 1."
+        }
+      ]
+    },
+    {
+      "id": "project_tomato_bridge_token",
+      "category": "synthetic_memory_project_convention",
+      "memory_type": "project",
+      "introduced_in_session": 1,
+      "workspace_effective_from_session": 2,
+      "description": "Project memory: future helper, handler, adapter, or glue-code changes should include the exact project token TOMATO_PROJECT_BRIDGE_743 in a nearby name, comment, or note so cross-session project conventions remain visible.",
+      "expected_memory_fact": {
+        "required_keywords": [
+          "TOMATO_PROJECT_BRIDGE_743",
+          "project token",
+          "helper",
+          "handler",
+          "adapter"
+        ],
+        "required_regex": [
+          "TOMATO_PROJECT_BRIDGE_743"
+        ]
+      },
+      "checks": [
+        {
+          "id": "tomato_project_bridge_present",
+          "type": "require_regex",
+          "path_glob": "**/*",
+          "pattern": "TOMATO_PROJECT_BRIDGE_743",
+          "source": "synthetic_memory_contract",
+          "strength": "sentinel_marker",
+          "signal_kind": "language_neutral_marker",
+          "rationale": "Later-session workspace should preserve or reuse the exact project convention token introduced in session 1."
+        }
+      ]
+    },
+    {
+      "id": "reference_tomato_canon_pointer",
+      "category": "synthetic_memory_reference_pointer",
+      "memory_type": "reference",
+      "introduced_in_session": 1,
+      "workspace_effective_from_session": 2,
+      "description": "Reference memory: treat docs/TOMATO_REFERENCE_CANON_744.md as the canonical local reference pointer for future work, and cite the exact path in comments, documentation, or implementation notes when adding related changes.",
+      "expected_memory_fact": {
+        "required_keywords": [
+          "docs/TOMATO_REFERENCE_CANON_744.md",
+          "canonical local reference",
+          "future work",
+          "implementation notes"
+        ],
+        "required_regex": [
+          "docs/TOMATO_REFERENCE_CANON_744\\.md"
+        ]
+      },
+      "checks": [
+        {
+          "id": "tomato_reference_pointer_present",
+          "type": "require_regex",
+          "path_glob": "**/*",
+          "pattern": "docs/TOMATO_REFERENCE_CANON_744\\.md",
+          "source": "synthetic_memory_contract",
+          "strength": "sentinel_marker",
+          "signal_kind": "language_neutral_marker",
+          "rationale": "Later-session workspace should cite the exact reference artifact pointer introduced in session 1."
+        }
+      ]
+    },
+    {
+      "id": "experience_tomato_safe_path_lesson",
+      "category": "synthetic_memory_experience_lesson",
+      "memory_type": "experience",
+      "introduced_in_session": 1,
+      "workspace_effective_from_session": 2,
+      "description": "Experience memory: previous work learned not to use the literal LEGACY_TEMP_PATH in future changes; use the exact safer marker TOMATO_SAFE_PATH_745 instead whenever temporary path, fallback path, or compatibility-path behavior is mentioned.",
+      "expected_memory_fact": {
+        "required_keywords": [
+          "TOMATO_SAFE_PATH_745",
+          "LEGACY_TEMP_PATH",
+          "experience",
+          "temporary path",
+          "fallback path"
+        ],
+        "required_regex": [
+          "TOMATO_SAFE_PATH_745"
+        ],
+        "forbidden_keywords": []
+      },
+      "checks": [
+        {
+          "id": "tomato_safe_path_present",
+          "type": "require_regex",
+          "path_glob": "**/*",
+          "pattern": "TOMATO_SAFE_PATH_745",
+          "source": "synthetic_memory_contract",
+          "strength": "sentinel_marker",
+          "signal_kind": "language_neutral_marker",
+          "rationale": "Later-session workspace should use the exact safer experience marker introduced in session 1."
+        },
+        {
+          "id": "tomato_legacy_temp_path_absent",
+          "type": "forbid_regex",
+          "path_glob": "**/*",
+          "pattern": "LEGACY_TEMP_PATH",
+          "source": "synthetic_memory_contract",
+          "strength": "negative_sentinel",
+          "signal_kind": "language_neutral_marker",
+          "rationale": "Later-session workspace should avoid the deprecated experience marker from the session-1 lesson."
+        }
+      ]
+    }
+  ],
+  "expected_memory_facts": [
+    {
+      "id": "user_tomato_preference_marker",
+      "required_keywords": [
+        "TOMATO_USER_PREF_741",
+        "future implementation work",
+        "newly added or meaningfully changed code"
+      ],
+      "required_regex": [
+        "TOMATO_USER_PREF_741"
+      ]
+    },
+    {
+      "id": "feedback_tomato_review_note",
+      "required_keywords": [
+        "TOMATO_REVIEW_NOTE_742",
+        "review note",
+        "compatibility",
+        "continuity"
+      ],
+      "required_regex": [
+        "TOMATO_REVIEW_NOTE_742"
+      ]
+    },
+    {
+      "id": "project_tomato_bridge_token",
+      "required_keywords": [
+        "TOMATO_PROJECT_BRIDGE_743",
+        "project token",
+        "helper",
+        "handler",
+        "adapter"
+      ],
+      "required_regex": [
+        "TOMATO_PROJECT_BRIDGE_743"
+      ]
+    },
+    {
+      "id": "reference_tomato_canon_pointer",
+      "required_keywords": [
+        "docs/TOMATO_REFERENCE_CANON_744.md",
+        "canonical local reference",
+        "future work",
+        "implementation notes"
+      ],
+      "required_regex": [
+        "docs/TOMATO_REFERENCE_CANON_744\\.md"
+      ]
+    },
+    {
+      "id": "experience_tomato_safe_path_lesson",
+      "required_keywords": [
+        "TOMATO_SAFE_PATH_745",
+        "LEGACY_TEMP_PATH",
+        "experience",
+        "temporary path",
+        "fallback path"
+      ],
+      "required_regex": [
+        "TOMATO_SAFE_PATH_745"
+      ],
+      "forbidden_keywords": []
+    }
+  ],
+  "test_plan": {
+    "status": "configured",
+    "command": [
+      "bash",
+      "build.sh"
+    ],
+    "working_dir": "pulsesphere",
+    "source": "test_runner_script",
+    "timeout_sec": 600,
+    "reason": null,
+    "test_like_file_count": 12,
+    "executor": "host",
+    "docker_image": "locobench-memory-eval:c",
+    "environment": {
+      "recommended_executor": "docker",
+      "network": "none"
+    },
+    "integrity": {
+      "status": "basic",
+      "original_test_files": [
+        "pulsesphere/services/analytics_sink_service/tests/test_data_lake_writer.c",
+        "pulsesphere/services/analytics_sink_service/tests/test_main.c",
+        "pulsesphere/services/enrichment_service/tests/test_enrichment_engine.c",
+        "pulsesphere/services/enrichment_service/tests/test_main.c",
+        "pulsesphere/services/ingestion_service/tests/test_http_ingestor.c",
+        "pulsesphere/services/ingestion_service/tests/test_main.c",
+        "pulsesphere/services/validation_service/tests/test_main.c",
+        "pulsesphere/services/validation_service/tests/test_validator.c"
+      ]
+    }
+  },
+  "requirement_checks": [
+    {
+      "id": "has_heartbeat_interval_config_value",
+      "type": "require_regex",
+      "path_glob": "pulsesphere/config/ingestion_service.conf",
+      "source": "overlay",
+      "strength": "explicit",
+      "signal_kind": "config_value",
+      "rationale": "ingestion_service config defines heartbeat_interval_ms=5000.",
+      "pattern": "heartbeat_interval_ms\\s*=\\s*5000"
+    },
+    {
+      "id": "runtime_config_has_heartbeat_field",
+      "type": "require_regex",
+      "path_glob": "pulsesphere/lib/common/include/ps_config.h",
+      "source": "overlay",
+      "strength": "explicit",
+      "signal_kind": "config_schema",
+      "rationale": "shared runtime config exposes heartbeat_interval_ms.",
+      "pattern": "heartbeat_interval_ms"
+    },
+    {
+      "id": "config_parser_reads_heartbeat_interval",
+      "type": "require_regex",
+      "path_glob": "pulsesphere/lib/common/src/ps_config.c",
+      "source": "overlay",
+      "strength": "explicit",
+      "signal_kind": "config_parser",
+      "rationale": "configuration parser reads heartbeat_interval_ms.",
+      "pattern": "heartbeat_interval_ms"
+    },
+    {
+      "id": "ingestion_service_uses_heartbeat_interval",
+      "type": "require_regex",
+      "path_glob": "pulsesphere/services/ingestion_service/src/main.c",
+      "source": "overlay",
+      "strength": "explicit",
+      "signal_kind": "runtime_integration",
+      "rationale": "ingestion service uses/logs the configured heartbeat interval.",
+      "pattern": "heartbeat_interval_ms|Ingestion service configured with heartbeat interval"
+    }
+  ],
+  "requirement_check_plan": {
+    "status": "configured",
+    "source": "overlay",
+    "reason": null,
+    "check_count": 4,
+    "source_distribution": {
+      "overlay": 4
+    },
+    "strength_distribution": {
+      "explicit": 4
+    },
+    "signal_kind_distribution": {
+      "config_parser": 1,
+      "config_schema": 1,
+      "config_value": 1,
+      "runtime_integration": 1
+    },
+    "rejection_reason_distribution": {},
+    "rejected_terms": []
+  }
+}

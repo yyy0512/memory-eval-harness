@@ -1,0 +1,378 @@
+```rust
+//! src/module_30.rs
+//!
+//! ChromaticCanvas Control Center – Session & SSL Middleware
+//! ---------------------------------------------------------
+//! This module wires two critical runtime guarantees into the web‐dashboard:
+//! 1. Enforced HTTPS for every request that reaches our application layer
+//! 2. A signed-cookie session system backed by Postgres
+//!
+//! The code is purposely self-contained so that it can be dropped into the
+//! `web_dashboard` crate without additional glue.  In production we mount the
+//! `HttpsRedirect` middleware first, then register the `AuthSession` extractor
+//! on every route that needs authentication.
+//!
+//! Technologies & conventions used:
+//! - Actix-web 4.x
+//! - SQLx (runtime-agnostic) for async DB interactions
+//! - `tracing` for structured logs
+//! - `thiserror` for ergonomic error management
+//!
+//! # Security notes
+//! - When `HttpsRedirect` detects an insecure request it performs a **307
+//!   Temporary Redirect** to the HTTPS schema (preserving the method).
+//! - Session cookies are signed with a secret key (typically your JWT/HMAC
+//!   signing key) and flagged `Secure`, `HttpOnly`, and `SameSite=Lax`.
+//! - Session expiration is checked on every request—expired tokens are purged
+//!   lazily to keep the hot path lean.
+//!
+//! # Public API In a Nutshell
+//! - `SessionManager::new(pool, secret)` – create a new manager
+//! - `.create_session(user_id, meta)` – returns a cookie
+//! - `.revoke(token)` – logout
+//! - `AuthSession` extractor – yields a validated `Session` to handlers
+//!
+//! ---------------------------------------------------------------------------
+
+use std::{
+    future::{ready, Future, Ready},
+    net::IpAddr,
+    pin::Pin,
+    task::{Context, Poll},
+    time::Duration,
+};
+
+use actix_web::{
+    body::MessageBody,
+    cookie::{time::OffsetDateTime, Cookie, SameSite},
+    dev::{forward_ready, Service, ServiceRequest, ServiceResponse, Transform},
+    error::{ErrorForbidden, ErrorInternalServerError},
+    http::{header, StatusCode},
+    web::{Data, Payload},
+    Error, FromRequest, HttpMessage, HttpRequest, HttpResponse,
+};
+use async_trait::async_trait;
+use chrono::{DateTime, Utc};
+use futures_util::future::LocalBoxFuture;
+use hmac::{Hmac, Mac};
+use rand::{distributions::Alphanumeric, Rng};
+use sha2::Sha256;
+use sqlx::{query, query_as, PgPool};
+use thiserror::Error;
+use tracing::{debug, error, info, instrument};
+use uuid::Uuid;
+
+type HmacSha256 = Hmac<Sha256>;
+
+const DEFAULT_SESSION_TTL: Duration = Duration::from_secs(60 * 60 * 24 * 14); // 14 days
+const COOKIE_NAME: &str = "cc_session";
+
+/// -------- Session Domain --------------------------------------------------
+
+/// Entity representing a live user session.
+#[derive(Debug, Clone)]
+pub struct Session {
+    pub token: String,
+    pub user_id: Uuid,
+    pub ip: IpAddr,
+    pub user_agent: Option<String>,
+    pub expires_at: DateTime<Utc>,
+}
+
+/// Errors thrown by the session layer.
+#[derive(Debug, Error)]
+pub enum SessionError {
+    #[error("database error: {0}")]
+    Database(#[from] sqlx::Error),
+
+    #[error("hmac validation failed")]
+    InvalidSignature,
+
+    #[error("expired session")]
+    Expired,
+
+    #[error("no session found")]
+    NotFound,
+}
+
+/// Stores and validates sessions against the DB.
+#[derive(Clone)]
+pub struct SessionManager {
+    pool: PgPool,
+    signing_key: Vec<u8>,
+}
+
+impl SessionManager {
+    pub fn new(pool: PgPool, signing_key: impl Into<Vec<u8>>) -> Self {
+        Self {
+            pool,
+            signing_key: signing_key.into(),
+        }
+    }
+
+    /// Creates a new signed session token and persists it.
+    ///
+    /// Returns a `Cookie` so that the caller can set it on the response.
+    #[instrument(skip(self, remote_ip, user_agent))]
+    pub async fn create_session(
+        &self,
+        user_id: Uuid,
+        remote_ip: IpAddr,
+        user_agent: Option<String>,
+        ttl: Option<Duration>,
+    ) -> Result<Cookie<'static>, SessionError> {
+        let ttl = ttl.unwrap_or(DEFAULT_SESSION_TTL);
+        let expires_at = Utc::now() + chrono::Duration::from_std(ttl).unwrap();
+        let raw_token: String = rand::thread_rng()
+            .sample_iter(&Alphanumeric)
+            .take(64)
+            .map(char::from)
+            .collect();
+
+        // Persist
+        query!(
+            r#"
+            INSERT INTO sessions (token, user_id, ip, user_agent, expires_at)
+            VALUES ($1, $2, $3, $4, $5)
+            "#,
+            raw_token,
+            user_id,
+            remote_ip,
+            user_agent,
+            expires_at
+        )
+        .execute(&self.pool)
+        .await?;
+
+        let signed_token = self.sign_token(&raw_token)?;
+
+        let cookie = Cookie::build(COOKIE_NAME, signed_token)
+            .secure(true)
+            .http_only(true)
+            .same_site(SameSite::Lax)
+            .expires(OffsetDateTime::from(expires_at))
+            .path("/")
+            .finish();
+
+        info!(%user_id, "created new session");
+        Ok(cookie)
+    }
+
+    /// Verifies the cookie and loads the session record.
+    #[instrument(skip(self))]
+    pub async fn validate_cookie(&self, cookie: &Cookie<'_>) -> Result<Session, SessionError> {
+        // 1. Verify signature
+        let raw_token = self.verify_token(cookie.value())?;
+
+        // 2. Load from DB
+        let record = query_as!(
+            Session,
+            r#"
+            SELECT token,
+                   user_id,
+                   ip as "ip!: IpAddr",
+                   user_agent,
+                   expires_at
+            FROM sessions
+            WHERE token = $1
+            "#,
+            raw_token
+        )
+        .fetch_optional(&self.pool)
+        .await?
+        .ok_or(SessionError::NotFound)?;
+
+        // 3. Expiration
+        if Utc::now() > record.expires_at {
+            self.revoke(&record.token).await?;
+            return Err(SessionError::Expired);
+        }
+
+        Ok(record)
+    }
+
+    /// Deletes a session (logout).
+    #[instrument(skip(self))]
+    pub async fn revoke(&self, token: &str) -> Result<(), SessionError> {
+        query!("DELETE FROM sessions WHERE token = $1", token)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    /// Internal: signs a raw session token with HMAC(SHA-256)
+    fn sign_token(&self, token: &str) -> Result<String, SessionError> {
+        let mut mac = HmacSha256::new_from_slice(&self.signing_key)
+            .expect("HMAC can take key of any size");
+        mac.update(token.as_bytes());
+        let sig = mac.finalize().into_bytes();
+
+        // Store as token.signature (Base64URL)
+        Ok(format!(
+            "{}.{}",
+            token,
+            base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(sig)
+        ))
+    }
+
+    /// Internal: validates the HMAC signature and returns the raw token
+    fn verify_token(&self, signed: &str) -> Result<String, SessionError> {
+        let mut parts = signed.split('.');
+        let token = parts.next().unwrap_or_default();
+        let sig = parts.next().ok_or(SessionError::InvalidSignature)?;
+
+        let sig = base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .decode(sig)
+            .map_err(|_| SessionError::InvalidSignature)?;
+
+        let mut mac =
+            HmacSha256::new_from_slice(&self.signing_key).expect("HMAC can take key of any size");
+        mac.update(token.as_bytes());
+
+        mac.verify_slice(&sig)
+            .map_err(|_| SessionError::InvalidSignature)?;
+
+        Ok(token.to_owned())
+    }
+}
+
+/// -------- Actix Extractor --------------------------------------------------
+
+/// Request extractor yielding an authenticated [`Session`].
+///
+/// Example:
+/// ```no_run
+/// async fn dashboard(session: AuthSession) -> impl Responder {
+///     format!("Hello user {}", session.0.user_id)
+/// }
+/// ```
+pub struct AuthSession(pub Session);
+
+#[async_trait(?Send)]
+impl FromRequest for AuthSession {
+    type Error = Error;
+    type Future = LocalBoxFuture<'static, Result<Self, Error>>;
+
+    #[instrument(skip(req, _payload))]
+    fn from_request(req: &HttpRequest, _payload: &mut Payload) -> Self::Future {
+        // Clone needed data
+        let manager_opt = req.app_data::<Data<SessionManager>>().cloned();
+        let cookie_opt = req.cookie(COOKIE_NAME).cloned();
+
+        Box::pin(async move {
+            let manager = manager_opt
+                .ok_or_else(|| ErrorInternalServerError("SessionManager missing"))?;
+
+            let cookie = cookie_opt.ok_or_else(|| ErrorForbidden("Missing session cookie"))?;
+
+            match manager.validate_cookie(&cookie).await {
+                Ok(session) => Ok(AuthSession(session)),
+                Err(SessionError::Expired) | Err(SessionError::NotFound) => {
+                    Err(ErrorForbidden("Invalid session"))
+                }
+                Err(e) => {
+                    error!(error = %e, "session validation failed");
+                    Err(ErrorInternalServerError("Session validation error"))
+                }
+            }
+        })
+    }
+}
+
+/// -------- HTTPS Redirect Middleware ---------------------------------------
+
+/// Simple middleware that forces HTTPS at the application edge.
+///
+/// Deployments behind a reverse proxy should ensure the
+/// `X-Forwarded-Proto: https` header is set, otherwise the middleware will
+/// mis-classify the request as insecure.
+pub struct HttpsRedirect;
+
+impl<S, B> Transform<S, ServiceRequest> for HttpsRedirect
+where
+    S: Service<ServiceRequest, Response = ServiceResponse<B>, Error = Error> + 'static,
+    B: MessageBody + 'static,
+{
+    type Response = ServiceResponse<B>;
+    type Error = Error;
+    type Transform = HttpsRedirectMiddleware<S>;
+    type InitError = ();
+    type Future = Ready<Result<Self::Transform, Self::InitError>>;
+
+    fn new_transform(&self, service: S) -> Self::Future {
+        ready(Ok(HttpsRedirectMiddleware { service }))
+    }
+}
+
+pub struct HttpsRedirectMiddleware<S> {
+    service: S,
+}
+
+impl<S, B> Service<ServiceRequest> for HttpsRedirectMiddleware<S>
+where
+    S: Service<ServiceRequest, Response = ServiceResponse<B>, Error = Error> + 'static,
+    B: MessageBody + 'static,
+{
+    type Response = ServiceResponse<B>;
+    type Error = Error;
+    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>>>>;
+
+    forward_ready!(service);
+
+    fn call(&self, mut req: ServiceRequest) -> Self::Future {
+        let is_secure = req
+            .connection_info()
+            .scheme()
+            .eq_ignore_ascii_case("https");
+
+        // Honour forwarded proto header (typical in k8s, AWS ELB, etc).
+        let forwarded_proto = req
+            .headers()
+            .get(header::HeaderName::from_static("x-forwarded-proto"))
+            .and_then(|v| v.to_str().ok());
+
+        let is_forwarded_secure = matches!(forwarded_proto, Some("https" | "HTTPS"));
+
+        if is_secure || is_forwarded_secure {
+            // Continue normal request pipeline
+            Box::pin(self.service.call(req))
+        } else {
+            // Redirect to HTTPS schema
+            let host = req
+                .connection_info()
+                .host()
+                .to_string()
+                .replace(":80", ""); // make prettier URLs
+
+            let uri = req.uri().to_string();
+            let redirect_url = format!("https://{}{}", host, uri);
+
+            let res = HttpResponse::TemporaryRedirect()
+                .insert_header((header::LOCATION, redirect_url))
+                .finish();
+
+            let boxed: ServiceResponse<_> = req.into_response(res.map_into_left_body());
+            Box::pin(async move { Ok(boxed) })
+        }
+    }
+}
+
+/// -------- Helper: session cookie deletion ----------------------------------
+
+/// Generates a deletion cookie for the current session.
+///
+/// Useful when you want to ensure the browser forgets the cookie immediately:
+/// ```no_run
+/// let mut resp = HttpResponse::Ok().finish();
+/// resp.add_removal_cookie(&delete_session_cookie()).unwrap();
+/// ```
+pub fn delete_session_cookie() -> Cookie<'static> {
+    Cookie::build(COOKIE_NAME, "")
+        .secure(true)
+        .http_only(true)
+        .same_site(SameSite::Lax)
+        .expires(OffsetDateTime::UNIX_EPOCH) // Already expired
+        .path("/")
+        .finish()
+}
+```

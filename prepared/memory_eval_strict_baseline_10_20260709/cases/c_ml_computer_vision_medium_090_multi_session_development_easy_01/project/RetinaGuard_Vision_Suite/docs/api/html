@@ -1,0 +1,379 @@
+/*
+ * RetinaGuard Vision Suite – API Documentation Generator
+ * File: docs/api/html/retinaguard_apidoc.c
+ *
+ * A standalone utility that parses C header files containing Doxygen-style
+ * comments and emits a single, self-contained HTML page summarising the public
+ * API.  The generated file is placed under docs/api/html/api.html so that it
+ * can be shipped with the binary or served by the in-process HTTP dashboard.
+ *
+ * Build:
+ *   gcc -Wall -Wextra -pedantic -std=c11 -O2 -o retinaguard_apidoc retinaguard_apidoc.c
+ *
+ * Usage:
+ *   ./retinaguard_apidoc <output-dir> <header1.h> [header2.h ...]
+ *
+ * Example:
+ *   ./retinaguard_apidoc ./docs/api/html include/rg_pipeline.h include/rg_model.h
+ *
+ * Limitations:
+ *   ‑ Assumes ANSI-C prototypes that end with ‘;’
+ *   ‑ Only top-level functions (no structs/enums/macros)
+ *   ‑ Comment blocks must immediately precede the prototype
+ *
+ * Copyright (c) 2024 RetinaGuard.
+ * SPDX-License-Identifier: MIT
+ */
+
+#define _POSIX_C_SOURCE 200809L /* for getline */
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <stdbool.h>
+#include <time.h>
+#include <errno.h>
+
+/* ---------------------------------------------------------------------------
+ * Utilities
+ * ---------------------------------------------------------------------------*/
+
+/* Portable replacement for strdup */
+static char *rg_strdup(const char *s)
+{
+    if (!s) return NULL;
+    size_t len = strlen(s) + 1;
+    char *dup = malloc(len);
+    if (!dup) return NULL;
+    memcpy(dup, s, len);
+    return dup;
+}
+
+/* Trim leading and trailing whitespace (in-place). Returns the trimmed string. */
+static char *rg_strtrim(char *s)
+{
+    char *end;
+    if (!s) return NULL;
+
+    /* Trim leading */
+    while (*s && (*s == ' ' || *s == '\t' || *s == '\n' || *s == '\r'))
+        s++;
+
+    if (*s == 0) return s; /* All spaces */
+
+    /* Trim trailing */
+    end = s + strlen(s) - 1;
+    while (end > s && (*end == ' ' || *end == '\t' || *end == '\n' || *end == '\r'))
+        *end-- = '\0';
+
+    return s;
+}
+
+/* Get current UTC time as ISO-8601 string */
+static void rg_iso8601(char *buf, size_t bufsz)
+{
+    time_t now = time(NULL);
+    struct tm tm_utc;
+    gmtime_r(&now, &tm_utc);
+    strftime(buf, bufsz, "%Y-%m-%dT%H:%M:%SZ", &tm_utc);
+}
+
+/* ---------------------------------------------------------------------------
+ * Data structures
+ * ---------------------------------------------------------------------------*/
+
+typedef struct {
+    char *comment;      /* Raw Doxygen comment block */
+    char *prototype;    /* Entire function prototype line */
+    char *name;         /* Extracted function name */
+} rg_api_entry_t;
+
+typedef struct {
+    rg_api_entry_t *entries;
+    size_t          count;
+    size_t          capacity;
+} rg_api_db_t;
+
+/* Initialise database */
+static void rg_api_db_init(rg_api_db_t *db)
+{
+    db->entries  = NULL;
+    db->count    = 0;
+    db->capacity = 0;
+}
+
+/* Release all memory */
+static void rg_api_db_free(rg_api_db_t *db)
+{
+    for (size_t i = 0; i < db->count; ++i) {
+        free(db->entries[i].comment);
+        free(db->entries[i].prototype);
+        free(db->entries[i].name);
+    }
+    free(db->entries);
+}
+
+/* Ensure capacity for at least one more record */
+static bool rg_api_db_reserve(rg_api_db_t *db)
+{
+    if (db->count < db->capacity) return true;
+    size_t newcap = (db->capacity == 0) ? 16 : db->capacity * 2;
+    rg_api_entry_t *tmp = realloc(db->entries, newcap * sizeof(*tmp));
+    if (!tmp) return false;
+    db->entries  = tmp;
+    db->capacity = newcap;
+    return true;
+}
+
+/* Add an entry to db; takes ownership of pointers */
+static bool rg_api_db_add(rg_api_db_t *db,
+                          char *comment,
+                          char *prototype,
+                          char *name)
+{
+    if (!rg_api_db_reserve(db)) return false;
+    db->entries[db->count].comment   = comment;
+    db->entries[db->count].prototype = prototype;
+    db->entries[db->count].name      = name;
+    db->count++;
+    return true;
+}
+
+/* Extract function name from prototype; caller must free */
+static char *rg_parse_function_name(const char *prototype)
+{
+    /* Locate opening parenthesis */
+    const char *paren = strchr(prototype, '(');
+    if (!paren) return rg_strdup("UNKNOWN");
+
+    /* Walk backward to find the first non-space char before '(' */
+    const char *end = paren - 1;
+    while (end > prototype && (*end == ' ' || *end == '\t'))
+        --end;
+
+    /* Walk further back to start of token */
+    const char *start = end;
+    while (start > prototype &&
+           ((*start >= 'A' && *start <= 'Z') ||
+            (*start >= 'a' && *start <= 'z') ||
+            (*start >= '0' && *start <= '9') ||
+            *start == '_'))
+        --start;
+    if (start != prototype) ++start;
+
+    size_t len = (size_t)(end - start + 1);
+    char *name = malloc(len + 1);
+    if (!name) return NULL;
+    memcpy(name, start, len);
+    name[len] = '\0';
+    return name;
+}
+
+/* ---------------------------------------------------------------------------
+ * Parsing logic
+ * ---------------------------------------------------------------------------*/
+
+/*
+ * Parse one header file.  Populate `db` with (comment, prototype) pairs.
+ * Returns 0 on success, -1 otherwise.
+ */
+static int rg_parse_header(const char *path, rg_api_db_t *db)
+{
+    FILE *fp = fopen(path, "r");
+    if (!fp) {
+        fprintf(stderr, "Error: Cannot open header '%s': %s\n", path, strerror(errno));
+        return -1;
+    }
+
+    char   *line      = NULL;
+    size_t  linecap   = 0;
+    ssize_t linelen;
+
+    bool    in_comment = false;
+    char   *comment_buf = NULL;
+    size_t  comment_len = 0;
+
+    while ((linelen = getline(&line, &linecap, fp)) != -1) {
+
+        /* Detect start of Doxygen comment */
+        if (!in_comment) {
+            char *trim = rg_strtrim(line);
+            if (strncmp(trim, "/**", 3) == 0) {
+                in_comment = true;
+                comment_len = 0;
+                free(comment_buf);
+                comment_buf = NULL;
+            }
+        }
+
+        if (in_comment) {
+            /* Append line to comment_buf */
+            size_t old_len = comment_len;
+            comment_len += (size_t)linelen;
+            char *tmp = realloc(comment_buf, comment_len + 1);
+            if (!tmp) {
+                fprintf(stderr, "Error: Out of memory while parsing comments\n");
+                free(comment_buf);
+                free(line);
+                fclose(fp);
+                return -1;
+            }
+            comment_buf = tmp;
+            memcpy(comment_buf + old_len, line, (size_t)linelen);
+            comment_buf[comment_len] = '\0';
+
+            /* End of comment? */
+            char *trim = rg_strtrim(line);
+            if (strstr(trim, "*/")) {
+                in_comment = false;
+            }
+            continue;
+        }
+
+        /* Outside comment: look for prototype line ending with ';' */
+        char *trim = rg_strtrim(line);
+        if (strchr(trim, '(') && strchr(trim, ')') && strchr(trim, ';')) {
+            char *p_dup = rg_strdup(trim);
+            if (!p_dup) {
+                fprintf(stderr, "Error: Out of memory while duplicating prototype\n");
+                free(comment_buf);
+                free(line);
+                fclose(fp);
+                return -1;
+            }
+            char *fn_name = rg_parse_function_name(trim);
+            char *c_dup   = comment_buf ? rg_strdup(comment_buf) : rg_strdup("No description.");
+            if (!rg_api_db_add(db, c_dup, p_dup, fn_name)) {
+                fprintf(stderr, "Error: Failed to add API entry\n");
+                free(p_dup);
+                free(fn_name);
+                free(c_dup);
+                free(comment_buf);
+                free(line);
+                fclose(fp);
+                return -1;
+            }
+            /* Reset comment buffer */
+            free(comment_buf);
+            comment_buf = NULL;
+        }
+    }
+
+    free(comment_buf);
+    free(line);
+    fclose(fp);
+    return 0;
+}
+
+/* ---------------------------------------------------------------------------
+ * HTML generation
+ * ---------------------------------------------------------------------------*/
+
+static int rg_generate_html(const rg_api_db_t *db, const char *out_dir)
+{
+    char path[4096];
+    if (snprintf(path, sizeof(path), "%s/api.html", out_dir) >= (int)sizeof(path)) {
+        fprintf(stderr, "Error: Output path too long\n");
+        return -1;
+    }
+
+    FILE *fp = fopen(path, "w");
+    if (!fp) {
+        fprintf(stderr, "Error: Cannot create output '%s': %s\n", path, strerror(errno));
+        return -1;
+    }
+
+    char iso[32];
+    rg_iso8601(iso, sizeof(iso));
+
+    /* HTML header */
+    fprintf(fp,
+        "<!DOCTYPE html>\n"
+        "<html lang=\"en\">\n"
+        "<head>\n"
+        "  <meta charset=\"utf-8\">\n"
+        "  <title>RetinaGuard Vision Suite – C API Reference</title>\n"
+        "  <style>\n"
+        "    body { font-family: Arial, sans-serif; margin: 2em; }\n"
+        "    h1 { color: #2c3e50; }\n"
+        "    .prototype { font-family: \"Courier New\", monospace; background:#f4f4f4; padding:4px; }\n"
+        "    .entry { margin-bottom: 2em; }\n"
+        "    .comment { white-space: pre-wrap; border-left: 4px solid #3498db; padding-left: 1em; color:#555; }\n"
+        "  </style>\n"
+        "</head>\n"
+        "<body>\n"
+        "<h1>RetinaGuard Vision Suite – C API Reference</h1>\n"
+        "<p>Generated on %s by <code>retinaguard_apidoc</code>.</p>\n",
+        iso);
+
+    /* Entries */
+    for (size_t i = 0; i < db->count; ++i) {
+        const rg_api_entry_t *e = &db->entries[i];
+        fprintf(fp,
+            "<div class=\"entry\" id=\"%s\">\n"
+            "  <h2>%s</h2>\n"
+            "  <div class=\"prototype\">%s</div>\n"
+            "  <div class=\"comment\">%s</div>\n"
+            "</div>\n",
+            e->name, e->name, e->prototype, e->comment);
+    }
+
+    /* Footer */
+    fprintf(fp,
+        "<hr/>\n"
+        "<p style=\"font-size:smaller;\">© 2024 RetinaGuard. All rights reserved.</p>\n"
+        "</body>\n"
+        "</html>\n");
+
+    fclose(fp);
+    return 0;
+}
+
+/* ---------------------------------------------------------------------------
+ * Main
+ * ---------------------------------------------------------------------------*/
+
+static void rg_usage(const char *prog)
+{
+    fprintf(stderr,
+        "Usage: %s <output-dir> <header1.h> [header2.h ...]\n"
+        "Generates HTML documentation for RetinaGuard C headers.\n",
+        prog);
+}
+
+int main(int argc, char *argv[])
+{
+    if (argc < 3) {
+        rg_usage(argv[0]);
+        return EXIT_FAILURE;
+    }
+
+    const char *out_dir = argv[1];
+
+    rg_api_db_t db;
+    rg_api_db_init(&db);
+
+    for (int i = 2; i < argc; ++i) {
+        if (rg_parse_header(argv[i], &db) != 0) {
+            rg_api_db_free(&db);
+            return EXIT_FAILURE;
+        }
+    }
+
+    /* Sort entries alphabetically for easier navigation */
+    if (db.count > 1) {
+        qsort(db.entries, db.count, sizeof(rg_api_entry_t),
+              (int (*)(const void *, const void *))[](const rg_api_entry_t *a,
+                                                     const rg_api_entry_t *b) {
+                  return strcmp(a->name, b->name);
+              });
+    }
+
+    if (rg_generate_html(&db, out_dir) != 0) {
+        rg_api_db_free(&db);
+        return EXIT_FAILURE;
+    }
+
+    printf("Documentation generated at %s/api.html (%zu APIs)\n", out_dir, db.count);
+    rg_api_db_free(&db);
+    return EXIT_SUCCESS;
+}

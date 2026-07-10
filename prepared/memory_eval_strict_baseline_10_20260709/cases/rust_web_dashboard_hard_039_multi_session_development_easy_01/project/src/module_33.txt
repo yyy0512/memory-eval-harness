@@ -1,0 +1,340 @@
+```rust
+//! ChromaticCanvas Control Center – Secure Session & Authentication Middleware
+//!
+//! This module implements a production-ready JWT session manager together with
+//! an Actix–Web middleware (`AuthGuard`) that transparently validates incoming
+//! requests.  It is completely self-contained so it can be dropped into the
+//! larger dashboard without additional plumbing.
+//!
+//! Highlights
+//! ----------
+//! * HS256-signed JWTs with rotating secret keys
+//! * Revocation / logout support
+//! * Sliding expiration (configurable)
+//! * Per-request user extraction via `req.extensions()`
+//! * Thorough, structured error handling
+//! * Async-friendly and highly concurrent (lock-free on hot path)
+//!
+//! # Usage
+//!
+//! ```no_run
+//! use actix_web::{App, web};
+//! use crate::security::{AuthGuard, SessionManager, SessionConfig};
+//!
+//! #[actix_web::main]
+//! async fn main() -> std::io::Result<()> {
+//!     let session_mgr = SessionManager::new(SessionConfig::default());
+//!
+//!     actix_web::HttpServer::new(move || {
+//!         App::new()
+//!             .app_data(session_mgr.clone())
+//!             .wrap(AuthGuard) // <-- protect all routes
+//!             .service(
+//!                 web::resource("/api/secure")
+//!                     .to(|req: actix_web::HttpRequest| async move {
+//!                         let user = req.extensions().get::<UserIdentity>().cloned();
+//!                         actix_web::HttpResponse::Ok().json(user)
+//!                     }),
+//!             )
+//!     })
+//!     .bind(("0.0.0.0", 443))?  // SSL configured elsewhere
+//!     .run()
+//!     .await
+//! }
+//! ```
+//!
+//! In production you’d mount this behind an SSL/TLS reverse proxy (e.g. Nginx,
+//! Caddy) or leverage Actix’s `openssl`/`rustls` features directly.
+//!
+//! ---------------------------------------------------------------------------
+
+use std::{
+    collections::HashSet,
+    pin::Pin,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
+    task::{Context as TaskContext, Poll},
+    time::SystemTime,
+};
+
+use actix_web::{
+    body::EitherBody,
+    dev::{Service, ServiceRequest, ServiceResponse, Transform},
+    error::ErrorUnauthorized,
+    http::header,
+    web::Data,
+    Error, HttpMessage, HttpResponse,
+};
+use anyhow::{anyhow, Context as AnyhowContext, Result};
+use chrono::{DateTime, Duration, TimeZone, Utc};
+use futures_util::future::{ready, LocalBoxFuture, Ready};
+use jsonwebtoken::{decode, encode, Algorithm, DecodingKey, EncodingKey, Header, Validation};
+use log::{debug, error, info, warn};
+use parking_lot::RwLock;
+use serde::{Deserialize, Serialize};
+use uuid::Uuid;
+
+/// The key under which the caller identity is stored inside `HttpRequest` extensions.
+pub const IDENTITY_EXTENSION_KEY: &str = "chromatic_canvas.user_identity";
+
+/// An application-level representation of the authenticated user.
+///
+/// In a full application this would likely map to a row in the `users` DB table.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct UserIdentity {
+    pub user_id: Uuid,
+    pub email: String,
+    pub roles: Vec<String>,
+}
+
+/// JWT claims used for session management.
+///
+/// Custom fields can be added provided they are serializable.
+#[derive(Debug, Serialize, Deserialize)]
+struct SessionClaims {
+    /// Token identifier used for revocation
+    jti: String,
+    /// Subject (user identifier)
+    sub: String,
+    /// Expiration timestamp (seconds since epoch)
+    exp: i64,
+    /// Issued at timestamp
+    iat: i64,
+    /// Optional sliding expiration refresh deadline
+    nbf: i64,
+    /// Embedded user payload
+    user: UserIdentity,
+}
+
+/// Runtime configuration for the [`SessionManager`].
+///
+/// Values may be loaded from a configuration file or env-vars at boot.
+#[derive(Clone)]
+pub struct SessionConfig {
+    /// Maximum lifetime of a session (hard limit).
+    pub ttl: Duration,
+    /// Sliding expiration window – token will be refreshed if less than this remaining.
+    pub refresh_threshold: Duration,
+    /// Cryptographic secret for signing (rotated via [`SessionManager::rotate_key`]).
+    pub base64_secret: String,
+}
+
+impl Default for SessionConfig {
+    fn default() -> Self {
+        Self {
+            ttl: Duration::hours(8),
+            refresh_threshold: Duration::minutes(30),
+            // WARNING: always provide via environment variable in production
+            base64_secret: base64::encode_config(rand::random::<[u8; 32]>(), base64::URL_SAFE),
+        }
+    }
+}
+
+/// Central authority issuing and validating session tokens.
+///
+/// Internally it keeps a set of revoked token IDs (`jti`) to support logout.
+#[derive(Clone)]
+pub struct SessionManager {
+    cfg: SessionConfig,
+    encoding_key: Arc<EncodingKey>,
+    decoding_key: Arc<DecodingKey>,
+    // Revoked token ids – in a clustered deployment put this in Redis / etcd.
+    revoked: Arc<RwLock<HashSet<String>>>,
+    // Simple metric for rotation audits
+    generation: Arc<AtomicU64>,
+}
+
+impl SessionManager {
+    /// Create a new manager instance.
+    pub fn new(cfg: SessionConfig) -> Self {
+        let bytes = base64::decode_config(&cfg.base64_secret, base64::URL_SAFE)
+            .expect("invalid base64 secret");
+        Self {
+            cfg,
+            encoding_key: Arc::new(EncodingKey::from_secret(&bytes)),
+            decoding_key: Arc::new(DecodingKey::from_secret(&bytes)),
+            revoked: Arc::new(RwLock::new(HashSet::new())),
+            generation: Arc::new(AtomicU64::new(0)),
+        }
+    }
+
+    /// Rotate the underlying symmetric key, invalidating all existing sessions.
+    ///
+    /// NOTE: In a horizontally scaled environment you’d broadcast this event to
+    /// every node (e.g. via NATS or Redis Pub/Sub).
+    pub fn rotate_key(&self, new_base64_secret: String) -> Result<()> {
+        let bytes = base64::decode_config(&new_base64_secret, base64::URL_SAFE)
+            .context("invalid base64 secret")?;
+        let mut revoked = self.revoked.write();
+        revoked.clear(); // everything that existed is now implicitly invalid
+
+        self.encoding_key = Arc::new(EncodingKey::from_secret(&bytes));
+        self.decoding_key = Arc::new(DecodingKey::from_secret(&bytes));
+        self.cfg.base64_secret = new_base64_secret;
+        let gen = self.generation.fetch_add(1, Ordering::SeqCst) + 1;
+
+        info!("🔑 Session key rotated (generation #{gen})");
+        Ok(())
+    }
+
+    /// Issue a brand-new session token for the given user.
+    ///
+    /// # Errors
+    /// Returns [`anyhow::Error`] if signing fails (rare unless RNG fails).
+    pub fn issue(&self, user: UserIdentity) -> Result<String> {
+        let now = Utc::now();
+        let jti = Uuid::new_v4().to_string();
+        let claims = SessionClaims {
+            jti: jti.clone(),
+            sub: user.user_id.to_string(),
+            exp: (now + self.cfg.ttl).timestamp(),
+            nbf: now.timestamp(),
+            iat: now.timestamp(),
+            user,
+        };
+
+        let token = encode(&Header::new(Algorithm::HS256), &claims, &self.encoding_key)
+            .context("failed to sign jwt")?;
+
+        debug!(target: "auth", "new session issued: {jti}");
+        Ok(token)
+    }
+
+    /// Validate a JWT and return the embedded [`UserIdentity`] if everything is valid.
+    ///
+    /// Automatically refuses revoked tokens.
+    pub fn validate(&self, token: &str) -> Result<UserIdentity> {
+        let mut validation = Validation::new(Algorithm::HS256);
+        validation.validate_exp = true;
+
+        let data = decode::<SessionClaims>(token, &self.decoding_key, &validation)
+            .map_err(|e| anyhow!("JWT decode error: {e}"))?;
+
+        // Check revocation list
+        if self.revoked.read().contains(&data.claims.jti) {
+            return Err(anyhow!("token has been revoked"));
+        }
+
+        // Sliding expiration: refresh if under threshold
+        let now = Utc::now().timestamp();
+        let remaining = data.claims.exp - now;
+        if remaining < self.cfg.refresh_threshold.num_seconds() {
+            debug!("token within refresh threshold ({}s), consider issuing a new one", remaining);
+        }
+
+        Ok(data.claims.user)
+    }
+
+    /// Revoke an existing token (e.g. logout).
+    ///
+    /// The token will be useless from that point forward.
+    pub fn revoke(&self, token: &str) -> Result<()> {
+        let data = decode::<SessionClaims>(token, &self.decoding_key, &Validation::new(Algorithm::HS256))
+            .context("failed to decode during revocation")?;
+        let mut revoked = self.revoked.write();
+        revoked.insert(data.claims.jti);
+        debug!("session revoked: {}", data.claims.jti);
+        Ok(())
+    }
+}
+
+/// Actix-Web middleware that ensures every request carries a valid session token.
+///
+/// If a token is present and valid, the resolved [`UserIdentity`] is inserted into
+/// the request’s extensions, allowing downstream handlers to access it.
+///
+/// The middleware is intentionally lightweight – the heavy lifting is delegated
+/// to [`SessionManager`].
+pub struct AuthGuard;
+
+impl<S, B> Transform<S, ServiceRequest> for AuthGuard
+where
+    S: Service<ServiceRequest, Response = ServiceResponse<B>, Error = Error> + 'static,
+    B: 'static,
+{
+    type Response = ServiceResponse<EitherBody<B>>;
+    type Error = Error;
+    type InitError = ();
+    type Transform = AuthGuardMiddleware<S>;
+    type Future = Ready<Result<Self::Transform, Self::InitError>>;
+
+    fn new_transform(&self, service: S) -> Self::Future {
+        ready(Ok(AuthGuardMiddleware { service }))
+    }
+}
+
+pub struct AuthGuardMiddleware<S> {
+    service: S,
+}
+
+impl<S, B> Service<ServiceRequest> for AuthGuardMiddleware<S>
+where
+    S: Service<ServiceRequest, Response = ServiceResponse<B>, Error = Error> + 'static,
+    B: 'static,
+{
+    type Response = ServiceResponse<EitherBody<B>>;
+    type Error = Error;
+    type Future = LocalBoxFuture<'static, Result<Self::Response, Self::Error>>;
+
+    fn poll_ready(&self, ctx: &mut TaskContext<'_>) -> Poll<Result<(), Self::Error>> {
+        self.service.poll_ready(ctx)
+    }
+
+    fn call(&self, mut req: ServiceRequest) -> Self::Future {
+        // Clone a handle for async block
+        let mgr = req.app_data::<Data<SessionManager>>().cloned();
+        let auth_hdr = req
+            .headers()
+            .get(header::AUTHORIZATION)
+            .and_then(|h| h.to_str().ok())
+            .map(|raw| raw.trim_start_matches("Bearer ").to_owned());
+
+        let fut = self.service.call(req);
+
+        Box::pin(async move {
+            let mut req = match fut.await {
+                Ok(res) => return Ok(res.map_into_left_body()),
+                Err(err) => return Err(err),
+            }
+            .into_parts()
+            .0;
+
+            // Delay validation until here so we own the request again
+            if let (Some(token), Some(mgr)) = (auth_hdr, mgr) {
+                match mgr.validate(&token) {
+                    Ok(user) => {
+                        req.extensions_mut().insert_named(IDENTITY_EXTENSION_KEY, user);
+                    }
+                    Err(err) => {
+                        warn!("unauthorized: {err:#}");
+                        return Err(ErrorUnauthorized("invalid or expired token"));
+                    }
+                }
+            } else {
+                // No token present – unauthorized
+                return Err(ErrorUnauthorized("missing bearer token"));
+            }
+
+            // Re-enter normal pipeline
+            let res = self.service.call(req).await?.map_into_left_body();
+            Ok(res)
+        })
+    }
+}
+
+/// Extension insertion helper – avoids stringly-typed names.
+///
+/// The nightly `insert`/`get` without type parameterization are only available
+/// on Rust 1.72+, so we roll our own.
+trait RequestExtensionsExt {
+    fn insert_named(&mut self, key: &'static str, val: impl Send + Sync + 'static);
+}
+
+impl RequestExtensionsExt for actix_web::Extensions {
+    fn insert_named(&mut self, key: &'static str, val: impl Send + Sync + 'static) {
+        self.insert((key, Arc::new(val)));
+    }
+}
+```

@@ -1,0 +1,322 @@
+```jsonc
+/**
+ * StreamPulse Nexus – Production Configuration Template
+ * -----------------------------------------------------
+ * This JSONC (JSON w/ Comments) file defines the default configuration for a
+ * production-grade StreamPulse Nexus node.  Placeholders wrapped in
+ * ${ ... } may be overridden via environment variables or by a higher-level
+ * configuration-management system (e.g., Consul, Ansible, Kubernetes ConfigMap).
+ *
+ * Remove or replace any unneeded sections to fit your particular deployment.
+ *
+ * NOTE:
+ *  • Comments are stripped automatically during the build pipeline.
+ *  • Secrets **must never** be committed to source control; use environment
+ *    variables or a secrets-manager instead.
+ *
+ * Schema reference: https://streampulse.io/schemas/nexus/config.schema.json
+ */
+{
+  /*------------------------------------------------------------*
+   |  Runtime Identity / Meta                                   |
+   *------------------------------------------------------------*/
+  "$schema": "https://streampulse.io/schemas/nexus/config.schema.json",
+  "environment":        "production",
+  "nodeId":             "${SP_NODE_ID:-nexus-edge-001}",
+  "version":            "1.0.0",
+
+  /*------------------------------------------------------------*
+   |  Networking                                                |
+   *------------------------------------------------------------*/
+  "network": {
+    "publicHostname": "${SP_PUBLIC_HOSTNAME}",
+    "bindAddress":    "0.0.0.0",
+
+    "ports": {
+      "mediaIngress":  5000,
+      "mediaEgress":   5001,
+      "control":       7000,
+      "websocket":     8080,
+      "metrics":       9100
+    },
+
+    /* TLS settings follow Mozilla "modern" recommendations */
+    "tls": {
+      "enabled":     true,
+      "certPath":    "${SP_TLS_CERT_PATH:/etc/streampulse/certs/fullchain.pem}",
+      "keyPath":     "${SP_TLS_KEY_PATH:/etc/streampulse/certs/privkey.pem}",
+      "caPath":      "${SP_TLS_CA_PATH:/etc/streampulse/certs/ca.pem}",
+      "minVersion":  "TLSv1.3",
+      "cipherSuites": [
+        "TLS_AES_256_GCM_SHA384",
+        "TLS_AES_128_GCM_SHA256",
+        "TLS_CHACHA20_POLY1305_SHA256"
+      ],
+      "ocspStapling": true,
+      "hsts": {
+        "enabled":            true,
+        "maxAge":             63072000,  // 2 years
+        "includeSubDomains":  true,
+        "preload":            true
+      }
+    }
+  },
+
+  /*------------------------------------------------------------*
+   |  Security                                                  |
+   *------------------------------------------------------------*/
+  "security": {
+    "zeroTrust": {
+      "enabled":       true,
+      "defaultPolicy": "deny",
+
+      /* Fine-grained policies can be generated at bootstrap */
+      "policies": [
+        {
+          "id":          "media-ingress",
+          "description": "Permit media ingress from trusted transcoders",
+          "sources":      ["transcoder:*"],
+          "destinations": ["node:${self.nodeId}:mediaIngress"],
+          "protocols":    ["udp"],
+          "action":       "allow"
+        }
+      ]
+    },
+
+    "jwt": {
+      "issuer":        "${SP_JWT_ISSUER:https://id.streampulse.io}",
+      "audience":      "streampulse.nexus",
+      "publicKeyPath": "${SP_JWT_PUBLIC_KEY_PATH:/etc/streampulse/keys/jwt_pub.pem}",
+      "algorithm":     "RS256",
+      "clockSkewSec":  5
+    },
+
+    "rateLimiter": {
+      "enabled":   true,
+      "windowMs":  1000,
+      "max":       2000,
+      "redis": {
+        "host": "${SP_REDIS_HOST:redis.internal}",
+        "port": 6379,
+        "tls":  false
+      }
+    },
+
+    /* Filesystem and binary integrity scanner */
+    "integrityScanner": {
+      "enableAtStartup": true,
+      "intervalMinutes": 30,
+      "excludePaths":    ["/tmp", "/var/cache/streampulse"]
+    }
+  },
+
+  /*------------------------------------------------------------*
+   |  Monitoring & Alerting                                     |
+   *------------------------------------------------------------*/
+  "monitoring": {
+    "metrics": {
+      "enabled":          true,
+      "exporter":         "prometheus",
+      "retentionDays":    30,
+      "scrapeIntervalSec": 15
+    },
+
+    "healthChecks": {
+      "initialDelaySec": 5,
+      "periodSec":       30,
+      "failThreshold":   3,
+      "handlers": {
+        "liveness":  "/healthz/live",
+        "readiness": "/healthz/ready"
+      }
+    },
+
+    "alerting": {
+      "enabled": true,
+      "providers": {
+        "pagerDuty": {
+          "routingKey":  "${SP_PD_ROUTING_KEY}",
+          "severityMap": {
+            "critical": "critical",
+            "warning":  "warning",
+            "info":     "info"
+          }
+        },
+        "slack": {
+          "webhookUrl": "${SP_SLACK_WEBHOOK_URL}",
+          "channel":    "#nexus-alerts"
+        }
+      },
+      "rules": [
+        {
+          "id":    "high-cpu",
+          "expr":  "avg(rate(process_cpu_seconds_total[1m])) by (instance) > 0.9",
+          "for":   "2m",
+          "labels": { "severity": "warning" },
+          "annotations": {
+            "summary":     "High CPU detected on {{ $labels.instance }}",
+            "description": "CPU usage exceeded 90% for more than 2 minutes."
+          }
+        }
+      ]
+    }
+  },
+
+  /*------------------------------------------------------------*
+   |  Logging                                                   |
+   *------------------------------------------------------------*/
+  "logging": {
+    "level":   "info",
+    "format":  "json",
+    "redact":  ["password", "token", "secret"],
+
+    "outputs": [
+      { "type": "stdout", "colorize": false },
+      {
+        "type": "file",
+        "path": "/var/log/streampulse/nexus.log",
+        "rotate": {
+          "enabled":    true,
+          "maxSizeMb":  100,
+          "maxFiles":   10,
+          "compress":   true
+        }
+      }
+    ],
+
+    "remote": {
+      "enabled":           true,
+      "endpoint":          "https://logs.streampulse.io/ingest",
+      "apiKey":            "${SP_LOG_API_KEY}",
+      "batchSize":         1000,
+      "flushIntervalSec":  10
+    }
+  },
+
+  /*------------------------------------------------------------*
+   |  Persistent Storage / Backups                              |
+   *------------------------------------------------------------*/
+  "storage": {
+    "provider":             "s3",
+    "bucket":               "${SP_S3_BUCKET}",
+    "region":               "${SP_S3_REGION:us-east-1}",
+    "prefix":               "nexus/recordings/",
+    "serverSideEncryption": "AES256",
+    "backupScheduleCron":   "0 3 * * *",   /* Daily @ 03:00 */
+    "retentionDays":        90
+  },
+
+  /*------------------------------------------------------------*
+   |  Modular Components                                        |
+   *------------------------------------------------------------*/
+  "modules": {
+    "ingress": {
+      "enabled":      true,
+      "strategy":     "adaptive-edge",
+      "maxSessions":  10000
+    },
+    "egress": {
+      "enabled":          true,
+      "strategy":         "geo-weighted",
+      "targetLatencyMs":  250
+    },
+    "edgeCache": {
+      "enabled":    true,
+      "provider":   "redis",
+      "ttlSeconds": 60,
+      "distributed": true,
+      "cluster": {
+        "mode":  "cluster",
+        "nodes": "${SP_REDIS_CACHE_NODES}"  /* Comma-separated list */
+      }
+    },
+    "transcoder": {
+      "enabled":  true,
+      "preset":   "hls-1080p-30fps",
+      "poolSize": 8
+    },
+    "analytics": {
+      "enabled":   true,
+      "pipeline":  [
+        "ingest",
+        "session-enrich",
+        "agg-metrics",
+        "persist"
+      ],
+      "kafka": {
+        "brokers":   "${SP_KAFKA_BROKERS}",
+        "clientId":  "nexus-analytics",
+        "ssl":       true,
+        "sasl": {
+          "mechanism": "scram-sha-512",
+          "username":  "${SP_KAFKA_USER}",
+          "password":  "${SP_KAFKA_PASS}"
+        }
+      }
+    },
+    "backup": {
+      "enabled":           true,
+      "retentionSnapshots": 14,
+      "verifyChecksums":    true
+    }
+  },
+
+  /*------------------------------------------------------------*
+   |  Cluster Coordination                                      |
+   *------------------------------------------------------------*/
+  "cluster": {
+    "id":   "${SP_CLUSTER_ID:nexus-prod}",
+    "role": "edge",
+
+    "discovery": {
+      "provider":  "etcd",
+      "endpoints": [
+        "https://etcd-1.cluster:2379",
+        "https://etcd-2.cluster:2379",
+        "https://etcd-3.cluster:2379"
+      ],
+      "tls": {
+        "certPath": "/etc/streampulse/etcd/client.pem",
+        "keyPath":  "/etc/streampulse/etcd/client-key.pem",
+        "caPath":   "/etc/streampulse/etcd/ca.pem"
+      },
+      "heartbeatIntervalSec": 10
+    },
+
+    "loadBalancing": {
+      "strategy":              "dynamic-weight",
+      "customStrategiesPath":  "/etc/streampulse/strategies",
+      "rebalanceThreshold":    0.15
+    },
+
+    "commandBus": {
+      "topic": "nexus.commands",
+      "retryPolicy": {
+        "maxAttempts": 5,
+        "backoffMs":   1000
+      }
+    }
+  },
+
+  /*------------------------------------------------------------*
+   |  Feature Flags                                             |
+   *------------------------------------------------------------*/
+  "featureFlags": {
+    "enableARSync":  false,
+    "enableTrivia":  true,
+    "betaAutoReplay": false
+  },
+
+  /*------------------------------------------------------------*
+   |  Node Runtime Limits / GC                                  |
+   *------------------------------------------------------------*/
+  "runtime": {
+    "workerThreads": 4,
+    "maxHeapMb":     2048,
+    "gc": {
+      "exposeMetrics": true,
+      "schedule":      "30m"
+    }
+  }
+}
+```

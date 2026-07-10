@@ -1,0 +1,259 @@
+```cpp
+/**
+ * chrono_flow_nexus/api/v1/schemas/task_schema.cpp
+ *
+ * Copyright (c) 2023–2024
+ * ChronoFlow Nexus — High-performance productivity micro-service.
+ *
+ * Licensed under the MIT License.  See LICENSE file in the project root
+ * for full license information.
+ *
+ * Purpose:
+ *   Exposes a strongly-typed JSON Schema for an API-level “Task” resource and
+ *   provides run-time validation utilities.  All inbound/outbound payloads
+ *   that represent a task MUST be validated against this schema to ensure
+ *   forward-compatibility and to protect domain invariants in deeper layers.
+ */
+
+#include <mutex>
+#include <stdexcept>
+#include <string>
+
+#include <nlohmann/json.hpp>      // https://github.com/nlohmann/json
+#include <json-schema.hpp>        // https://github.com/pboettch/json-schema-validator
+
+namespace chrono_flow::api::v1::schema
+{
+
+//------------------------------------------------------------------------------
+// TaskSchema
+//------------------------------------------------------------------------------
+/**
+ * Static utility class that lazily constructs the Task JSON Schema and exposes
+ *   1. the raw nlohmann::json definition (for documentation & reflection) and
+ *   2. a validate() helper that throws std::invalid_argument when the instance
+ *      is not conforming to the schema.
+ *
+ * Thread-safe and allocation-free after the first call thanks to std::call_once.
+ */
+class TaskSchema final
+{
+public:
+    /**
+     * Return the canonical JSON Schema definition used by the service.
+     *
+     * The reference is valid for the entire life of the program and forever
+     * immutable after first initialization.
+     */
+    static const nlohmann::json& definition();
+
+    /**
+     * Validate a JSON document against the Task schema.  Throws
+     * std::invalid_argument if any violation is detected.
+     *
+     * Usage:
+     *     nlohmann::json doc = ...;   // parsed or composed elsewhere
+     *     TaskSchema::validate(doc);  // will throw on error
+     */
+    static void validate(const nlohmann::json& instance);
+
+private:
+    TaskSchema()  = delete;
+    ~TaskSchema() = delete;
+};
+
+//------------------------------------------------------------------------------
+// Implementation details
+//------------------------------------------------------------------------------
+namespace
+{
+    using nlohmann::json;
+
+    /**
+     * Build the JSON Schema for a Task.  Isolated in its own function so the
+     * result can be captured by std::call_once and never rebuilt.
+     */
+    json build_schema()
+    {
+        json schema =
+        {
+            { "$schema", "http://json-schema.org/draft-07/schema#" },
+            { "$id",     "https://chrono-flow.io/schemas/v1/task.json" },
+            { "title",   "Task" },
+            {
+                "description",
+                "ChronoFlow Task representation.  Guarantees compatibility "
+                "across REST and GraphQL transports."
+            },
+            { "type", "object" },
+            { "additionalProperties", false },
+            { "required",
+                {
+                    "id", "title", "status",
+                    "created_at", "updated_at", "version"
+                }
+            },
+            {
+                "properties",
+                {
+                    {
+                        "id",
+                        {
+                            { "description", "Unique ULID representing the task." },
+                            { "type", "string" },
+                            { "pattern", "^[0-9A-HJKMNP-TV-Z]{26}$" }
+                        }
+                    },
+                    {
+                        "title",
+                        {
+                            { "description", "Short, human-readable title." },
+                            { "type", "string" },
+                            { "minLength", 1 },
+                            { "maxLength", 128 }
+                        }
+                    },
+                    {
+                        "description",
+                        {
+                            { "description",
+                              "Optional Markdown description with a 8 KiB cap." },
+                            { "type", "string" },
+                            { "maxLength", 8 * 1024 },
+                            { "default", "" }
+                        }
+                    },
+                    {
+                        "status",
+                        {
+                            { "description", "Task’s workflow state." },
+                            { "type", "string" },
+                            { "enum",
+                                { "OPEN", "IN_PROGRESS", "BLOCKED", "DONE", "ARCHIVED" }
+                            }
+                        }
+                    },
+                    {
+                        "estimated_duration_minutes",
+                        {
+                            { "description", "Planned duration in minutes." },
+                            { "type", "integer" },
+                            { "minimum", 0 },
+                            { "maximum", 8 * 60 },
+                            { "default", 0 }
+                        }
+                    },
+                    {
+                        "actual_duration_minutes",
+                        {
+                            { "description", "Observed duration in minutes." },
+                            { "type", "integer" },
+                            { "minimum", 0 },
+                            { "maximum", 8 * 60 },
+                            { "default", 0 }
+                        }
+                    },
+                    {
+                        "tags",
+                        {
+                            { "description", "Collection of free-form tags." },
+                            { "type", "array" },
+                            { "uniqueItems", true },
+                            { "maxItems", 16 },
+                            {
+                                "items",
+                                {
+                                    { "type", "string" },
+                                    { "minLength", 1 },
+                                    { "maxLength", 32 },
+                                    { "pattern", "^[a-zA-Z0-9_\\-]+$" }
+                                }
+                            },
+                            { "default", json::array() }
+                        }
+                    },
+                    {
+                        "created_at",
+                        {
+                            { "description", "RFC-3339 creation timestamp." },
+                            { "type", "string" },
+                            { "format", "date-time" }
+                        }
+                    },
+                    {
+                        "updated_at",
+                        {
+                            { "description", "RFC-3339 last update timestamp." },
+                            { "type", "string" },
+                            { "format", "date-time" }
+                        }
+                    },
+                    {
+                        "version",
+                        {
+                            { "description",
+                              "Monotonically increasing version number for "
+                              "optimistic concurrency control." },
+                            { "type", "integer" },
+                            { "minimum", 1 }
+                        }
+                    }
+                }
+            }
+        };
+
+        return schema;
+    }
+
+    // Singleton storage for schema and compiled validator
+    std::once_flag                              g_once_flag;
+    nlohmann::json                              g_schema;
+    std::unique_ptr<json_schema::json_validator> g_validator;
+
+    /**
+     * Initialize singleton state (schema + validator).
+     */
+    void init()
+    {
+        g_schema = build_schema();
+
+        // No external references allowed → deny remote fetches.
+        g_validator = std::make_unique<json_schema::json_validator>(
+            [](const std::string& uri,
+               const json_schema::json_uri_callback_t /*secondary_loader*/)
+            {
+                throw std::invalid_argument(
+                    "External schema reference forbidden: " + uri);
+            });
+
+        // Compile the schema; will throw if OUR schema is malformed.
+        g_validator->set_root_schema(g_schema);
+    }
+} // anonymous namespace
+
+//------------------------------------------------------------------------------
+// TaskSchema public interface
+//------------------------------------------------------------------------------
+const nlohmann::json& TaskSchema::definition()
+{
+    std::call_once(g_once_flag, init);
+    return g_schema;
+}
+
+void TaskSchema::validate(const nlohmann::json& instance)
+{
+    std::call_once(g_once_flag, init);
+
+    try
+    {
+        g_validator->validate(instance);
+    }
+    catch (const std::exception& ex)
+    {
+        throw std::invalid_argument(
+            std::string("Task JSON validation failed: ") + ex.what());
+    }
+}
+
+} // namespace chrono_flow::api::v1::schema
+```

@@ -1,0 +1,377 @@
+{
+  "scenario_id": "java_api_rest_hard_042_multi_session_development_hard_01",
+  "ground_truth": {
+    "description": "The ground truth consists of the creation of two new files in `common-lib`, and modifications to three existing files across different modules. The key is placing shared code correctly and integrating it without disrupting existing logic.",
+    "new_files": [
+      {
+        "path": "vitalpulse-cloudcare-api/common-lib/src/main/java/com/vitalpulse/cloudcare/common/model/AuditLog.java",
+        "content": "package com.vitalpulse.cloudcare.common.model;\n\nimport java.util.Map;\n\n// Assumes Lombok is available, which is common in modern Java projects.\n// import lombok.Builder;\n// import lombok.Data;\n\n// @Data\n// @Builder\npublic class AuditLog {\n    private String timestamp;\n    private String serviceName;\n    private String principalId;\n    private String action;\n    private String entityType;\n    private String entityId;\n    private Map<String, Object> details;\n\n    // Constructors, Getters, and Setters would be here if not using Lombok\n}"
+      },
+      {
+        "path": "vitalpulse-cloudcare-api/common-lib/src/main/java/com/vitalpulse/cloudcare/common/util/AuditLogger.java",
+        "content": "package com.vitalpulse.cloudcare.common.util;\n\nimport com.fasterxml.jackson.core.JsonProcessingException;\nimport com.fasterxml.jackson.databind.ObjectMapper;\nimport com.vitalpulse.cloudcare.common.model.AuditLog;\n\npublic class AuditLogger {\n\n    private static final ObjectMapper MAPPER = new ObjectMapper();\n\n    public static void log(AuditLog auditLog) {\n        try {\n            String logString = MAPPER.writeValueAsString(auditLog);\n            System.out.println(logString);\n        } catch (JsonProcessingException e) {\n            System.err.println(\"Failed to serialize audit log: \" + e.getMessage());\n        }\n    }\n}"
+      }
+    ],
+    "modified_files": [
+      {
+        "path": "vitalpulse-cloudcare-api/services/order-management-command/src/main/java/com/vitalpulse/cloudcare/orders/handler/CreateOrderHandler.java",
+        "key_change_snippet": "// ... inside handleRequest method, after order is saved ...\nMedicationOrder newOrder = orderService.createOrder(orderRequest);\n\n// New Audit Logging logic\ntry {\n    String principalId = request.getRequestContext().getAuthorizer().get(\"principalId\").toString();\n    Map<String, Object> details = new HashMap<>();\n    details.put(\"patientId\", newOrder.getPatientId());\n    details.put(\"medication\", newOrder.getMedication());\n\n    AuditLog auditLog = AuditLog.builder()\n        .timestamp(Instant.now().toString())\n        .serviceName(\"order-management-command\")\n        .principalId(principalId)\n        .action(\"CREATE_ORDER\")\n        .entityType(\"MedicationOrder\")\n        .entityId(newOrder.getOrderId())\n        .details(details)\n        .build();\n    AuditLogger.log(auditLog);\n} catch (Exception e) {\n    // Log error but do not fail the main request\n    System.err.println(\"Error during audit logging: \" + e.getMessage());\n}\n\n// ... return successful response ..."
+      },
+      {
+        "path": "vitalpulse-cloudcare-api/services/vital-ingestion-command/src/main/java/com/vitalpulse/cloudcare/ingestion/handler/VitalStreamHandler.java",
+        "key_change_snippet": "// ... inside the loop processing records, after a record is saved ...\nVitalSign savedVital = vitalIngestionService.processAndSaveVital(vitalRecord);\n\n// New Audit Logging logic\nif (savedVital != null) {\n    try {\n        Map<String, Object> details = new HashMap<>();\n        details.put(\"vitalType\", savedVital.getType());\n        details.put(\"value\", savedVital.getValue());\n\n        AuditLog auditLog = AuditLog.builder()\n            .timestamp(Instant.now().toString())\n            .serviceName(\"vital-ingestion-command\")\n            .principalId(savedVital.getPatientId()) // Or from another source if available\n            .action(\"INGEST_VITALS\")\n            .entityType(\"VitalSign\")\n            .entityId(savedVital.getVitalId())\n            .details(details)\n            .build();\n        AuditLogger.log(auditLog);\n    } catch (Exception e) {\n        System.err.println(\"Error during audit logging: \" + e.getMessage());\n    }\n}\n// ... continue loop ..."
+      },
+      {
+        "path": "vitalpulse-cloudcare-api/docs/architecture.md",
+        "key_change_snippet": "\n\n## Audit Logging\n\nTo ensure security, compliance, and traceability, the VitalPulse CloudCare API implements a cross-service audit logging mechanism. This system records all critical data modification events.\n\n### Purpose\n\nThe primary purpose of audit logging is to provide a comprehensive trail of who did what, and when. This is essential for security analysis, incident response, and meeting regulatory compliance standards.\n\n### Audit Log Structure\n\nAudit events are captured as structured JSON objects and logged to CloudWatch Logs. The common model is defined in `common-lib` as `AuditLog.java` and has the following structure:\n\n- `timestamp`: ISO 8601 timestamp of the event.\n- `serviceName`: The name of the microservice generating the log (e.g., `order-management-command`).\n- `principalId`: The identifier of the user or system that initiated the action.\n- `action`: A specific string defining the action (e.g., `CREATE_ORDER`).\n- `entityType`: The type of the domain object being modified (e.g., `MedicationOrder`).\n- `entityId`: The unique ID of the object instance.\n- `details`: A map containing action-specific contextual data.\n\n### Current Implementations\n\nAs of the current version, audit logging is implemented in the following services for the specified actions:\n\n- **order-management-command**: On creation of new medication orders.\n- **vital-ingestion-command**: On ingestion of new patient vital signs."
+      }
+    ]
+  },
+  "expected_approach": "An expert developer would approach this incrementally, mirroring the sessions.\n\n1.  **Analysis & Foundation (Session 1):** The developer would first identify `common-lib` as the correct location for shared code. They would create `AuditLog.java` as a simple POJO with the required fields, possibly with Lombok annotations if the library is used elsewhere. Then, they'd create `AuditLogger.java`, likely with a private static `ObjectMapper` instance for efficiency, and a public static `log` method that wraps the serialization and `System.out.println` in a try-catch block for `JsonProcessingException`. They would then run `mvn clean install` on the `common-lib` module to build it and make it available to other modules.\n\n2.  **First Integration (Session 2):** The developer would open `order-management-command/pom.xml` to confirm the `<dependency>` on `common-lib` exists. They would then navigate to `CreateOrderHandler.java`, find the line where `orderService.createOrder(...)` returns the created order. Immediately after this line, they would add the logic to build the `AuditLog` object, pulling data from the input `APIGatewayProxyRequestEvent` and the newly created order object. They would then make the static call to `AuditLogger.log(...)`.\n\n3.  **Second Integration & Documentation (Session 3):** The developer would replicate the pattern from Session 2 in `VitalStreamHandler.java`. They'd find the successful processing point within the main loop and insert the `AuditLogger.log(...)` call, populating the `AuditLog` with context-specific information from the vital sign data. Finally, they would open `docs/architecture.md`, add a new H2 header for 'Audit Logging', and write clear, concise documentation explaining the feature's design and current implementation scope.",
+  "evaluation_criteria": [
+    "**Context Retention & Session Continuity:** Did the agent correctly use the `AuditLog` and `AuditLogger` classes created in Session 1 during Sessions 2 and 3? Did it remember the overall goal across sessions?",
+    "**Architectural Adherence:** Were the new classes placed in the correct shared module (`common-lib`)? Was the logging logic placed appropriately within the handler lifecycle (i.e., after the core operation succeeds)?",
+    "**Code Correctness & Quality:** Does the generated Java code compile? Is the logic sound? Is the JSON serialization handled correctly? Is the audit logging wrapped in a try-catch block to prevent it from failing the primary API request?",
+    "**Task Completion (Session 1):** Were both `AuditLog.java` and `AuditLogger.java` created correctly as specified?",
+    "**Task Completion (Session 2):** Was the `CreateOrderHandler.java` correctly modified to include the audit logic, populating the `AuditLog` object with the correct contextual data?",
+    "**Task Completion (Session 3):** Was the `VitalStreamHandler.java` correctly modified? Was the `architecture.md` file updated with a clear, accurate, and well-formatted description of the new feature?",
+    "**File System Navigation & Modification:** Did the agent correctly identify, read, and write to the specified files across the complex directory structure?",
+    "**Dependency Management:** Did the agent correctly identify the need for the service modules to depend on `common-lib` and know how to check/modify the `pom.xml` if needed?"
+  ],
+  "memory_contracts": [
+    {
+      "id": "user_tomato_preference_marker",
+      "category": "synthetic_memory_user_preference",
+      "memory_type": "user",
+      "introduced_in_session": 1,
+      "workspace_effective_from_session": 2,
+      "description": "User preference: for future implementation work in this repository, place the exact marker TOMATO_USER_PREF_741 near newly added or meaningfully changed code, comments, or documentation so the user's TOMATO preference is visible across sessions.",
+      "expected_memory_fact": {
+        "required_keywords": [
+          "TOMATO_USER_PREF_741",
+          "user preference",
+          "future implementation work",
+          "newly added or meaningfully changed code"
+        ],
+        "required_regex": [
+          "TOMATO_USER_PREF_741"
+        ]
+      },
+      "checks": [
+        {
+          "id": "tomato_user_pref_marker_present",
+          "type": "require_regex",
+          "path_glob": "**/*",
+          "pattern": "TOMATO_USER_PREF_741",
+          "source": "synthetic_memory_contract",
+          "strength": "sentinel_marker",
+          "signal_kind": "language_neutral_marker",
+          "rationale": "Later-session workspace should preserve or reuse the exact user preference marker introduced in session 1."
+        }
+      ]
+    },
+    {
+      "id": "feedback_tomato_review_note",
+      "category": "synthetic_memory_feedback_continuity",
+      "memory_type": "feedback",
+      "introduced_in_session": 1,
+      "workspace_effective_from_session": 2,
+      "description": "Feedback to remember: future implementation changes should include the exact review note TOMATO_REVIEW_NOTE_742 near changed logic to show that compatibility and continuity were considered.",
+      "expected_memory_fact": {
+        "required_keywords": [
+          "TOMATO_REVIEW_NOTE_742",
+          "review note",
+          "compatibility",
+          "continuity"
+        ],
+        "required_regex": [
+          "TOMATO_REVIEW_NOTE_742"
+        ]
+      },
+      "checks": [
+        {
+          "id": "tomato_review_note_present",
+          "type": "require_regex",
+          "path_glob": "**/*",
+          "pattern": "TOMATO_REVIEW_NOTE_742",
+          "source": "synthetic_memory_contract",
+          "strength": "sentinel_marker",
+          "signal_kind": "language_neutral_marker",
+          "rationale": "Later-session workspace should carry forward the exact feedback marker introduced in session 1."
+        }
+      ]
+    },
+    {
+      "id": "project_tomato_bridge_token",
+      "category": "synthetic_memory_project_convention",
+      "memory_type": "project",
+      "introduced_in_session": 1,
+      "workspace_effective_from_session": 2,
+      "description": "Project memory: future helper, handler, adapter, or glue-code changes should include the exact project token TOMATO_PROJECT_BRIDGE_743 in a nearby name, comment, or note so cross-session project conventions remain visible.",
+      "expected_memory_fact": {
+        "required_keywords": [
+          "TOMATO_PROJECT_BRIDGE_743",
+          "project token",
+          "helper",
+          "handler",
+          "adapter"
+        ],
+        "required_regex": [
+          "TOMATO_PROJECT_BRIDGE_743"
+        ]
+      },
+      "checks": [
+        {
+          "id": "tomato_project_bridge_present",
+          "type": "require_regex",
+          "path_glob": "**/*",
+          "pattern": "TOMATO_PROJECT_BRIDGE_743",
+          "source": "synthetic_memory_contract",
+          "strength": "sentinel_marker",
+          "signal_kind": "language_neutral_marker",
+          "rationale": "Later-session workspace should preserve or reuse the exact project convention token introduced in session 1."
+        }
+      ]
+    },
+    {
+      "id": "reference_tomato_canon_pointer",
+      "category": "synthetic_memory_reference_pointer",
+      "memory_type": "reference",
+      "introduced_in_session": 1,
+      "workspace_effective_from_session": 2,
+      "description": "Reference memory: treat docs/TOMATO_REFERENCE_CANON_744.md as the canonical local reference pointer for future work, and cite the exact path in comments, documentation, or implementation notes when adding related changes.",
+      "expected_memory_fact": {
+        "required_keywords": [
+          "docs/TOMATO_REFERENCE_CANON_744.md",
+          "canonical local reference",
+          "future work",
+          "implementation notes"
+        ],
+        "required_regex": [
+          "docs/TOMATO_REFERENCE_CANON_744\\.md"
+        ]
+      },
+      "checks": [
+        {
+          "id": "tomato_reference_pointer_present",
+          "type": "require_regex",
+          "path_glob": "**/*",
+          "pattern": "docs/TOMATO_REFERENCE_CANON_744\\.md",
+          "source": "synthetic_memory_contract",
+          "strength": "sentinel_marker",
+          "signal_kind": "language_neutral_marker",
+          "rationale": "Later-session workspace should cite the exact reference artifact pointer introduced in session 1."
+        }
+      ]
+    },
+    {
+      "id": "experience_tomato_safe_path_lesson",
+      "category": "synthetic_memory_experience_lesson",
+      "memory_type": "experience",
+      "introduced_in_session": 1,
+      "workspace_effective_from_session": 2,
+      "description": "Experience memory: previous work learned not to use the literal LEGACY_TEMP_PATH in future changes; use the exact safer marker TOMATO_SAFE_PATH_745 instead whenever temporary path, fallback path, or compatibility-path behavior is mentioned.",
+      "expected_memory_fact": {
+        "required_keywords": [
+          "TOMATO_SAFE_PATH_745",
+          "LEGACY_TEMP_PATH",
+          "experience",
+          "temporary path",
+          "fallback path"
+        ],
+        "required_regex": [
+          "TOMATO_SAFE_PATH_745"
+        ],
+        "forbidden_keywords": []
+      },
+      "checks": [
+        {
+          "id": "tomato_safe_path_present",
+          "type": "require_regex",
+          "path_glob": "**/*",
+          "pattern": "TOMATO_SAFE_PATH_745",
+          "source": "synthetic_memory_contract",
+          "strength": "sentinel_marker",
+          "signal_kind": "language_neutral_marker",
+          "rationale": "Later-session workspace should use the exact safer experience marker introduced in session 1."
+        },
+        {
+          "id": "tomato_legacy_temp_path_absent",
+          "type": "forbid_regex",
+          "path_glob": "**/*",
+          "pattern": "LEGACY_TEMP_PATH",
+          "source": "synthetic_memory_contract",
+          "strength": "negative_sentinel",
+          "signal_kind": "language_neutral_marker",
+          "rationale": "Later-session workspace should avoid the deprecated experience marker from the session-1 lesson."
+        }
+      ]
+    }
+  ],
+  "expected_memory_facts": [
+    {
+      "id": "user_tomato_preference_marker",
+      "required_keywords": [
+        "TOMATO_USER_PREF_741",
+        "future implementation work",
+        "newly added or meaningfully changed code"
+      ],
+      "required_regex": [
+        "TOMATO_USER_PREF_741"
+      ]
+    },
+    {
+      "id": "feedback_tomato_review_note",
+      "required_keywords": [
+        "TOMATO_REVIEW_NOTE_742",
+        "review note",
+        "compatibility",
+        "continuity"
+      ],
+      "required_regex": [
+        "TOMATO_REVIEW_NOTE_742"
+      ]
+    },
+    {
+      "id": "project_tomato_bridge_token",
+      "required_keywords": [
+        "TOMATO_PROJECT_BRIDGE_743",
+        "project token",
+        "helper",
+        "handler",
+        "adapter"
+      ],
+      "required_regex": [
+        "TOMATO_PROJECT_BRIDGE_743"
+      ]
+    },
+    {
+      "id": "reference_tomato_canon_pointer",
+      "required_keywords": [
+        "docs/TOMATO_REFERENCE_CANON_744.md",
+        "canonical local reference",
+        "future work",
+        "implementation notes"
+      ],
+      "required_regex": [
+        "docs/TOMATO_REFERENCE_CANON_744\\.md"
+      ]
+    },
+    {
+      "id": "experience_tomato_safe_path_lesson",
+      "required_keywords": [
+        "TOMATO_SAFE_PATH_745",
+        "LEGACY_TEMP_PATH",
+        "experience",
+        "temporary path",
+        "fallback path"
+      ],
+      "required_regex": [
+        "TOMATO_SAFE_PATH_745"
+      ],
+      "forbidden_keywords": []
+    }
+  ],
+  "test_plan": {
+    "status": "configured",
+    "command": [
+      "npm",
+      "test"
+    ],
+    "working_dir": ".",
+    "source": "package_json_test_script",
+    "timeout_sec": 300,
+    "reason": null,
+    "test_like_file_count": 13,
+    "executor": "host",
+    "docker_image": "locobench-memory-eval:java",
+    "environment": {
+      "recommended_executor": "docker",
+      "network": "none"
+    },
+    "integrity": {
+      "status": "basic",
+      "original_test_files": [
+        "tests/test_main.java",
+        "tests/test_utils.java",
+        "vitalpulse-cloudcare-api/services/auth-authorizer/src/test/java/com/vitalpulse/cloudcare/authorizer/TokenAuthorizerHandlerTest.java",
+        "vitalpulse-cloudcare-api/services/graphql-api/src/test/java/com/vitalpulse/cloudcare/graphql/GraphQLHandlerTest.java",
+        "vitalpulse-cloudcare-api/services/order-management-command/src/test/java/com/vitalpulse/cloudcare/orders/CreateOrderHandlerTest.java",
+        "vitalpulse-cloudcare-api/services/patient-data-query/src/test/java/com/vitalpulse/cloudcare/query/GetPatientDataHandlerTest.java",
+        "vitalpulse-cloudcare-api/services/vital-ingestion-command/src/test/java/com/vitalpulse/cloudcare/ingestion/VitalStreamHandlerTest.java"
+      ]
+    }
+  },
+  "requirement_checks": [
+    {
+      "id": "audit_log_model_exists",
+      "type": "require_regex",
+      "path_glob": "**/common-lib/**/*.java",
+      "source": "overlay",
+      "strength": "explicit",
+      "signal_kind": "domain_model",
+      "rationale": "common library defines AuditLog.",
+      "pattern": "class\\s+AuditLog|AuditLog"
+    },
+    {
+      "id": "audit_logger_exists",
+      "type": "require_regex",
+      "path_glob": "**/common-lib/**/*.java",
+      "source": "overlay",
+      "strength": "explicit",
+      "signal_kind": "service_contract",
+      "rationale": "common library defines AuditLogger contract.",
+      "pattern": "AuditLogger|log\\s*\\(\\s*AuditLog"
+    },
+    {
+      "id": "order_creation_audit_logged",
+      "type": "require_regex",
+      "path_glob": "**/CreateOrderHandler.java",
+      "source": "overlay",
+      "strength": "explicit",
+      "signal_kind": "runtime_integration",
+      "rationale": "order creation emits audit log.",
+      "pattern": "CREATE_ORDER|AuditLog|AuditLogger"
+    },
+    {
+      "id": "vitals_ingestion_audit_logged",
+      "type": "require_regex",
+      "path_glob": "**/VitalStreamHandler.java",
+      "source": "overlay",
+      "strength": "explicit",
+      "signal_kind": "runtime_integration",
+      "rationale": "vital ingestion emits audit log.",
+      "pattern": "INGEST_VITALS|AuditLog|AuditLogger"
+    },
+    {
+      "id": "architecture_docs_audit",
+      "type": "require_regex",
+      "path_glob": "docs/architecture.md",
+      "source": "overlay",
+      "strength": "explicit",
+      "signal_kind": "documentation",
+      "rationale": "architecture docs describe audit logging.",
+      "pattern": "AuditLog|AuditLogger|audit"
+    }
+  ],
+  "requirement_check_plan": {
+    "status": "configured",
+    "source": "overlay",
+    "reason": null,
+    "check_count": 5,
+    "source_distribution": {
+      "overlay": 5
+    },
+    "strength_distribution": {
+      "explicit": 5
+    },
+    "signal_kind_distribution": {
+      "documentation": 1,
+      "domain_model": 1,
+      "runtime_integration": 2,
+      "service_contract": 1
+    },
+    "rejection_reason_distribution": {},
+    "rejected_terms": []
+  }
+}

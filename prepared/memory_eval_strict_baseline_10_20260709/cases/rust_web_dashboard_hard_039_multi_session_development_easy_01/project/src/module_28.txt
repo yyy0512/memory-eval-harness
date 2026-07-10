@@ -1,0 +1,428 @@
+```rust
+//! src/module_28.rs
+//!
+//! Session management layer for ChromaticCanvas Control Center.
+//!
+//! This module exposes three major artefacts:
+//! 1. [`Session`]  – strongly-typed representation of a user/session scope.
+//! 2. [`SessionStore`] – async trait for persisting sessions.
+//! 3. [`SessionLayer`] – Tower/axum middleware that injects a [`Session`]
+//!    into every request while handling cookie extraction, validity checks
+//!    and automatic persistence on response.
+//!
+//! It is deliberately engine-agnostic; only the `axum` integration lives
+//! behind the `axum` feature gate so that the rest of the code base can
+//! stay free of hard framework dependencies during unit tests.
+//!
+//! ```text
+//! ┌─────────────────────────────┐
+//! │  Incoming HTTP Request      │
+//! └────────────┬────────────────┘
+//!              │  ① Extract cookie, decrypt/signature-check
+//!              ▼
+//! ┌─────────────────────────────┐
+//! │   SessionLayer (Tower)      │
+//! └────────────┬────────────────┘
+//!              │  ② Load from store (or create anon)
+//!              ▼
+//!        Downstream handlers
+//!              │  ③ Mutate session            ▲
+//!              │                              │
+//!              └────────── ④ On response ─────┘
+//!                              Persist & set cookie
+//! ```
+
+#![allow(clippy::arc_with_non_send_sync)]
+
+use async_trait::async_trait;
+use chrono::{DateTime, Duration, Utc};
+use cookie::{Cookie, CookieJar, Key};
+use ring::rand::{SecureRandom, SystemRandom};
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use std::{
+    collections::HashMap,
+    net::SocketAddr,
+    sync::Arc,
+};
+use thiserror::Error;
+use tokio::sync::RwLock;
+use tower::{Layer, ServiceBuilder};
+use uuid::Uuid;
+
+#[cfg(feature = "axum")]
+use {
+    axum::{
+        body::Body,
+        http::{Request, StatusCode},
+        middleware::Next,
+        response::{IntoResponse, Response},
+        Extension,
+    },
+    tower_http::cookies::{CookieManagerLayer, CookieManager},
+};
+
+/// Number of minutes after which an unused session expires.
+const SESSION_TTL_MINUTES: i64 = 60;
+
+/// Name of the cookie that stores the session identifier.
+const SESSION_COOKIE_NAME: &str = "cc_session";
+
+/// Randomly generated key used to sign/encrypt the cookies.  
+/// In a real deployment this must be derived from an environment variable
+/// or a KMS. For the sake of the example we generate it lazily at startup.
+fn default_signing_key() -> Key {
+    let mut bytes = [0u8; 64];
+    SystemRandom::new()
+        .fill(&mut bytes)
+        .expect("failed to generate cookie signing key");
+    Key::from(&bytes)
+}
+
+/// Unique identifier for a session.
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Hash, Serialize, Deserialize)]
+pub struct SessionId(Uuid);
+
+impl SessionId {
+    pub fn new() -> Self {
+        Self(Uuid::new_v4())
+    }
+}
+
+/// Optional unique identifier for a user account.
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Hash, Serialize, Deserialize)]
+pub struct UserId(Uuid);
+
+/// Core in-memory representation of a session.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Session {
+    pub id: SessionId,
+    pub user_id: Option<UserId>,
+    pub created_at: DateTime<Utc>,
+    pub expires_at: DateTime<Utc>,
+    /// Arbitrary key/value bag for consumers to attach additional data.
+    pub data: HashMap<String, Value>,
+}
+
+impl Session {
+    /// Returns `true` if the session has reached its expiry time.
+    pub fn is_expired(&self) -> bool {
+        Utc::now() > self.expires_at
+    }
+
+    /// Refreshes the expiry timestamp, extending its lifetime.
+    pub fn touch(&mut self) {
+        self.expires_at = Utc::now() + Duration::minutes(SESSION_TTL_MINUTES);
+    }
+
+    /// Creates a brand-new anonymous session.
+    pub fn anonymous() -> Self {
+        let now = Utc::now();
+        Self {
+            id: SessionId::new(),
+            user_id: None,
+            created_at: now,
+            expires_at: now + Duration::minutes(SESSION_TTL_MINUTES),
+            data: HashMap::new(),
+        }
+    }
+}
+
+/// Errors that can occur within the session management subsystem.
+#[derive(Debug, Error)]
+pub enum SessionError {
+    #[error("session not found")]
+    NotFound,
+    #[error("session expired")]
+    Expired,
+    #[error("session store error: {0}")]
+    Store(#[from] Box<dyn std::error::Error + Send + Sync>),
+    #[error("serde error: {0}")]
+    Serde(#[from] serde_json::Error),
+}
+
+/// Abstract interface for persistence back-ends (Redis/PostgreSQL/etc.).
+#[async_trait]
+pub trait SessionStore: Send + Sync + 'static {
+    /// Fetches a session by ID. Returns [`SessionError::NotFound`]
+    /// if the session is missing.
+    async fn load(&self, id: SessionId) -> Result<Session, SessionError>;
+
+    /// Persists the given session.
+    async fn save(&self, session: &Session) -> Result<(), SessionError>;
+
+    /// Deletes a session from the store.
+    async fn delete(&self, id: SessionId) -> Result<(), SessionError>;
+}
+
+/// In-memory `DashMap` implementation – handy for local tests and benches.
+#[derive(Debug, Clone, Default)]
+pub struct InMemorySessionStore {
+    inner: Arc<RwLock<HashMap<SessionId, Session>>>,
+}
+
+impl InMemorySessionStore {
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
+#[async_trait]
+impl SessionStore for InMemorySessionStore {
+    async fn load(&self, id: SessionId) -> Result<Session, SessionError> {
+        let map = self.inner.read().await;
+        let session = map
+            .get(&id)
+            .ok_or(SessionError::NotFound)?
+            .clone();
+
+        if session.is_expired() {
+            drop(map); // release read lock before upgrading.
+            self.delete(id).await.ok(); // fire-and-forget cleanup
+            return Err(SessionError::Expired);
+        }
+
+        Ok(session)
+    }
+
+    async fn save(&self, session: &Session) -> Result<(), SessionError> {
+        let mut map = self.inner.write().await;
+        map.insert(session.id, session.clone());
+        Ok(())
+    }
+
+    async fn delete(&self, id: SessionId) -> Result<(), SessionError> {
+        let mut map = self.inner.write().await;
+        map.remove(&id).ok_or(SessionError::NotFound)?;
+        Ok(())
+    }
+}
+
+/// Bundle store and signer so we can pass them around conveniently.
+#[derive(Debug, Clone)]
+pub struct SessionLayer<S> {
+    store: Arc<S>,
+    key: Key,
+}
+
+impl<S> SessionLayer<S>
+where
+    S: SessionStore,
+{
+    pub fn new(store: S) -> Self {
+        Self {
+            store: Arc::new(store),
+            key: default_signing_key(),
+        }
+    }
+
+    /// Exposes the [`tower::Layer`] so users can compose more easily.
+    #[cfg(feature = "axum")]
+    pub fn into_tower_layer(self) -> impl Layer<
+        Request<Body>,
+        Response = Response,
+        Error = axum::Error,
+        Service = impl tower::Service<Request<Body>, Response = Response, Error = axum::Error>,
+    > + Clone {
+        // CookieManagerLayer handles bidirectional sync with the Set-Cookie header
+        // while we maintain our own CookieJar inside request extensions.
+        let cookie_layer = CookieManagerLayer::new()
+            .with_key(self.key.clone());
+
+        ServiceBuilder::new()
+            .layer(Extension(self.store))
+            .layer(Extension(self.key))
+            .layer(cookie_layer)
+            .layer(axum::middleware::from_fn(session_middleware))
+    }
+}
+
+#[cfg(feature = "axum")]
+async fn session_middleware<S>(
+    mut req: Request<Body>,
+    next: Next<Body>,
+) -> Result<Response, axum::Error>
+where
+    S: SessionStore,
+{
+    let Extension(store) = req
+        .extensions()
+        .get::<Arc<S>>()
+        .cloned()
+        .expect("SessionStore missing from request extensions");
+
+    let Extension(key) = req
+        .extensions()
+        .get::<Key>()
+        .cloned()
+        .expect("Cookie signing Key missing from request extensions");
+
+    // Extract existing cookie (if any)
+    let cookies = req
+        .extensions_mut()
+        .get_mut::<CookieManager>()
+        .expect("CookieManager extension missing");
+
+    let sid = cookies
+        .get(SESSION_COOKIE_NAME)
+        .and_then(|c| c.value().parse::<Uuid>().ok())
+        .map(SessionId);
+
+    let session = match sid {
+        Some(id) => match store.load(id).await {
+            Ok(mut s) => {
+                s.touch(); // keep alive
+                s
+            }
+            Err(_) => Session::anonymous(),
+        },
+        None => Session::anonymous(),
+    };
+
+    // Attach session for downstream handlers.
+    req.extensions_mut().insert(session.clone());
+
+    // Run the rest of the stack.
+    let mut res = next.run(req).await;
+
+    // Ensure the possibly-mutated session is persisted.
+    if let Some(mut session) = res
+        .extensions_mut()
+        .remove::<Session>()
+    {
+        // Touch expiry even if nothing else changed to keep it alive.
+        session.touch();
+        store.save(&session).await.map_err(|e| {
+            tracing::error!("failed to save session: {e}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+
+        // Set cookie
+        let cookie = Cookie::build(
+            SESSION_COOKIE_NAME,
+            session.id.0.to_string(),
+        )
+        .path("/")
+        .http_only(true)
+        .secure(true) // Chromium samesite Lax by default
+        .expires(session.expires_at.into())
+        .finish();
+
+        cookies.add(cookie);
+    }
+
+    Ok(res)
+}
+
+/// Convenience extractor for axum handlers.
+#[cfg(feature = "axum")]
+pub struct ExtractSession(pub Session);
+
+#[cfg(feature = "axum")]
+#[async_trait]
+impl<S> axum::extract::FromRequest<Body, S> for ExtractSession
+where
+    S: Send + Sync,
+{
+    type Rejection = (StatusCode, &'static str);
+
+    async fn from_request(
+        req: Request<Body>,
+        _state: &S,
+    ) -> Result<Self, Self::Rejection> {
+        req.extensions()
+            .get::<Session>()
+            .cloned()
+            .map(ExtractSession)
+            .ok_or((StatusCode::INTERNAL_SERVER_ERROR, "session missing"))
+    }
+}
+
+/* -------------------------------------------------------------------------
+   Example usage with Axum (behind feature gate)
+   ------------------------------------------------------------------------- */
+
+#[cfg(all(test, feature = "axum"))]
+mod tests {
+    use super::*;
+    use axum::{
+        async_trait,
+        extract::State,
+        routing::get,
+        Router,
+    };
+    use hyper::{body::to_bytes, Request, StatusCode};
+    use tower::ServiceExt;
+
+    async fn demo_handler(
+        ExtractSession(mut sess): ExtractSession,
+    ) -> impl IntoResponse {
+        // Increment a visit counter stored in the session.
+        let visits = sess
+            .data
+            .entry("visits".into())
+            .or_insert(Value::from(0))
+            .as_i64()
+            .unwrap_or(0)
+            + 1;
+
+        sess.data
+            .insert("visits".into(), Value::from(visits));
+
+        // Re-insert mutated session so the middleware picks it up.
+        Extension::<Session>(sess);
+
+        format!("visit: {visits}")
+    }
+
+    #[tokio::test]
+    async fn round_trip_session_cookie() {
+        let store = InMemorySessionStore::new();
+        let layer = SessionLayer::new(store.clone())
+            .into_tower_layer();
+
+        let app = Router::new()
+            .route("/", get(demo_handler))
+            .layer(layer);
+
+        // First request – should set cookie.
+        let response = app
+            .clone()
+            .oneshot(Request::builder().uri("/").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body()).await.unwrap();
+        assert_eq!(&body[..], b"visit: 1");
+
+        // Extract Set-Cookie header.
+        let cookie_header = response
+            .headers()
+            .get("set-cookie")
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_owned();
+
+        // Second request with cookie – visit counter increments.
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/")
+                    .header("cookie", cookie_header)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body()).await.unwrap();
+        assert_eq!(&body[..], b"visit: 2");
+
+        // Store should have exactly one session.
+        assert_eq!(store.inner.read().await.len(), 1);
+    }
+}
+```

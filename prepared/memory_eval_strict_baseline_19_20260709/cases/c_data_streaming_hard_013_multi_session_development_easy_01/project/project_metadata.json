@@ -1,0 +1,367 @@
+{
+  "specification": {
+    "unique_id": "c_data_streaming_hard_013",
+    "name": "PulseSphere: Real-Time Social Pulse Streaming Platform",
+    "description": "PulseSphere is a high-throughput, event-driven data-streaming platform written in C that captures, validates, transforms, and disseminates live \"social pulses\" (likes, comments, shares, follows, and reaction emojis) from multiple social networks, community forums, and in-house engagement widgets. Each pulse is modeled as an immutable event and published into a unified event fabric, enabling downstream microservices to continuously compute community sentiment, trending topics, and influence graphs in near real-time.\n\nDesigned around a microservice-oriented Data Lake and Pipeline Pattern, PulseSphere ingests millions of heterogeneous social events per second, performs schema-on-read validation, parallel enrichment (geo-tagging, language detection, toxicity scoring), and streams curated data into analytical sinks for data scientists while simultaneously driving interactive dashboards for moderators. Fault-tolerant batch windows reconcile late and out-of-order events, and Strategy Pattern plug-ins allow rapid experimentation with alternative enrichment, quality-check, and visualization strategies without redeploying the entire system.",
+    "domain": "data_streaming",
+    "complexity": "hard",
+    "language": "c",
+    "architecture": "event_driven",
+    "theme": "social",
+    "target_file_count": 75,
+    "target_token_count": 234678,
+    "features": [
+      "data_storage",
+      "stream_processing",
+      "data_ingestion",
+      "error_recovery",
+      "data_validation",
+      "data_visualization",
+      "batch_processing",
+      "parallel_processing",
+      "data_quality_checks",
+      "data_transformation"
+    ],
+    "architecture_patterns": [
+      "Microservices",
+      "Data_Lake",
+      "Observer_Pattern",
+      "Strategy_Pattern",
+      "Event_Streaming",
+      "Pipeline_Pattern"
+    ],
+    "dependencies": [
+      "librdkafka (C client for Apache Kafka) \u2013 Event streaming backbone",
+      "libuv \u2013 High-performance event loop & async I/O",
+      "Apache Arrow C Library \u2013 In-memory columnar representation for batch and stream interoperability",
+      "Flatbuffers or Google Protobuf-C \u2013 Compact, schema-versioned message serialization",
+      "jansson \u2013 JSON parsing/validation for schema-on-read",
+      "libpq / PostgreSQL \u2013 Metadata & configuration store (Data Lake catalog)",
+      "Redis Streams (hiredis) \u2013 Low-latency pub/sub for hot paths (e.g., moderator alert channels)",
+      "OpenSSL \u2013 TLS encryption for cross-datacenter event transport",
+      "Prometheus C Client & Grafana \u2013 Telemetry, health metrics, and data visualization endpoints",
+      "Parquet-C and libhdfs \u2013 Batch off-loads to HDFS-backed Data Lake",
+      "OpenMP / Intel TBB \u2013 Parallel processing of transformation stages",
+      "cJSON / RapidJSON C wrappers \u2013 Lightweight JSON generation for UI APIs",
+      "libarchive \u2013 Compressed batch file handling in cold-storage workflows"
+    ],
+    "seed": 617515
+  },
+  "generated_timestamp": 1754355564.510609,
+  "phase_1_complete": true,
+  "uniqueness_factors": {
+    "domain": "data_streaming",
+    "complexity": "hard",
+    "architecture": "event_driven",
+    "theme": "social",
+    "seed": 617515
+  },
+  "files": [
+    {
+      "path": "pulsesphere/.gitignore",
+      "type": "source"
+    },
+    {
+      "path": "pulsesphere/README.md",
+      "type": "documentation"
+    },
+    {
+      "path": "pulsesphere/build.sh",
+      "type": "source"
+    },
+    {
+      "path": "pulsesphere/CMakeLists.txt",
+      "type": "source"
+    },
+    {
+      "path": "pulsesphere/config/pulsesphere_defaults.h",
+      "type": "config"
+    },
+    {
+      "path": "pulsesphere/config/ingestion_service.conf",
+      "type": "config"
+    },
+    {
+      "path": "pulsesphere/config/validation_service.conf",
+      "type": "config"
+    },
+    {
+      "path": "pulsesphere/config/enrichment_service.conf",
+      "type": "config"
+    },
+    {
+      "path": "pulsesphere/config/analytics_sink_service.conf",
+      "type": "config"
+    },
+    {
+      "path": "pulsesphere/config/dashboard_service.conf",
+      "type": "config"
+    },
+    {
+      "path": "pulsesphere/config/batch_reconciliation_service.conf",
+      "type": "config"
+    },
+    {
+      "path": "pulsesphere/docs/01_architecture.md",
+      "type": "documentation"
+    },
+    {
+      "path": "pulsesphere/docs/02_setup_guide.md",
+      "type": "documentation"
+    },
+    {
+      "path": "pulsesphere/docs/03_deployment.md",
+      "type": "documentation"
+    },
+    {
+      "path": "pulsesphere/docs/04_pipeline_deep_dive.md",
+      "type": "documentation"
+    },
+    {
+      "path": "pulsesphere/docs/05_strategy_plugin_dev_guide.md",
+      "type": "documentation"
+    },
+    {
+      "path": "pulsesphere/docs/Doxyfile",
+      "type": "documentation"
+    },
+    {
+      "path": "pulsesphere/docs/api/index.html",
+      "type": "documentation"
+    },
+    {
+      "path": "pulsesphere/lib/common/CMakeLists.txt",
+      "type": "source"
+    },
+    {
+      "path": "pulsesphere/lib/common/include/ps_common.h",
+      "type": "source"
+    },
+    {
+      "path": "pulsesphere/lib/common/include/ps_event.h",
+      "type": "source"
+    },
+    {
+      "path": "pulsesphere/lib/common/include/ps_logger.h",
+      "type": "source"
+    },
+    {
+      "path": "pulsesphere/lib/common/include/ps_config.h",
+      "type": "config"
+    },
+    {
+      "path": "pulsesphere/lib/common/src/ps_event.c",
+      "type": "source"
+    },
+    {
+      "path": "pulsesphere/lib/common/src/ps_logger.c",
+      "type": "source"
+    },
+    {
+      "path": "pulsesphere/lib/common/src/ps_config.c",
+      "type": "config"
+    },
+    {
+      "path": "pulsesphere/lib/event_fabric/CMakeLists.txt",
+      "type": "source"
+    },
+    {
+      "path": "pulsesphere/lib/event_fabric/include/ps_kafka_client.h",
+      "type": "source"
+    },
+    {
+      "path": "pulsesphere/lib/event_fabric/src/ps_kafka_client.c",
+      "type": "source"
+    },
+    {
+      "path": "pulsesphere/protos/pulse_event.proto",
+      "type": "source"
+    },
+    {
+      "path": "pulsesphere/protos/build_protos.sh",
+      "type": "source"
+    },
+    {
+      "path": "pulsesphere/services/ingestion_service/CMakeLists.txt",
+      "type": "source"
+    },
+    {
+      "path": "pulsesphere/services/ingestion_service/src/main.c",
+      "type": "source"
+    },
+    {
+      "path": "pulsesphere/services/ingestion_service/src/http_ingestor.c",
+      "type": "source"
+    },
+    {
+      "path": "pulsesphere/services/ingestion_service/src/websocket_ingestor.c",
+      "type": "source"
+    },
+    {
+      "path": "pulsesphere/services/ingestion_service/include/http_ingestor.h",
+      "type": "source"
+    },
+    {
+      "path": "pulsesphere/services/ingestion_service/include/websocket_ingestor.h",
+      "type": "source"
+    },
+    {
+      "path": "pulsesphere/services/ingestion_service/tests/test_http_ingestor.c",
+      "type": "test"
+    },
+    {
+      "path": "pulsesphere/services/ingestion_service/tests/test_main.c",
+      "type": "test"
+    },
+    {
+      "path": "pulsesphere/services/validation_service/CMakeLists.txt",
+      "type": "source"
+    },
+    {
+      "path": "pulsesphere/services/validation_service/src/main.c",
+      "type": "source"
+    },
+    {
+      "path": "pulsesphere/services/validation_service/src/validator.c",
+      "type": "source"
+    },
+    {
+      "path": "pulsesphere/services/validation_service/include/validator.h",
+      "type": "source"
+    },
+    {
+      "path": "pulsesphere/services/validation_service/tests/test_validator.c",
+      "type": "test"
+    },
+    {
+      "path": "pulsesphere/services/validation_service/tests/test_main.c",
+      "type": "test"
+    },
+    {
+      "path": "pulsesphere/services/enrichment_service/CMakeLists.txt",
+      "type": "source"
+    },
+    {
+      "path": "pulsesphere/services/enrichment_service/src/main.c",
+      "type": "source"
+    },
+    {
+      "path": "pulsesphere/services/enrichment_service/src/enrichment_engine.c",
+      "type": "source"
+    },
+    {
+      "path": "pulsesphere/services/enrichment_service/src/strategy_loader.c",
+      "type": "source"
+    },
+    {
+      "path": "pulsesphere/services/enrichment_service/include/enrichment_engine.h",
+      "type": "source"
+    },
+    {
+      "path": "pulsesphere/services/enrichment_service/include/strategy_interface.h",
+      "type": "source"
+    },
+    {
+      "path": "pulsesphere/services/enrichment_service/include/strategy_loader.h",
+      "type": "source"
+    },
+    {
+      "path": "pulsesphere/services/enrichment_service/plugins/geo_tag/CMakeLists.txt",
+      "type": "source"
+    },
+    {
+      "path": "pulsesphere/services/enrichment_service/plugins/geo_tag/src/geo_tag_strategy.c",
+      "type": "source"
+    },
+    {
+      "path": "pulsesphere/services/enrichment_service/plugins/geo_tag/include/geo_tag_strategy.h",
+      "type": "source"
+    },
+    {
+      "path": "pulsesphere/services/enrichment_service/plugins/language_detect/CMakeLists.txt",
+      "type": "source"
+    },
+    {
+      "path": "pulsesphere/services/enrichment_service/plugins/language_detect/src/language_detect_strategy.c",
+      "type": "source"
+    },
+    {
+      "path": "pulsesphere/services/enrichment_service/plugins/language_detect/include/language_detect_strategy.h",
+      "type": "source"
+    },
+    {
+      "path": "pulsesphere/services/enrichment_service/plugins/toxicity_score/CMakeLists.txt",
+      "type": "source"
+    },
+    {
+      "path": "pulsesphere/services/enrichment_service/plugins/toxicity_score/src/toxicity_score_strategy.c",
+      "type": "source"
+    },
+    {
+      "path": "pulsesphere/services/enrichment_service/plugins/toxicity_score/include/toxicity_score_strategy.h",
+      "type": "source"
+    },
+    {
+      "path": "pulsesphere/services/enrichment_service/tests/test_enrichment_engine.c",
+      "type": "test"
+    },
+    {
+      "path": "pulsesphere/services/enrichment_service/tests/test_main.c",
+      "type": "test"
+    },
+    {
+      "path": "pulsesphere/services/analytics_sink_service/CMakeLists.txt",
+      "type": "source"
+    },
+    {
+      "path": "pulsesphere/services/analytics_sink_service/src/main.c",
+      "type": "source"
+    },
+    {
+      "path": "pulsesphere/services/analytics_sink_service/src/data_lake_writer.c",
+      "type": "source"
+    },
+    {
+      "path": "pulsesphere/services/analytics_sink_service/src/batch_manager.c",
+      "type": "source"
+    },
+    {
+      "path": "pulsesphere/services/analytics_sink_service/include/data_lake_writer.h",
+      "type": "source"
+    },
+    {
+      "path": "pulsesphere/services/analytics_sink_service/include/batch_manager.h",
+      "type": "source"
+    },
+    {
+      "path": "pulsesphere/services/analytics_sink_service/tests/test_data_lake_writer.c",
+      "type": "test"
+    },
+    {
+      "path": "pulsesphere/services/analytics_sink_service/tests/test_main.c",
+      "type": "test"
+    },
+    {
+      "path": "pulsesphere/services/dashboard_service/CMakeLists.txt",
+      "type": "source"
+    },
+    {
+      "path": "pulsesphere/services/dashboard_service/src/main.c",
+      "type": "source"
+    },
+    {
+      "path": "pulsesphere/services/dashboard_service/src/websocket_server.c",
+      "type": "source"
+    },
+    {
+      "path": "pulsesphere/services/dashboard_service/src/event_aggregator.c",
+      "type": "source"
+    }
+  ],
+  "generated_stats": {
+    "files_count": 75,
+    "lines_count": 23401,
+    "generation_time": 1652.9638350009918,
+    "timestamp": 1754391345.299647
+  }
+}

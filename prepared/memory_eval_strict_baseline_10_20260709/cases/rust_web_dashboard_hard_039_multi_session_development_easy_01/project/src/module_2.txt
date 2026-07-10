@@ -1,0 +1,424 @@
+```rust
+//! src/module_2.rs
+//! ----------------------------------------------------------------------------
+//! Authentication & Session middleware for ChromaticCanvas Control Center
+//! ----------------------------------------------------------------------------
+//! This module ships a ready-to-use Actix-Web middleware that verifies
+//! Bearer-tokens (JWT), performs session look-ups, and injects the resolved
+//! `AuthenticatedUser` into the request’s extensions so downstream handlers
+//! can retrieve it type-safely.
+//!
+//! The design is intentionally generic: any persistence layer that implements
+//! `UserRepository` can be plugged in (Diesel, SQLx, SurrealDB, etc.).
+//!
+//! NOTE: real-world deployments should mount the middleware _after_ a TLS
+//! terminator (e.g., Nginx, Caddy) or enable `actix_web::middleware::Logger`
+//! with sensitive-header redaction to avoid leaking credentials in logs.
+//!
+//! ----------------------------------------------------------------------------
+
+use std::{
+    fmt,
+    future::{ready, Ready},
+    pin::Pin,
+    rc::Rc,
+    sync::Arc,
+    task::{Context, Poll},
+};
+
+use actix_service::{Service, Transform};
+use actix_web::{
+    dev::{forward_ready, ServiceRequest, ServiceResponse},
+    error::ResponseError,
+    http::header::{HeaderMap, AUTHORIZATION},
+    web::Data,
+    Error, HttpMessage, HttpResponse,
+};
+use chrono::{Duration, Utc};
+use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
+use serde::{Deserialize, Serialize};
+use thiserror::Error;
+use uuid::Uuid;
+
+// -----------------------------------------------------------------------------
+// Domain types
+// -----------------------------------------------------------------------------
+
+/// A business-domain representation of the currently authenticated user.
+/// This is what downstream handlers will receive.
+#[derive(Clone, Debug)]
+pub struct AuthenticatedUser {
+    pub id:        Uuid,
+    pub username:  String,
+    pub roles:     Vec<String>,
+    pub issued_at: i64,
+    pub expires_at: i64,
+}
+
+// -----------------------------------------------------------------------------
+// JSON-Web-Token
+// -----------------------------------------------------------------------------
+
+#[derive(Debug, Serialize, Deserialize)]
+struct Claims {
+    sub: String,
+    uid: Uuid,
+    rol: Vec<String>,
+    exp: usize,
+    iat: usize,
+}
+
+impl Claims {
+    fn from_user(user: &User, ttl: Duration) -> Self {
+        let now     = Utc::now();
+        let expires = now + ttl;
+
+        Self {
+            sub: user.username.clone(),
+            uid: user.id,
+            rol: user.roles.clone(),
+            exp: expires.timestamp() as usize,
+            iat: now.timestamp() as usize,
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// User persistence abstraction
+// -----------------------------------------------------------------------------
+
+/// Minimal contract the authentication layer expects from a user store.
+pub trait UserRepository: Send + Sync + 'static {
+    fn lookup_by_id(&self, id: Uuid) -> Result<Option<User>, RepoError>;
+}
+
+/// Simple DTO yielded by [`UserRepository`].
+#[derive(Debug, Clone)]
+pub struct User {
+    pub id:       Uuid,
+    pub username: String,
+    pub roles:    Vec<String>,
+}
+
+/// Possible failures returned by [`UserRepository`].
+#[derive(Debug, Error)]
+pub enum RepoError {
+    #[error("connection pool exhausted")]
+    PoolDepleted(#[source] Box<dyn std::error::Error + Send + Sync>),
+    #[error("query failed")]
+    QueryFailed(#[source] Box<dyn std::error::Error + Send + Sync>),
+}
+
+// -----------------------------------------------------------------------------
+// Token service
+// -----------------------------------------------------------------------------
+
+/// Responsible for encoding & decoding JWTs.
+#[derive(Clone)]
+pub struct TokenService {
+    enc_key: Arc<EncodingKey>,
+    dec_key: Arc<DecodingKey<'static>>,
+    ttl:     Duration,
+}
+
+impl TokenService {
+    pub fn new(secret: impl AsRef<[u8]>, ttl_minutes: i64) -> Self {
+        let secret = secret.as_ref();
+        Self {
+            enc_key: Arc::new(EncodingKey::from_secret(secret)),
+            dec_key: Arc::new(DecodingKey::from_secret(secret).into_static()),
+            ttl: Duration::minutes(ttl_minutes),
+        }
+    }
+
+    /// Produce a signed token for a given `User`.
+    pub fn sign(&self, user: &User) -> Result<String, jwt::errors::Error> {
+        let claims = Claims::from_user(user, self.ttl);
+        encode(&Header::default(), &claims, &self.enc_key)
+    }
+
+    /// Decode & validate the token, mapping it to an [`AuthenticatedUser`].
+    pub fn verify(&self, token: &str) -> Result<AuthenticatedUser, AuthError> {
+        let token_data = decode::<Claims>(&token, &self.dec_key, &Validation::default())
+            .map_err(AuthError::InvalidToken)?;
+
+        let claims = token_data.claims;
+        Ok(AuthenticatedUser {
+            id: claims.uid,
+            username: claims.sub,
+            roles: claims.rol,
+            issued_at: claims.iat as i64,
+            expires_at: claims.exp as i64,
+        })
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Middleware implementation
+// -----------------------------------------------------------------------------
+
+/// Actix-Web middleware to authenticate requests using Bearer tokens.
+/// Usage:
+///   app.wrap(AuthenticationLayer::new(repo, token_service));
+pub struct AuthenticationLayer<R> {
+    repo: Arc<R>,
+    tokens: TokenService,
+}
+
+impl<R> AuthenticationLayer<R>
+where
+    R: UserRepository,
+{
+    pub fn new(repo: R, tokens: TokenService) -> Self {
+        Self { repo: Arc::new(repo), tokens }
+    }
+}
+
+// Required by Actix to convert our `AuthenticationLayer` into a middleware
+impl<S, R> Transform<S, ServiceRequest> for AuthenticationLayer<R>
+where
+    S: Service<ServiceRequest, Response = ServiceResponse, Error = Error> + 'static,
+    R: UserRepository,
+{
+    type Response = ServiceResponse;
+    type Error = Error;
+    type InitError = ();
+    type Transform = AuthenticationMiddleware<S, R>;
+    type Future = Ready<Result<Self::Transform, Self::InitError>>;
+
+    fn new_transform(&self, service: S) -> Self::Future {
+        ready(Ok(AuthenticationMiddleware {
+            service: Rc::new(service),
+            repo: Arc::clone(&self.repo),
+            tokens: self.tokens.clone(),
+        }))
+    }
+}
+
+pub struct AuthenticationMiddleware<S, R> {
+    service: Rc<S>,
+    repo: Arc<R>,
+    tokens: TokenService,
+}
+
+impl<S, R> Service<ServiceRequest> for AuthenticationMiddleware<S, R>
+where
+    S: Service<ServiceRequest, Response = ServiceResponse, Error = Error> + 'static,
+    R: UserRepository,
+{
+    type Response = ServiceResponse;
+    type Error = Error;
+    type Future = Pin<Box<dyn futures::Future<Output = Result<Self::Response, Self::Error>>>>;
+
+    forward_ready!(service);
+
+    fn call(&self, mut req: ServiceRequest) -> Self::Future {
+        // Clone handles for async move
+        let repo   = Arc::clone(&self.repo);
+        let tokens = self.tokens.clone();
+        let svc    = Rc::clone(&self.service);
+
+        Box::pin(async move {
+            match extract_token(req.headers()) {
+                Ok(token) => match tokens.verify(&token) {
+                    Ok(claimed_user) => match repo.lookup_by_id(claimed_user.id) {
+                        Ok(Some(_db_user)) => {
+                            // Insert user into request extensions
+                            req.extensions_mut().insert(claimed_user);
+                            svc.call(req).await
+                        }
+                        Ok(None) => Err(AuthError::UnknownAccount.into()),
+                        Err(e)   => Err(AuthError::Repo(e).into()),
+                    },
+                    Err(e) => Err(e.into()),
+                },
+                Err(e) => Err(e.into()),
+            }
+        })
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Request header helpers
+// -----------------------------------------------------------------------------
+
+fn extract_token(headers: &HeaderMap) -> Result<String, AuthError> {
+    let auth_header = headers
+        .get(AUTHORIZATION)
+        .ok_or(AuthError::MissingHeader)?
+        .to_str()
+        .map_err(|_| AuthError::MalformedHeader)?;
+
+    let mut parts = auth_header.splitn(2, ' ');
+    match (parts.next(), parts.next()) {
+        (Some(scheme), Some(token)) if scheme.eq_ignore_ascii_case("bearer") => Ok(token.to_owned()),
+        _ => Err(AuthError::MalformedHeader),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Error handling
+// -----------------------------------------------------------------------------
+
+/// A unified error type mapping auth failures to HTTP responses.
+#[derive(Debug, Error)]
+pub enum AuthError {
+    #[error("Authorization header missing")]
+    MissingHeader,
+    #[error("Authorization header malformed")]
+    MalformedHeader,
+    #[error("JWT validation failed")]
+    InvalidToken(#[from] jsonwebtoken::errors::Error),
+    #[error("account no longer exists")]
+    UnknownAccount,
+    #[error("repository error")]
+    Repo(#[from] RepoError),
+}
+
+impl ResponseError for AuthError {
+    fn error_response(&self) -> HttpResponse {
+        match self {
+            AuthError::MissingHeader | AuthError::MalformedHeader => {
+                HttpResponse::Unauthorized().finish()
+            }
+            AuthError::InvalidToken(_) => HttpResponse::Unauthorized().finish(),
+            AuthError::UnknownAccount  => HttpResponse::Unauthorized().finish(),
+            AuthError::Repo(_)         => HttpResponse::InternalServerError().finish(),
+        }
+    }
+}
+
+impl fmt::Display for AuthenticatedUser {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{} ({})", self.username, self.id)
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Convenience extractor for handlers
+// -----------------------------------------------------------------------------
+
+use actix_web::FromRequest;
+use futures::future::LocalBoxFuture;
+
+/// A typed extractor for downstream handlers.
+///
+/// Example:
+/// ```ignore
+/// async fn index(user: AuthUser) -> impl Responder {
+///     format!("Welcome {}", user.username)
+/// }
+/// ```
+pub struct AuthUser(AuthenticatedUser);
+
+impl std::ops::Deref for AuthUser {
+    type Target = AuthenticatedUser;
+    fn deref(&self) -> &Self::Target { &self.0 }
+}
+
+impl FromRequest for AuthUser {
+    type Error = Error;
+    type Future = LocalBoxFuture<'static, Result<Self, Error>>;
+
+    fn from_request(req: &actix_web::HttpRequest, _payload: &mut actix_http::Payload) -> Self::Future {
+        let maybe_user = req.extensions().get::<AuthenticatedUser>().cloned();
+        Box::pin(async move {
+            maybe_user
+                .map(AuthUser)
+                .ok_or_else(|| AuthError::MissingHeader.into())
+        })
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Example in-memory repository (for tests & demos)
+// -----------------------------------------------------------------------------
+
+#[cfg(any(test, feature = "mock"))]
+mod mock_repo {
+    use super::*;
+
+    #[derive(Default, Clone)]
+    pub struct InMemoryRepo {
+        users: Arc<std::sync::Mutex<Vec<User>>>,
+    }
+
+    impl InMemoryRepo {
+        pub fn seed(&self, user: User) {
+            self.users.lock().unwrap().push(user);
+        }
+    }
+
+    impl UserRepository for InMemoryRepo {
+        fn lookup_by_id(&self, id: Uuid) -> Result<Option<User>, RepoError> {
+            let users = self.users.lock().unwrap().clone();
+            Ok(users.into_iter().find(|u| u.id == id))
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Unit tests
+// -----------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use actix_web::{
+        body::MessageBody,
+        test::{self, call_service, init_service, read_body, TestRequest},
+        App, HttpResponse,
+    };
+
+    #[actix_rt::test]
+    async fn middleware_allows_valid_token() {
+        let repo = mock_repo::InMemoryRepo::default();
+        let sample_user = User {
+            id: Uuid::new_v4(),
+            username: "alice".into(),
+            roles: vec!["artist".into()],
+        };
+        repo.seed(sample_user.clone());
+
+        let tokens = TokenService::new("secret".as_bytes(), 60);
+        let token  = tokens.sign(&sample_user).unwrap();
+
+        let app = init_service(
+            App::new()
+                .wrap(AuthenticationLayer::new(repo.clone(), tokens.clone()))
+                .route("/ping", actix_web::web::get().to(|| async { HttpResponse::Ok() })),
+        )
+        .await;
+
+        let req = TestRequest::get()
+            .uri("/ping")
+            .insert_header((AUTHORIZATION, format!("Bearer {}", token)))
+            .to_request();
+
+        let resp = call_service(&app, req).await;
+        assert!(resp.status().is_success());
+    }
+
+    #[actix_rt::test]
+    async fn middleware_blocks_invalid_token() {
+        let repo   = mock_repo::InMemoryRepo::default();
+        let tokens = TokenService::new("secret".as_bytes(), 60);
+
+        let app = init_service(
+            App::new()
+                .wrap(AuthenticationLayer::new(repo, tokens))
+                .route("/ping", actix_web::web::get().to(|| async { HttpResponse::Ok() })),
+        )
+        .await;
+
+        let req = TestRequest::get()
+            .uri("/ping")
+            .insert_header((AUTHORIZATION, "Bearer invalid.token.here"))
+            .to_request();
+
+        let resp = call_service(&app, req).await;
+        assert_eq!(resp.status(), 401);
+        assert!(read_body(resp).await.is_empty());
+    }
+}
+```

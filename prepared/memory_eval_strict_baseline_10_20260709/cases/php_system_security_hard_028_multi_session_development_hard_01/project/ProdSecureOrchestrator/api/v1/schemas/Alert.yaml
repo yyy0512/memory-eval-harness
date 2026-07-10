@@ -1,0 +1,286 @@
+<?php
+/**
+ * ProdSecure Orchestrator
+ *
+ *  ─────────────────────────────────────────────────────────────────────────────
+ *   Alert Schema (API v1)
+ *  ─────────────────────────────────────────────────────────────────────────────
+ *
+ *  This file represents the canonical Alert schema used throughout the
+ *  application.  The object carries both data-level validation logic (powered
+ *  by Symfony’s Validator component) and a set of helpers for (de)serialising
+ *  to JSON or YAML.  A static OpenAPI-compatible schema definition is also
+ *  included so that build pipelines can automatically spit out an
+ *  `api/v1/schemas/Alert.yaml` file whenever the PHP source of truth changes.
+ *
+ *  Architecture Touch-Points
+ *  ─────────────────────────
+ *  • Observer Pattern:  ViewModels publish / consume Alert objects in real-time
+ *  • Chain of Responsibility:  Every Alert passes through a strategic handler
+ *    pipeline (throttle, deduplicate, escalate, dispatch, …)
+ *  • Strategy Pattern:  Alert routing / escalation strategies are hot-swappable
+ *
+ *  @author   ProdSecure Engineering
+ *  @license  MIT
+ *  @link     https://prodsecure.example.com
+ */
+
+declare(strict_types=1);
+
+namespace ProdSecureOrchestrator\Api\V1\Schemas;
+
+use DateTimeImmutable;
+use DateTimeZone;
+use InvalidArgumentException;
+use JsonSerializable;
+use RuntimeException;
+use Symfony\Component\Validator\Constraints as Assert;
+use Symfony\Component\Validator\Validation;
+use Symfony\Component\Validator\Validator\ValidatorInterface;
+use Symfony\Component\Yaml\Yaml;
+
+final class Alert implements JsonSerializable
+{
+    // ───────────────────────────────────────────────────────────────────────────
+    //  Constants & Static Properties
+    // ───────────────────────────────────────────────────────────────────────────
+    public const SEVERITY_INFO      = 'info';
+    public const SEVERITY_LOW       = 'low';
+    public const SEVERITY_MEDIUM    = 'medium';
+    public const SEVERITY_HIGH      = 'high';
+    public const SEVERITY_CRITICAL  = 'critical';
+
+    private static ?ValidatorInterface $validator = null;
+
+    /**
+     * OpenAPI 3.0 Schema Definition
+     *
+     * This array can be dumped into YAML or JSON for documentation generation.
+     * The values mirror the runtime constraints enforced in {@see assertValid()}.
+     */
+    public const OPENAPI_SCHEMA = [
+        'type'       => 'object',
+        'required'   => ['id', 'type', 'severity', 'message', 'source', 'timestamp'],
+        'properties' => [
+            'id'        => [
+                'type'        => 'string',
+                'format'      => 'uuid',
+                'description' => 'Globally unique Alert identifier',
+            ],
+            'type'      => [
+                'type'        => 'string',
+                'description' => 'High-level classification (e.g. intrusion, backup, performance)',
+                'maxLength'   => 100,
+            ],
+            'severity'  => [
+                'type'        => 'string',
+                'enum'        => [
+                    self::SEVERITY_INFO,
+                    self::SEVERITY_LOW,
+                    self::SEVERITY_MEDIUM,
+                    self::SEVERITY_HIGH,
+                    self::SEVERITY_CRITICAL,
+                ],
+            ],
+            'message'   => [
+                'type'        => 'string',
+                'description' => 'Human-readable alert text',
+                'maxLength'   => 1024,
+            ],
+            'source'    => [
+                'type'        => 'string',
+                'description' => 'Component or subsystem that originated the alert',
+                'maxLength'   => 255,
+            ],
+            'timestamp' => [
+                'type'        => 'string',
+                'format'      => 'date-time',
+                'description' => 'UTC ISO-8601 timestamp',
+            ],
+            'metadata'  => [
+                'type'        => 'object',
+                'description' => 'Arbitrary key/value data for downstream processors',
+            ],
+        ],
+    ];
+
+    // ───────────────────────────────────────────────────────────────────────────
+    //  Properties
+    // ───────────────────────────────────────────────────────────────────────────
+    private string            $id;
+    private string            $type;
+    private string            $severity;
+    private string            $message;
+    private string            $source;
+    private DateTimeImmutable $timestamp;
+    private array             $metadata;
+
+    // ───────────────────────────────────────────────────────────────────────────
+    //  Constructor & Factory
+    // ───────────────────────────────────────────────────────────────────────────
+    public function __construct(
+        string             $id,
+        string             $type,
+        string             $severity,
+        string             $message,
+        string             $source,
+        ?DateTimeImmutable $timestamp = null,
+        array              $metadata  = [],
+    ) {
+        $this->id        = $id;
+        $this->type      = $type;
+        $this->severity  = strtolower($severity);
+        $this->message   = $message;
+        $this->source    = $source;
+        $this->timestamp = $timestamp ?? new DateTimeImmutable('now', new DateTimeZone('UTC'));
+        $this->metadata  = $metadata;
+
+        $this->assertValid(); // Fail-fast if the payload is not spec-compliant
+    }
+
+    /**
+     * Build an Alert object from an associative array, typically raw request data.
+     *
+     * @throws InvalidArgumentException when required keys are missing
+     */
+    public static function fromArray(array $data): self
+    {
+        return new self(
+            $data['id']        ?? throw new InvalidArgumentException('Missing field: id'),
+            $data['type']      ?? throw new InvalidArgumentException('Missing field: type'),
+            $data['severity']  ?? self::SEVERITY_INFO,
+            $data['message']   ?? '',
+            $data['source']    ?? '',
+            isset($data['timestamp'])
+                ? new DateTimeImmutable($data['timestamp'])
+                : null,
+            $data['metadata'] ?? [],
+        );
+    }
+
+    // ───────────────────────────────────────────────────────────────────────────
+    //  Validation
+    // ───────────────────────────────────────────────────────────────────────────
+    /**
+     * Runs a Symfony Validator pass against the current instance.
+     *
+     * @throws InvalidArgumentException when any constraint violations surface
+     */
+    private function assertValid(): void
+    {
+        if (self::$validator === null) {
+            self::$validator = Validation::createValidatorBuilder()
+                ->enableAnnotationMapping()
+                ->getValidator();
+        }
+
+        $violations = self::$validator->validate($this->toFlatArray(), new Assert\Collection([
+            'fields' => [
+                'id'        => [new Assert\NotBlank(), new Assert\Uuid()],
+                'type'      => [new Assert\NotBlank(), new Assert\Length(max: 100)],
+                'severity'  => [new Assert\Choice([
+                    'choices' => [
+                        self::SEVERITY_INFO,
+                        self::SEVERITY_LOW,
+                        self::SEVERITY_MEDIUM,
+                        self::SEVERITY_HIGH,
+                        self::SEVERITY_CRITICAL,
+                    ],
+                ])],
+                'message'   => [new Assert\NotBlank(), new Assert\Length(max: 1024)],
+                'source'    => [new Assert\NotBlank(), new Assert\Length(max: 255)],
+                'timestamp' => [new Assert\NotNull()],
+                'metadata'  => [new Assert\Type('array')],
+            ],
+            'allowExtraFields' => false,
+        ]));
+
+        if ($violations->count() > 0) {
+            $messages = [];
+            foreach ($violations as $violation) {
+                $messages[] = sprintf('%s: %s', $violation->getPropertyPath(), $violation->getMessage());
+            }
+            throw new InvalidArgumentException('Alert payload validation failed: '.implode('; ', $messages));
+        }
+    }
+
+    // ───────────────────────────────────────────────────────────────────────────
+    //  Business Logic
+    // ───────────────────────────────────────────────────────────────────────────
+    /**
+     * Escalates the severity by one logical step, up to CRITICAL.
+     */
+    public function escalate(): void
+    {
+        $order = [
+            self::SEVERITY_INFO,
+            self::SEVERITY_LOW,
+            self::SEVERITY_MEDIUM,
+            self::SEVERITY_HIGH,
+            self::SEVERITY_CRITICAL,
+        ];
+
+        $idx = array_search($this->severity, $order, true);
+        if ($idx === false) {
+            throw new RuntimeException(sprintf('Unknown severity: %s', $this->severity));
+        }
+
+        if ($idx < count($order) - 1) {
+            $this->severity = $order[$idx + 1];
+        }
+    }
+
+    // ───────────────────────────────────────────────────────────────────────────
+    //  Serialisation Helpers
+    // ───────────────────────────────────────────────────────────────────────────
+    /**
+     * Returns the Alert as a flat array (useful for validation or persistence).
+     */
+    public function toFlatArray(): array
+    {
+        return [
+            'id'        => $this->id,
+            'type'      => $this->type,
+            'severity'  => $this->severity,
+            'message'   => $this->message,
+            'source'    => $this->source,
+            'timestamp' => $this->timestamp->format(DATE_ATOM),
+            'metadata'  => $this->metadata,
+        ];
+    }
+
+    /**
+     * JSON serialisation hook (implements JsonSerializable).
+     */
+    public function jsonSerialize(): array
+    {
+        return $this->toFlatArray();
+    }
+
+    /**
+     * Returns a YAML representation of the current object.
+     */
+    public function toYaml(int $indent = 2): string
+    {
+        return Yaml::dump($this->toFlatArray(), 4, $indent, Yaml::DUMP_OBJECT_AS_MAP);
+    }
+
+    /**
+     * Dumps the OpenAPI schema definition as YAML (used in build pipelines).
+     */
+    public static function openApiYaml(int $indent = 2): string
+    {
+        return Yaml::dump(self::OPENAPI_SCHEMA, 4, $indent, Yaml::DUMP_OBJECT_AS_MAP);
+    }
+
+    // ───────────────────────────────────────────────────────────────────────────
+    //  Accessors
+    // ───────────────────────────────────────────────────────────────────────────
+    public function getId(): string                 { return $this->id; }
+    public function getType(): string               { return $this->type; }
+    public function getSeverity(): string           { return $this->severity; }
+    public function getMessage(): string            { return $this->message; }
+    public function getSource(): string             { return $this->source; }
+    public function getTimestamp(): DateTimeImmutable { return $this->timestamp; }
+    public function getMetadata(): array            { return $this->metadata; }
+}

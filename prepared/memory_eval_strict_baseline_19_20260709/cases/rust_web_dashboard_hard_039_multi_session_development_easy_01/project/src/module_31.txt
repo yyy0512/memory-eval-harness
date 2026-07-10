@@ -1,0 +1,381 @@
+```rust
+//! src/module_31.rs
+//!
+//! ChromaticCanvas Control Center – Color Palette Suggestion Service
+//! -----------------------------------------------------------------
+//! This module powers the AI-driven *Color Palette Suggestion* feature.
+//!
+//! It exposes a REST endpoint (`POST /api/v1/palette/suggest`) that takes an
+//! `artwork_id` (and optional `scheme_type`) and returns a curated list of
+//! color palettes.  Results are cached in-memory to minimise round-trips to
+//! the external AI micro-service.  The endpoint is guarded by a session
+//! extractor that validates *signed session tokens* and guarantees HTTPS
+//! enforcement (basic SSL security consideration).
+//!
+//! Dependencies (Cargo.toml):
+//! --------------------------
+//! actix-web        = "4"
+//! actix-rt         = "2"
+//! anyhow           = "1"
+//! async-trait      = "0.1"
+//! dashmap          = "5"
+//! log              = "0.4"
+//! once_cell        = "1"
+//! reqwest          = { version = "0.11", features = ["json", "rustls-tls"] }
+//! serde            = { version = "1", features = ["derive"] }
+//! serde_json       = "1"
+//! thiserror        = "1"
+//! time             = "0.3"
+//!
+//! Build features assumed elsewhere in the project: `error_handling`,
+//! `session_management`, `ssl_security`, `responsive_design`, etc.
+
+#![forbid(unsafe_code)]
+
+use actix_web::{
+    dev::Payload,
+    error::{ErrorForbidden, ErrorInternalServerError, ErrorUnauthorized},
+    http::header::HeaderMap,
+    web, Error, FromRequest, HttpRequest, HttpResponse, Responder,
+};
+use anyhow::Context;
+use async_trait::async_trait;
+use dashmap::DashMap;
+use log::{debug, error, info};
+use once_cell::sync::Lazy;
+use reqwest::StatusCode;
+use serde::{Deserialize, Serialize};
+use std::{
+    future::Future,
+    pin::Pin,
+    sync::Arc,
+    time::{Duration, SystemTime},
+};
+use thiserror::Error;
+use time::OffsetDateTime;
+
+/// Maximum age for cache entries.
+const CACHE_TTL: Duration = Duration::from_secs(60 * 30); // 30 min
+
+/// Thread-safe, global cache for palette suggestions.
+///
+/// In production, this could be swapped for a Redis or Memcached backend.
+static PALETTE_CACHE: Lazy<DashMap<CacheKey, CachedPalettes>> = Lazy::new(DashMap::new);
+
+/// A unique key for the in-memory cache.
+///
+/// The key is `(artwork_id, scheme_type)`.
+#[derive(Clone, Eq, PartialEq, Hash)]
+struct CacheKey(u64, PaletteMode);
+
+/// Wrapper struct around cached palettes and their insertion timestamp.
+struct CachedPalettes {
+    palettes: Vec<ColorPalette>,
+    created_at: SystemTime,
+}
+
+impl CachedPalettes {
+    fn is_stale(&self) -> bool {
+        self.created_at
+            .elapsed()
+            .map(|elapsed| elapsed > CACHE_TTL)
+            .unwrap_or(true)
+    }
+}
+
+/* -------------------------------------------------------------------------- */
+/*                                 Data Model                                 */
+/* -------------------------------------------------------------------------- */
+
+/// An individual color, represented as a 6-digit RGB hex string.
+///
+/// Example: `#FF5733`
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Color(String);
+
+impl Color {
+    /// Validate that the supplied string is a proper `#RRGGBB` hex value.
+    pub fn validate(&self) -> Result<(), PaletteError> {
+        let valid_len = self.0.len() == 7;
+        let valid_hash = self.0.starts_with('#');
+        let valid_hex = self
+            .0
+            .chars()
+            .skip(1)
+            .all(|c| c.is_ascii_hexdigit());
+
+        if valid_len && valid_hash && valid_hex {
+            Ok(())
+        } else {
+            Err(PaletteError::InvalidColor(self.0.clone()))
+        }
+    }
+}
+
+/// Represents a full palette – usually 3-5 colors curated to work together.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ColorPalette {
+    pub name: String,
+    pub colors: Vec<Color>,
+}
+
+/// Different palette generation strategies supported by the AI back-end.
+#[derive(Debug, Copy, Clone, Serialize, Deserialize, Eq, PartialEq, Hash)]
+#[serde(rename_all = "snake_case")]
+pub enum PaletteMode {
+    /// Leverages the dominant colors in the artwork.
+    Dominant,
+    /// Builds a monochromatic set based on the average hue.
+    Monochrome,
+    /// Generates complementary colors to the existing scheme.
+    Complementary,
+}
+
+impl Default for PaletteMode {
+    fn default() -> Self {
+        PaletteMode::Dominant
+    }
+}
+
+/// Incoming JSON-payload for `/palette/suggest`.
+#[derive(Debug, Deserialize)]
+pub struct SuggestPaletteRequest {
+    pub artwork_id: u64,
+    #[serde(default)]
+    pub scheme_type: PaletteMode,
+}
+
+/// Successful response body.
+#[derive(Debug, Serialize)]
+pub struct SuggestPaletteResponse {
+    pub generated_at: OffsetDateTime,
+    pub palettes: Vec<ColorPalette>,
+}
+
+/* -------------------------------------------------------------------------- */
+/*                                   Errors                                   */
+/* -------------------------------------------------------------------------- */
+
+#[derive(Debug, Error)]
+pub enum PaletteError {
+    #[error("REQWEST error: {0}")]
+    Http(#[from] reqwest::Error),
+    #[error("Invalid color format supplied: {0}")]
+    InvalidColor(String),
+    #[error("Failed to parse AI response: {0}")]
+    Parsing(String),
+    #[error("AI service returned non-success status: {0}")]
+    Remote(StatusCode),
+    #[error("Cache error – {0}")]
+    Cache(String),
+}
+
+impl actix_web::ResponseError for PaletteError {
+    fn error_response(&self) -> HttpResponse {
+        match self {
+            PaletteError::InvalidColor(_) | PaletteError::Parsing(_) => {
+                HttpResponse::UnprocessableEntity().json(self.to_string())
+            }
+            PaletteError::Remote(sc) if sc.is_client_error() => {
+                HttpResponse::BadRequest().json(self.to_string())
+            }
+            _ => HttpResponse::InternalServerError().json(self.to_string()),
+        }
+    }
+}
+
+/* -------------------------------------------------------------------------- */
+/*                                Session Token                               */
+/* -------------------------------------------------------------------------- */
+
+/// Custom extractor that validates signed session tokens.
+///
+/// The token is expected in the `Authorization: Bearer <token>` header.  A
+/// minimal HMAC-based validation is performed here; in a real deployment this
+/// would call into the global auth subsystem or IdP.
+pub struct SessionToken {
+    pub user_id: u64,
+}
+
+#[async_trait(?Send)]
+impl FromRequest for SessionToken {
+    type Error = Error;
+    type Future = Pin<Box<dyn Future<Output = Result<Self, Error>>>>;
+    type Config = ();
+
+    fn from_request(req: &HttpRequest, _: &mut Payload) -> Self::Future {
+        // Cloning is cheap; header map is just an Arc internally.
+        let headers: HeaderMap = req.headers().clone();
+
+        Box::pin(async move {
+            // Enforce HTTPS.  `ConnectionInfo` works behind proxies if configured.
+            if req.connection_info().scheme() != "https" {
+                return Err(ErrorForbidden(
+                    "Insecure scheme – HTTPS is required for this endpoint.",
+                ));
+            }
+
+            // Extract Bearer token.
+            let token = headers
+                .get("Authorization")
+                .and_then(|v| v.to_str().ok())
+                .and_then(|s| s.strip_prefix("Bearer "))
+                .ok_or_else(|| ErrorUnauthorized("Missing or malformed Authorization header"))?;
+
+            // Very simplistic validation – in production, delegate to auth service.
+            if let Some(user_id) = validate_signed_token(token) {
+                Ok(SessionToken { user_id })
+            } else {
+                Err(ErrorUnauthorized("Invalid or expired session token"))
+            }
+        })
+    }
+}
+
+/// Performs HMAC validation & decoding of the session token.
+///
+/// NOTE: This is a stub!  Replace with your real authentication integration.
+fn validate_signed_token(token: &str) -> Option<u64> {
+    // For demo purposes we simply parse the token as `user_id:signature`
+    let mut parts = token.splitn(2, ':');
+    let user_id = parts.next()?.parse::<u64>().ok()?;
+    let signature = parts.next()?;
+
+    // Very naive constant secret key.  DO NOT SHIP THIS TO PROD.
+    const SECRET: &str = "ChromaticCanvas-SuperSecret!";
+    let expected_sig = blake3::keyed_hash(SECRET.as_bytes(), &user_id.to_le_bytes());
+    let expected_sig_b64 = base64::encode(expected_sig.as_bytes());
+
+    if signature == expected_sig_b64 {
+        Some(user_id)
+    } else {
+        None
+    }
+}
+
+/* -------------------------------------------------------------------------- */
+/*                              Palette Service                               */
+/* -------------------------------------------------------------------------- */
+
+/// Main service object, wrapping an async HTTP client.
+///
+/// Clonable so it can be stored inside an *Actix Web* data extractor.
+#[derive(Clone)]
+pub struct PaletteService {
+    http: Arc<reqwest::Client>,
+}
+
+impl Default for PaletteService {
+    fn default() -> Self {
+        PaletteService {
+            http: Arc::new(
+                reqwest::Client::builder()
+                    .user_agent("ChromaticCanvas/PaletteService (rust)")
+                    .timeout(Duration::from_secs(10))
+                    .build()
+                    .expect("Failed to build HTTP client"),
+            ),
+        }
+    }
+}
+
+impl PaletteService {
+    /// Perform the AI request, with in-memory caching.
+    pub async fn suggest_palettes(
+        &self,
+        artwork_id: u64,
+        mode: PaletteMode,
+    ) -> Result<Vec<ColorPalette>, PaletteError> {
+        let key = CacheKey(artwork_id, mode);
+
+        // ---------------------------------------------------- Cache lookup
+        if let Some(entry) = PALETTE_CACHE.get(&key) {
+            if !entry.is_stale() {
+                debug!("Palette cache hit for key={:?}", key);
+                return Ok(entry.palettes.clone());
+            }
+        }
+
+        // ---------------------------------------------------- External call
+        debug!("Cache miss -> calling AI micro-service for key={:?}", key);
+        let response = self
+            .http
+            .post("https://api.chromaticcanvas.ai/v1/palette")
+            .json(&serde_json::json!({
+                "artwork_id": artwork_id,
+                "mode": mode,
+            }))
+            .send()
+            .await
+            .context("Failed to contact palette AI service")?;
+
+        if !response.status().is_success() {
+            return Err(PaletteError::Remote(response.status()));
+        }
+
+        let palettes: Vec<ColorPalette> = response
+            .json()
+            .await
+            .context("Failed to parse palette AI response")?;
+
+        // Validate colors eagerly to avoid poisoning cache.
+        for p in &palettes {
+            for c in &p.colors {
+                c.validate()?;
+            }
+        }
+
+        // ---------------------------------------------------- Cache insert
+        PALETTE_CACHE.insert(
+            key,
+            CachedPalettes {
+                palettes: palettes.clone(),
+                created_at: SystemTime::now(),
+            },
+        );
+
+        Ok(palettes)
+    }
+}
+
+/* -------------------------------------------------------------------------- */
+/*                              HTTP Endpoints                                */
+/* -------------------------------------------------------------------------- */
+
+/// Handler for `POST /api/v1/palette/suggest`.
+///
+/// On success returns HTTP 200 with JSON body `[ColorPalette]`.
+pub async fn suggest_palette_handler(
+    svc: web::Data<PaletteService>,
+    _session: SessionToken,
+    payload: web::Json<SuggestPaletteRequest>,
+) -> Result<impl Responder, Error> {
+    let SuggestPaletteRequest {
+        artwork_id,
+        scheme_type,
+    } = payload.into_inner();
+
+    match svc.suggest_palettes(artwork_id, scheme_type).await {
+        Ok(palettes) => {
+            let body = SuggestPaletteResponse {
+                generated_at: OffsetDateTime::now_utc(),
+                palettes,
+            };
+            Ok(HttpResponse::Ok().json(body))
+        }
+        Err(e) => {
+            error!("Palette suggestion error: {:?}", e);
+            Err(ErrorInternalServerError(e))
+        }
+    }
+}
+
+/// Configure routes under `/api/v1/palette`.
+pub fn init_palette_routes(cfg: &mut web::ServiceConfig) {
+    cfg.app_data(web::Data::new(PaletteService::default()))
+        .service(
+            web::scope("/api/v1/palette")
+                .route("/suggest", web::post().to(suggest_palette_handler)),
+        );
+}
+```

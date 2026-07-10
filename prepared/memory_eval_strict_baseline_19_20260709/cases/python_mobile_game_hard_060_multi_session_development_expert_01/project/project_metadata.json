@@ -1,0 +1,260 @@
+{
+  "specification": {
+    "unique_id": "python_mobile_game_hard_060",
+    "name": "QuestSmith: Productivity RPG Forge",
+    "description": "QuestSmith turns daily tasks and habits into an immersive role-playing adventure where progress in real life fuels advancement in the game world. Users \u2018forge\u2019 quests out of calendar events, reminders, and location-based triggers; completing them grants experience, crafting materials, and in-game currency that can be spent on power-ups or cosmetic items. Real-time analytics, adaptive difficulty, and social leaderboards keep players engaged while reinforcing productive behavior.\n\nBuilt as a single, self-contained Python/Kivy application, QuestSmith employs MVVM for clean UI\u2013logic separation and the Repository Pattern to centralize data access to a unified SQLite store that works both online and offline. Biometric authentication secures user profiles, while an Observer-based event bus propagates quest status changes to UI widgets, push-notification schedulers, and the analytics engine. A Factory-driven adapter layer wraps platform services (location, IAP, social sharing) so the core game logic remains pure Python\u2014even crash-reporting hooks are injected via factories\u2014keeping the entire experience cohesive inside one monolith optimized for mobile performance and offline reliability.",
+    "domain": "mobile_game",
+    "complexity": "hard",
+    "language": "python",
+    "architecture": "monolithic",
+    "theme": "productivity",
+    "target_file_count": 52,
+    "target_token_count": 428091,
+    "features": [
+      "biometric_auth",
+      "crash_reporting",
+      "push_notifications",
+      "location_services",
+      "social_sharing",
+      "responsive_ui",
+      "offline_sync",
+      "in_app_purchases",
+      "analytics"
+    ],
+    "architecture_patterns": [
+      "Repository_Pattern",
+      "Observer_Pattern",
+      "Factory_Pattern",
+      "MVVM",
+      "Adapter_Pattern"
+    ],
+    "dependencies": [
+      "kivy==2.3.0              # responsive cross-platform UI",
+      "kivymd>=1.1.0            # Material components for productivity screens",
+      "plyer>=2.1.0             # adapter to mobile APIs: biometrics, location, notifications",
+      "sqlite3 (stdlib)         # lightweight monolithic data store",
+      "requests>=2.31.0         # REST sync & crash-report uploads",
+      "sentry-sdk>=1.40.0       # crash_reporting integration",
+      "PyJWT>=2.8.0             # secure auth tokens for offline_sync",
+      "pandas>=2.2.0            # local analytics & trend calculations",
+      "google-play-billing==1.0 # in_app_purchases (Android adapter)",
+      "facebook-sdk>=3.1        # social_sharing hooks",
+      "numpy>=1.26.0            # game mechanics & analytics math",
+      "pytest>=8.1.0            # internal monolith test suite"
+    ],
+    "seed": 776392
+  },
+  "generated_timestamp": 1754355463.15108,
+  "phase_1_complete": true,
+  "uniqueness_factors": {
+    "domain": "mobile_game",
+    "complexity": "hard",
+    "architecture": "monolithic",
+    "theme": "productivity",
+    "seed": 776392
+  },
+  "files": [
+    {
+      "path": "src/utils.py",
+      "type": "source"
+    },
+    {
+      "path": "src/config.py",
+      "type": "config"
+    },
+    {
+      "path": "src/constants.py",
+      "type": "source"
+    },
+    {
+      "path": "tests/test_main.py",
+      "type": "test"
+    },
+    {
+      "path": "tests/test_utils.py",
+      "type": "test"
+    },
+    {
+      "path": "README.md",
+      "type": "documentation"
+    },
+    {
+      "path": "requirements.txt",
+      "type": "source"
+    },
+    {
+      "path": ".gitignore",
+      "type": "source"
+    },
+    {
+      "path": "Dockerfile",
+      "type": "documentation"
+    },
+    {
+      "path": "docs/api.md",
+      "type": "documentation"
+    },
+    {
+      "path": "src/module_1.py",
+      "type": "source"
+    },
+    {
+      "path": "src/module_2.py",
+      "type": "source"
+    },
+    {
+      "path": "src/module_3.py",
+      "type": "source"
+    },
+    {
+      "path": "src/module_4.py",
+      "type": "source"
+    },
+    {
+      "path": "src/module_5.py",
+      "type": "source"
+    },
+    {
+      "path": "src/module_6.py",
+      "type": "source"
+    },
+    {
+      "path": "src/module_7.py",
+      "type": "source"
+    },
+    {
+      "path": "src/module_8.py",
+      "type": "source"
+    },
+    {
+      "path": "src/module_9.py",
+      "type": "source"
+    },
+    {
+      "path": "src/module_10.py",
+      "type": "source"
+    },
+    {
+      "path": "src/module_11.py",
+      "type": "source"
+    },
+    {
+      "path": "src/module_12.py",
+      "type": "source"
+    },
+    {
+      "path": "src/module_13.py",
+      "type": "source"
+    },
+    {
+      "path": "src/module_14.py",
+      "type": "source"
+    },
+    {
+      "path": "src/module_15.py",
+      "type": "source"
+    },
+    {
+      "path": "src/module_16.py",
+      "type": "source"
+    },
+    {
+      "path": "src/module_17.py",
+      "type": "source"
+    },
+    {
+      "path": "src/module_18.py",
+      "type": "source"
+    },
+    {
+      "path": "src/module_19.py",
+      "type": "source"
+    },
+    {
+      "path": "src/module_20.py",
+      "type": "source"
+    },
+    {
+      "path": "src/module_21.py",
+      "type": "source"
+    },
+    {
+      "path": "src/module_22.py",
+      "type": "source"
+    },
+    {
+      "path": "src/module_23.py",
+      "type": "source"
+    },
+    {
+      "path": "src/module_24.py",
+      "type": "source"
+    },
+    {
+      "path": "src/module_25.py",
+      "type": "source"
+    },
+    {
+      "path": "src/module_26.py",
+      "type": "source"
+    },
+    {
+      "path": "src/module_27.py",
+      "type": "source"
+    },
+    {
+      "path": "src/module_28.py",
+      "type": "source"
+    },
+    {
+      "path": "src/module_29.py",
+      "type": "source"
+    },
+    {
+      "path": "src/module_30.py",
+      "type": "source"
+    },
+    {
+      "path": "src/module_31.py",
+      "type": "source"
+    },
+    {
+      "path": "src/module_32.py",
+      "type": "source"
+    },
+    {
+      "path": "src/module_33.py",
+      "type": "source"
+    },
+    {
+      "path": "src/module_34.py",
+      "type": "source"
+    },
+    {
+      "path": "src/module_35.py",
+      "type": "source"
+    },
+    {
+      "path": "src/module_36.py",
+      "type": "source"
+    },
+    {
+      "path": "src/module_37.py",
+      "type": "source"
+    },
+    {
+      "path": "src/module_38.py",
+      "type": "source"
+    },
+    {
+      "path": "src/module_39.py",
+      "type": "source"
+    }
+  ],
+  "generated_stats": {
+    "files_count": 52,
+    "lines_count": 21092,
+    "generation_time": 2423.44522690773,
+    "timestamp": 1754363968.473876
+  }
+}

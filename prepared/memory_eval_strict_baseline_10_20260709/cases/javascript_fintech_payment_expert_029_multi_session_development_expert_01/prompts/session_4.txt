@@ -1,0 +1,9 @@
+You are working in the repository at the current working directory. This is session 4 of a 5-session development task. The previous session has ended and conversation context is unavailable. Use the repository state to continue the task. Do not ask for previous conversation context. Complete only the requirements for this session.
+
+You will implement this feature over several sessions. Each session represents a distinct phase of development. You must retain context from previous sessions to succeed.
+
+**Session 4: Enforcing the Throttle**
+With the user's status now centrally managed, enforce the block in the `transactions-service`.
+- Modify the `create-transaction.handler.js` in the `transactions-service`.
+- Before creating the `TransactionCreated` event, the handler must check the user's throttling status. This will likely require an internal API call or query to the `accounts-service` to fetch the user's current state.
+- If the user is actively throttled, the command must be rejected with an appropriate error.

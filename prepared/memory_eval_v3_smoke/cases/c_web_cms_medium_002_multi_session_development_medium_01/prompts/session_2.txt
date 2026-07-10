@@ -1,9 +1,0 @@
-You are working in the repository at the current working directory. This is session 2 of a 3-session development task. The previous session has ended and conversation context is unavailable. Use the repository state and your persistent memory if available. Do not ask for previous conversation context. Complete only the requirements for this session. At the end, update memory with decisions and remaining work.
-
-You are tasked with building the backend functionality for a new user subscription feature. The work is divided into three sessions. You must retain context between sessions to successfully complete the entire feature.
-
-**Session 2: Payment Processing Logic**
-(Continuing from the previous session) Now, implement the core payment logic.
-- **Analyze:** Examine `src/services/payment_service.c`.
-- **Implement:** Create a new function: `int process_subscription_payment(const char* user_id, int duration_months)`. 
-- **Logic:** Inside this function, simulate a call to a payment gateway. If the payment is successful, use the functions from `user_model.c` to find the user, update their subscription status to `ACTIVE`, and set their new expiration date based on the current time and `duration_months`. The function should return 1 on success and 0 on failure.

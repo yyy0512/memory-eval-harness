@@ -1,9 +1,0 @@
-You are working in the repository at the current working directory. This is session 1 of a multi-session development task. Complete only the requirements for this session. At the end, save any useful project-specific memory for future sessions.
-
-You will implement this feature over multiple sessions. Follow the instructions for each session carefully.
-
-**Session 1: Scaffolding the Middleware**
-Your first task is to create the foundational structure for a new `RequestTracingMiddleware`. Before writing any code, you must understand the existing middleware pattern. 
-1. Analyze `nexus/middleware/CacheMiddleware.h` and `nexus/middleware/RateLimitMiddleware.h` to determine the required interface and design. 
-2. Review the `docs/architecture/02_request_lifecycle.md` document to understand how middleware is processed.
-3. Based on your analysis, create two new files: `include/nexus/middleware/RequestTracingMiddleware.h` and `src/middleware/RequestTracingMiddleware.cpp`. These files should contain the class definition and method stubs for the new middleware, adhering to the project's existing patterns.

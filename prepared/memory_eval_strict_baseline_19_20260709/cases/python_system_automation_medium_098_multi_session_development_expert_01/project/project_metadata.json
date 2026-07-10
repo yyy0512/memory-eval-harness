@@ -1,0 +1,188 @@
+{
+  "specification": {
+    "unique_id": "python_system_automation_medium_098",
+    "name": "VitalOps Orchestrator",
+    "description": "VitalOps Orchestrator is a medium-sized, event-driven system-automation platform that continuously monitors, balances, and remediates the compute resources that run electronic medical-record (EMR) micro-services inside a hospital\u2019s private cloud. It collects live performance metrics from containerized clinical applications (e-prescribing, radiology viewers, decision-support engines), applies load-balancing rules based on patient-safety SLAs, and automatically executes backup/recovery and deployment workflows when anomalies or scheduled maintenance windows arise. \n\nUsing the MVVM pattern, the project separates the medical-domain models (e.g., PatientContext, ClinicalService, CompliancePolicy) from the orchestration logic (ViewModels such as PerformanceCoordinator or RecoveryCoordinator) and the multiple user interfaces (web dashboard for SREs, Grafana panels for clinicians, CLI for DevOps). Event_Driven messaging, Chain_of_Responsibility policy pipelines, a Service_Mesh sidecar controller, and Observer-Pattern subscriptions converge to create a highly modular automation fabric that can be extended for new clinical workloads without refactoring core logic. Healthcare-specific alerting\u2014such as \u201cPACS latency exceeds diagnostic threshold\u201d or \u201cSepsis-prediction ML service degraded\u201d\u2014distinguishes the solution from generic automation projects while maintaining compliance with HIPAA logging and audit requirements.",
+    "domain": "system_automation",
+    "complexity": "medium",
+    "language": "python",
+    "architecture": "mvvm",
+    "theme": "healthcare",
+    "target_file_count": 31,
+    "target_token_count": 184334,
+    "features": [
+      "performance_metrics",
+      "load_balancing",
+      "alerting",
+      "backup_recovery",
+      "deployment_automation",
+      "log_aggregation"
+    ],
+    "architecture_patterns": [
+      "Event_Driven",
+      "Chain_of_Responsibility",
+      "Service_Mesh",
+      "Observer_Pattern"
+    ],
+    "dependencies": [
+      "Python 3.11+",
+      "PySide6 or QtPy (GUI dashboard \u2013 View layer)",
+      "FastAPI (lightweight web View layer & REST hooks)",
+      "Pydantic (domain models with validation \u2013 Model layer)",
+      "RxPY (reactive streams implementing Observer pattern)",
+      "Celery + RabbitMQ (event-driven task orchestration)",
+      "Kubernetes Python Client (deployment & scaling automation)",
+      "Istio-python-client or Linkerd-ctl wrapper (Service Mesh management)",
+      "Prometheus_client (performance metrics scraping/export)",
+      "Grafana-API-client (dashboard provisioning)",
+      "Elasticsearch, Logstash, Kibana (ELK stack for log aggregation)",
+      "SQLModel or SQLAlchemy (configuration & audit database)",
+      "Cerberus or Schema (policy validation)",
+      "pytest + Hypothesis (test automation)",
+      "Docker SDK for Python (container lifecycle)",
+      "Backup/Recovery tools: Borgmatic CLI wrapper, Velero Python client"
+    ],
+    "seed": 458839
+  },
+  "generated_timestamp": 1754355475.124427,
+  "phase_1_complete": true,
+  "uniqueness_factors": {
+    "domain": "system_automation",
+    "complexity": "medium",
+    "architecture": "mvvm",
+    "theme": "healthcare",
+    "seed": 458839
+  },
+  "files": [
+    {
+      "path": "vitalops_orchestrator/README.md",
+      "type": "documentation"
+    },
+    {
+      "path": "vitalops_orchestrator/requirements.txt",
+      "type": "source"
+    },
+    {
+      "path": "vitalops_orchestrator/docker-compose.yml",
+      "type": "documentation"
+    },
+    {
+      "path": "vitalops_orchestrator/config.yaml",
+      "type": "config"
+    },
+    {
+      "path": "vitalops_orchestrator/.env.example",
+      "type": "config"
+    },
+    {
+      "path": "vitalops_orchestrator/run.py",
+      "type": "source"
+    },
+    {
+      "path": "vitalops_orchestrator/vitalops/__init__.py",
+      "type": "source"
+    },
+    {
+      "path": "vitalops_orchestrator/vitalops/core/__init__.py",
+      "type": "source"
+    },
+    {
+      "path": "vitalops_orchestrator/vitalops/core/eventing.py",
+      "type": "source"
+    },
+    {
+      "path": "vitalops_orchestrator/vitalops/core/logging.py",
+      "type": "source"
+    },
+    {
+      "path": "vitalops_orchestrator/vitalops/models/__init__.py",
+      "type": "source"
+    },
+    {
+      "path": "vitalops_orchestrator/vitalops/models/domain.py",
+      "type": "source"
+    },
+    {
+      "path": "vitalops_orchestrator/vitalops/models/events.py",
+      "type": "source"
+    },
+    {
+      "path": "vitalops_orchestrator/vitalops/coordinators/__init__.py",
+      "type": "source"
+    },
+    {
+      "path": "vitalops_orchestrator/vitalops/coordinators/performance.py",
+      "type": "source"
+    },
+    {
+      "path": "vitalops_orchestrator/vitalops/coordinators/recovery.py",
+      "type": "source"
+    },
+    {
+      "path": "vitalops_orchestrator/vitalops/coordinators/deployment.py",
+      "type": "source"
+    },
+    {
+      "path": "vitalops_orchestrator/vitalops/policy_engine/__init__.py",
+      "type": "source"
+    },
+    {
+      "path": "vitalops_orchestrator/vitalops/policy_engine/chain.py",
+      "type": "source"
+    },
+    {
+      "path": "vitalops_orchestrator/vitalops/policy_engine/handlers.py",
+      "type": "source"
+    },
+    {
+      "path": "vitalops_orchestrator/vitalops/services/__init__.py",
+      "type": "source"
+    },
+    {
+      "path": "vitalops_orchestrator/vitalops/services/metric_collector.py",
+      "type": "source"
+    },
+    {
+      "path": "vitalops_orchestrator/vitalops/services/workflow_engine.py",
+      "type": "source"
+    },
+    {
+      "path": "vitalops_orchestrator/vitalops/services/notification_gateway.py",
+      "type": "source"
+    },
+    {
+      "path": "vitalops_orchestrator/vitalops/interfaces/__init__.py",
+      "type": "source"
+    },
+    {
+      "path": "vitalops_orchestrator/vitalops/interfaces/api.py",
+      "type": "source"
+    },
+    {
+      "path": "vitalops_orchestrator/vitalops/interfaces/cli.py",
+      "type": "source"
+    },
+    {
+      "path": "vitalops_orchestrator/docs/architecture.md",
+      "type": "documentation"
+    },
+    {
+      "path": "vitalops_orchestrator/docs/api_guide.md",
+      "type": "documentation"
+    },
+    {
+      "path": "vitalops_orchestrator/docs/setup_guide.md",
+      "type": "documentation"
+    },
+    {
+      "path": "vitalops_orchestrator/tests/test_coordinators.py",
+      "type": "test"
+    }
+  ],
+  "generated_stats": {
+    "files_count": 31,
+    "lines_count": 11433,
+    "generation_time": 2465.404153108597,
+    "timestamp": 1754363566.0414238
+  }
+}

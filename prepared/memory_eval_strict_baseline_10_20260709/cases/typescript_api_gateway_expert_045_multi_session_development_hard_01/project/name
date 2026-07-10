@@ -1,0 +1,309 @@
+```typescript
+/**
+ * SocialPulse Gateway – VersionedRouter
+ * -------------------------------------
+ * A smart Express router wrapper that enables
+ *  1. Seamless, header- or query-driven API version negotiation
+ *  2. Incremental rollout (canary/soft-launch) of controllers
+ *  3. Fine-grained metrics & structured logging for each version
+ *
+ * NOTE:
+ *  This file purposefully lives in the `infrastructure/web` layer because it
+ *  orchestrates external concerns (HTTP, Express) without leaking details into
+ *  the domain/application layers.
+ *
+ * Author: SocialPulse Platform Team
+ */
+
+import express, {
+  NextFunction,
+  Request,
+  RequestHandler,
+  Response,
+  Router,
+} from 'express';
+import semver, { SemVer } from 'semver';
+import { v4 as uuid } from 'uuid';
+
+import { logger } from '../logging/Logger'; // our opinionated pino wrapper
+
+/* -------------------------------------------------------------------------- */
+/*                              Type Definitions                              */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Public contract that each versioned controller must implement
+ * so that the VersionedRouter can resolve the handler by version.
+ */
+export interface VersionedController {
+  /**
+   * Semantic version to be matched. (e.g., "1.0.0", "2.1.0-beta")
+   * NOTE: Pre-release tags (alpha, beta, rc) are permitted and compared using semver rules.
+   */
+  readonly version: string;
+
+  /**
+   * Express handler for the given route.
+   * The handler should not concern itself with version resolution.
+   */
+  readonly handler: RequestHandler;
+}
+
+/**
+ * Options to configure behaviour of VersionedRouter on a per-route basis.
+ */
+export interface VersionedRouteOptions {
+  /**
+   * Optional semantic version that should be treated as the "default"
+   * when no client version is supplied.  If undefined, the latest stable
+   * version is automatically used.
+   */
+  defaultVersion?: string;
+
+  /**
+   * If `true`, hitting a deprecated version triggers a deprecation warning
+   * header (Sunset, Deprecation with ISO-8601 timestamp).
+   */
+  deprecationWarnings?: boolean;
+}
+
+/* -------------------------------------------------------------------------- */
+/*                            Helper Utility API                              */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Extract a semantic version requested by the client.
+ * Supports:
+ *  • Custom header:      X-API-Version
+ *  • Accept version:     Accept-Version (RFC-inspired)
+ *  • URL query param:    ?v=1.2.0
+ */
+function negotiateVersion(req: Request): string | undefined {
+  const headerVersion =
+    req.header('X-API-Version') || req.header('Accept-Version');
+  const queryVersion = req.query.v as string | undefined;
+
+  // precedence: explicit header > query param
+  return headerVersion ?? queryVersion ?? undefined;
+}
+
+/**
+ * Choose the best matching controller using semver rules.
+ *
+ * Strategy:
+ * 1. Exact match for requested version (eg: 2.1.0)               ✅
+ * 2. Compatible match (eg: ^2.0.0)                               ✅
+ * 3. Default version from options                                ✅
+ * 4. Highest stable version (excluding prereleases) fallback     ✅
+ */
+function resolveController(
+  requestedVersion: string | undefined,
+  controllers: VersionedController[],
+  options: VersionedRouteOptions,
+): VersionedController | undefined {
+  if (controllers.length === 0) return undefined;
+
+  // sort ascending to allow deterministic selection of "highest"
+  const sorted = controllers.sort((a, b) =>
+    semver.compare(a.version, b.version),
+  );
+
+  // 1. exact match
+  const exact = requestedVersion
+    ? sorted.find((c) => semver.eq(c.version, requestedVersion))
+    : undefined;
+  if (exact) return exact;
+
+  // 2. compatible match using caret range, e.g., ^2.0.0
+  if (requestedVersion) {
+    const compatible = sorted
+      .slice()
+      .reverse() // check highest first
+      .find((c) => semver.satisfies(c.version, `^${requestedVersion}`));
+    if (compatible) return compatible;
+  }
+
+  // 3. defaultVersion override
+  if (options.defaultVersion) {
+    const def = sorted.find((c) => semver.eq(c.version, options.defaultVersion));
+    if (def) return def;
+  }
+
+  // 4. highest stable version (dropping prerelease)
+  const highestStable = sorted
+    .slice()
+    .reverse()
+    .find((c) => !(new SemVer(c.version).prerelease.length > 0));
+  return highestStable ?? sorted[sorted.length - 1]; // fallback to absolute latest
+}
+
+/* -------------------------------------------------------------------------- */
+/*                               Main Wrapper                                 */
+/* -------------------------------------------------------------------------- */
+
+export class VersionedRouter {
+  private readonly router: Router;
+
+  constructor() {
+    this.router = express.Router({ mergeParams: true });
+  }
+
+  public get expressRouter(): Router {
+    return this.router;
+  }
+
+  /**
+   * Register a GET route with one or multiple versioned controllers.
+   */
+  public get(
+    path: string,
+    controllers: VersionedController[],
+    options: VersionedRouteOptions = {},
+  ): void {
+    this.router.get(
+      path,
+      this.buildVersionedHandler(path, 'GET', controllers, options),
+    );
+  }
+
+  /**
+   * Register a POST route with one or multiple versioned controllers.
+   */
+  public post(
+    path: string,
+    controllers: VersionedController[],
+    options: VersionedRouteOptions = {},
+  ): void {
+    this.router.post(
+      path,
+      this.buildVersionedHandler(path, 'POST', controllers, options),
+    );
+  }
+
+  /**
+   * Additional HTTP methods (PUT, DELETE, PATCH) can be easily added here.
+   */
+
+  /* ---------------------------------------------------------------------- */
+  /*                             Private Methods                            */
+  /* ---------------------------------------------------------------------- */
+
+  private buildVersionedHandler(
+    path: string,
+    method: string,
+    controllers: VersionedController[],
+    options: VersionedRouteOptions,
+  ): RequestHandler {
+    if (controllers.length === 0) {
+      throw new Error(
+        `[VersionedRouter] No controllers supplied for ${method} ${path}`,
+      );
+    }
+
+    // Validate semantic versions upfront for fail-fast
+    controllers.forEach(({ version }) => {
+      if (!semver.valid(version)) {
+        throw new Error(
+          `[VersionedRouter] Invalid semantic version '${version}' for ${method} ${path}`,
+        );
+      }
+    });
+
+    return async (req: Request, res: Response, next: NextFunction) => {
+      const requestId = req.header('X-Request-Id') ?? uuid();
+      const reqVersion = negotiateVersion(req);
+
+      const controller = resolveController(
+        reqVersion,
+        controllers,
+        options,
+      );
+
+      if (!controller) {
+        logger.warn(
+          {
+            requestId,
+            path,
+            method,
+            availableVersions: controllers.map((c) => c.version),
+            requestedVersion: reqVersion,
+          },
+          '404 – No versioned controller found',
+        );
+        res.status(404).json({
+          error: 'NotFound',
+          message: `No version available for ${method} ${path}`,
+        });
+        return;
+      }
+
+      // Attach metadata for downstream middlewares / loggers
+      res.setHeader('X-Resolved-Version', controller.version);
+      res.setHeader('X-Request-Id', requestId);
+
+      if (
+        options.deprecationWarnings &&
+        reqVersion &&
+        semver.lt(reqVersion, controller.version)
+      ) {
+        // "Sunset" header: date when deprecated version will no longer be served
+        const sunsetDate = new Date();
+        sunsetDate.setMonth(sunsetDate.getMonth() + 3); // 3-month grace period
+        res.setHeader('Sunset', sunsetDate.toISOString());
+        res.setHeader('Deprecation', new Date().toISOString());
+      }
+
+      // metric example – could hook to Prometheus/StatsD
+      logger.info(
+        {
+          requestId,
+          path,
+          method,
+          resolvedVersion: controller.version,
+          requestedVersion: reqVersion ?? 'N/A',
+        },
+        'Invoking versioned controller',
+      );
+
+      // Hand over to actual controller
+      try {
+        await Promise.resolve(controller.handler(req, res, next));
+      } catch (err) {
+        logger.error(
+          {
+            requestId,
+            path,
+            method,
+            resolvedVersion: controller.version,
+            error: err,
+          },
+          'Unhandled error in versioned controller',
+        );
+        next(err);
+      }
+    };
+  }
+}
+
+/* -------------------------------------------------------------------------- */
+/*                              Usage Example                                 */
+/* -------------------------------------------------------------------------- */
+/*
+import { VersionedRouter, VersionedController } from './VersionedRouter';
+import { getTimelineV1 } from '../presentation/controllers/timeline/getTimeline.v1';
+import { getTimelineV2 } from '../presentation/controllers/timeline/getTimeline.v2';
+
+const timelineRouter = new VersionedRouter();
+
+timelineRouter.get(
+  '/timeline',
+  [
+    { version: '1.0.0', handler: getTimelineV1 },
+    { version: '2.0.0', handler: getTimelineV2 },
+  ],
+  { defaultVersion: '2.0.0', deprecationWarnings: true },
+);
+
+export default timelineRouter.expressRouter;
+*/
+```

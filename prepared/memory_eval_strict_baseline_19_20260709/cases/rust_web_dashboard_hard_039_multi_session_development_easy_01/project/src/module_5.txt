@@ -1,0 +1,358 @@
+```rust
+//! src/module_5.rs
+//! -----------------------------------------------------------------------------
+//! Session & Authentication Middleware
+//! -----------------------------------------------------------------------------
+//! This module wires together cookie-based session handling, token validation,
+//! and user extraction for downstream handlers.  It is deliberately isolated so
+//! that the public surface is minimal and composable from the main `web_dashboard`
+//! crate.  Although it could be split into multiple files, we keep it in a single
+//! module for ease of exposition in this sample.
+//!
+//! Key capabilities
+//! ----------------
+//! 1. Typed session cookie & JWT-style HMAC validation using `ring`.
+//! 2. Optional backing store (Redis) for server-side invalidation / logout.
+//! 3. `actix_web::FromRequest` extractor that yields an authenticated user or
+//!    returns `401 Unauthorized` when the session is missing/expired/invalid.
+//! 4. Fine-grained error types with `thiserror` and consistent logging.
+//!
+//! NOTE: The surrounding project must enable the following Cargo features:
+//!       actix-web = { version = "4", features = ["cookies"] }
+//!       redis = { version = "0.24", features = ["aio", "tokio-comp"] }
+//!       ring = "0.17"
+//!       serde = { version = "1", features = ["derive"] }
+//!       thiserror = "1"
+//!       rand = "0.8"
+//! -----------------------------------------------------------------------------
+
+use std::future::{ready, Ready};
+use std::pin::Pin;
+use std::task::{Context, Poll};
+
+use actix_service::{Service, Transform};
+use actix_web::cookie::{time::OffsetDateTime, Cookie, SameSite};
+use actix_web::dev::{forward_ready, ServiceRequest, ServiceResponse};
+use actix_web::{error::ErrorUnauthorized, http, Error, HttpMessage, HttpResponse};
+use chrono::{DateTime, Duration, Utc};
+use futures_util::future::LocalBoxFuture;
+use rand::RngCore;
+use redis::AsyncCommands;
+use ring::hmac;
+use serde::{Deserialize, Serialize};
+use thiserror::Error;
+
+/// Application-level authentication configuration.
+///
+/// Injected via `App::app_data`.
+#[derive(Clone)]
+pub struct AuthConfig {
+    /// HMAC secret used to sign session tokens.
+    pub hmac_key: hmac::Key,
+    /// Name of the cookie sent to the client.
+    pub cookie_name: String,
+    /// Session expiration (rolling) in seconds.
+    pub ttl: i64,
+    /// Optional Redis prefix for session invalidation.
+    pub redis_prefix: Option<String>,
+}
+
+impl AuthConfig {
+    pub fn new<S: Into<String>>(secret: &[u8], cookie_name: S, ttl: i64) -> Self {
+        Self {
+            hmac_key: hmac::Key::new(hmac::HMAC_SHA256, secret),
+            cookie_name: cookie_name.into(),
+            ttl,
+            redis_prefix: None,
+        }
+    }
+}
+
+/// Strongly-typed session claims.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionClaims {
+    pub uid: uuid::Uuid,
+    pub exp: DateTime<Utc>,
+}
+
+/// Signed token wrapper.
+#[derive(Debug, Clone)]
+pub struct SessionToken(String);
+
+impl SessionToken {
+    /// Creates a freshly signed token from claims.
+    fn sign(claims: &SessionClaims, key: &hmac::Key) -> Result<Self, AuthError> {
+        let payload = serde_json::to_vec(claims)?;
+        let sig = hmac::sign(key, &payload);
+        let token = base64::encode_config(&payload, base64::URL_SAFE_NO_PAD)
+            + "."
+            + &base64::encode_config(sig.as_ref(), base64::URL_SAFE_NO_PAD);
+        Ok(Self(token))
+    }
+
+    /// Verifies token and returns claims.
+    fn verify(&self, key: &hmac::Key) -> Result<SessionClaims, AuthError> {
+        let mut split = self.0.splitn(2, '.');
+        let (payload_b64, sig_b64) = (
+            split.next().ok_or(AuthError::MalformedToken)?,
+            split.next().ok_or(AuthError::MalformedToken)?,
+        );
+
+        let payload = base64::decode_config(payload_b64, base64::URL_SAFE_NO_PAD)?;
+        let sig = base64::decode_config(sig_b64, base64::URL_SAFE_NO_PAD)?;
+
+        hmac::verify(key, &payload, &sig).map_err(|_| AuthError::InvalidSignature)?;
+
+        let claims: SessionClaims = serde_json::from_slice(&payload)?;
+        if claims.exp < Utc::now() {
+            return Err(AuthError::Expired);
+        }
+        Ok(claims)
+    }
+}
+
+/// High-level middleware error type.
+#[derive(Debug, Error)]
+pub enum AuthError {
+    #[error("expired session")]
+    Expired,
+    #[error("malformed token")]
+    MalformedToken,
+    #[error("signature mismatch")]
+    InvalidSignature,
+    #[error("user session revoked")]
+    Revoked,
+    #[error("serialization error")]
+    Serde(#[from] serde_json::Error),
+    #[error("base64 decoding error")]
+    B64(#[from] base64::DecodeError),
+    #[error("redis error")]
+    Redis(#[from] redis::RedisError),
+}
+
+impl actix_web::ResponseError for AuthError {
+    fn error_response(&self) -> HttpResponse {
+        HttpResponse::Unauthorized().finish()
+    }
+}
+
+/// Per-request extension containing the authenticated user id.
+#[derive(Clone)]
+pub struct AuthUser(pub uuid::Uuid);
+
+// -----------------------------------------------------------------------------
+// Actix Middleware  -----------------------------------------------------------
+// -----------------------------------------------------------------------------
+
+pub struct SessionMiddleware;
+
+impl<S, B> Transform<S, ServiceRequest> for SessionMiddleware
+where
+    S: Service<ServiceRequest, Response = ServiceResponse<B>, Error = Error> + 'static,
+    S::Future: 'static,
+{
+    type Response = ServiceResponse<B>;
+    type Error = Error;
+    type Transform = SessionMiddlewareImpl<S>;
+    type InitError = ();
+    type Future = Ready<Result<Self::Transform, Self::InitError>>;
+
+    forward_ready!();
+
+    fn new_transform(&self, service: S) -> Self::Future {
+        ready(Ok(SessionMiddlewareImpl { service }))
+    }
+}
+
+pub struct SessionMiddlewareImpl<S> {
+    service: S,
+}
+
+impl<S, B> Service<ServiceRequest> for SessionMiddlewareImpl<S>
+where
+    S: Service<ServiceRequest, Response = ServiceResponse<B>, Error = Error> + 'static,
+    S::Future: 'static,
+{
+    type Response = ServiceResponse<B>;
+    type Error = Error;
+    type Future = LocalBoxFuture<'static, Result<Self::Response, Self::Error>>;
+
+    fn poll_ready(&self, ctx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.service.poll_ready(ctx)
+    }
+
+    fn call(&self, mut req: ServiceRequest) -> Self::Future {
+        let cfg = req
+            .app_data::<AuthConfig>()
+            .cloned()
+            .expect("AuthConfig missing");
+
+        let cookie = req.cookie(&cfg.cookie_name);
+        let redis_prefix = cfg.redis_prefix.clone();
+        let key = cfg.hmac_key.clone();
+
+        Box::pin(async move {
+            if let Some(cookie) = cookie {
+                match SessionToken(cookie.value().to_owned()).verify(&key) {
+                    Ok(claims) => {
+                        // Optionally consult Redis for revocation
+                        if let Some(prefix) = redis_prefix {
+                            let mut conn = get_redis_conn().await?;
+                            let revoked: bool = conn
+                                .get(format!("{}:{}", prefix, claims.uid))
+                                .await
+                                .unwrap_or(false);
+                            if revoked {
+                                return Err(ErrorUnauthorized(AuthError::Revoked));
+                            }
+                        }
+
+                        req.extensions_mut().insert(AuthUser(claims.uid));
+                    }
+                    Err(e) => {
+                        return Err(ErrorUnauthorized(e));
+                    }
+                }
+            }
+            let res = self.service.call(req).await?;
+            Ok(res)
+        })
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Extractor  ------------------------------------------------------------------
+// -----------------------------------------------------------------------------
+
+impl actix_web::FromRequest for AuthUser {
+    type Error = Error;
+    type Future = Ready<Result<Self, Self::Error>>;
+    type Config = ();
+
+    fn from_request(req: &actix_web::HttpRequest, _: &mut actix_web::dev::Payload) -> Self::Future {
+        if let Some(user) = req.extensions().get::<AuthUser>().cloned() {
+            ready(Ok(user))
+        } else {
+            ready(Err(ErrorUnauthorized("authentication required")))
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Helper functions  -----------------------------------------------------------
+// -----------------------------------------------------------------------------
+
+/// Logs in a user and returns a cookie that should be attached to the response.
+pub async fn login(
+    uid: uuid::Uuid,
+    cfg: &AuthConfig,
+) -> Result<Cookie<'static>, AuthError> {
+    let exp = Utc::now() + Duration::seconds(cfg.ttl);
+    let claims = SessionClaims { uid, exp };
+    let token = SessionToken::sign(&claims, &cfg.hmac_key)?;
+
+    let cookie = Cookie::build(cfg.cookie_name.clone(), token.0)
+        .path("/")
+        .http_only(true)
+        .secure(true) // ensure SSL/TLS
+        .same_site(SameSite::Lax)
+        .expires(OffsetDateTime::from_unix_timestamp(exp.timestamp()).ok())
+        .finish();
+
+    Ok(cookie)
+}
+
+/// Generates a CSRF-safe logout action by revoking the server-side token
+/// and returning an expired cookie to be cleared on the client.
+pub async fn logout(
+    user: &AuthUser,
+    cfg: &AuthConfig,
+) -> Result<Cookie<'static>, AuthError> {
+    if let Some(prefix) = &cfg.redis_prefix {
+        let mut conn = get_redis_conn().await?;
+        let _: () = conn
+            .set_ex(
+                format!("{}:{}", prefix, user.0),
+                true,
+                cfg.ttl as usize, // auto-expire after TTL
+            )
+            .await?;
+    }
+
+    let expired_cookie = Cookie::build(cfg.cookie_name.clone(), "")
+        .path("/")
+        .http_only(true)
+        .secure(true)
+        .expires(OffsetDateTime::UNIX_EPOCH) // immediately expire
+        .finish();
+
+    Ok(expired_cookie)
+}
+
+/// Lightweight async Redis connection helper.
+async fn get_redis_conn() -> Result<redis::aio::Connection, AuthError> {
+    // In reality, you'd pool this.  For brevity we open per call.
+    let redis_url = std::env::var("REDIS_URL").unwrap_or_else(|_| "redis://127.0.0.1/".to_string());
+    let client = redis::Client::open(redis_url)?;
+    Ok(client.get_tokio_connection().await?)
+}
+
+// -----------------------------------------------------------------------------
+// Test-only utilities  --------------------------------------------------------
+// -----------------------------------------------------------------------------
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[actix_rt::test]
+    async fn roundtrip_token() {
+        let secret = b"super-secret-key";
+        let cfg = AuthConfig::new(secret, "cc_session", 3600);
+
+        let uid = uuid::Uuid::new_v4();
+        let cookie = login(uid, &cfg).await.unwrap();
+
+        let token = SessionToken(cookie.value().to_owned());
+        let claims = token.verify(&cfg.hmac_key).unwrap();
+        assert_eq!(claims.uid, uid);
+    }
+
+    #[test]
+    fn token_signature_mismatch() {
+        let secret = b"secret";
+        let cfg = AuthConfig::new(secret, "sess", 3600);
+
+        let claims = SessionClaims {
+            uid: uuid::Uuid::new_v4(),
+            exp: Utc::now() + Duration::hours(1),
+        };
+        let token = SessionToken::sign(&claims, &cfg.hmac_key).unwrap();
+
+        // Tamper with token
+        let mut tampered = token.0.clone().into_bytes();
+        tampered[3] ^= 0b1010_1010;
+        let tampered = SessionToken(String::from_utf8(tampered).unwrap());
+
+        assert!(matches!(
+            tampered.verify(&cfg.hmac_key),
+            Err(AuthError::InvalidSignature)
+        ));
+    }
+
+    #[test]
+    fn token_expiry() {
+        let secret = b"secret";
+        let cfg = AuthConfig::new(secret, "sess", 1); // 1 second TTL
+
+        let claims = SessionClaims {
+            uid: uuid::Uuid::new_v4(),
+            exp: Utc::now() - Duration::seconds(10),
+        };
+        let token = SessionToken::sign(&claims, &cfg.hmac_key).unwrap();
+        assert!(matches!(
+            token.verify(&cfg.hmac_key),
+            Err(AuthError::Expired)
+        ));
+    }
+}
+```

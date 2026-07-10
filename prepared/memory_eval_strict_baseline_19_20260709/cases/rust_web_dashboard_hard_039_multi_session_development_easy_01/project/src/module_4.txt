@@ -1,0 +1,341 @@
+```rust
+//! src/module_4.rs
+//!
+//! Secure session management middleware + helpers for the ChromaticCanvas
+//! Control Center.  This module is responsible for:
+//!  • Creating and verifying signed, encrypted session tokens
+//!  • Seamlessly injecting authenticated user context into Actix‐web
+//!    requests
+//!  • Gracefully handling token expiration / rotation
+//!  • Guarding against downgrade attacks by enforcing TLS
+//!
+//! The implementation purposefully avoids “rolling our own crypto”;
+//! instead it piggy-backs on vetted libraries (`jsonwebtoken`, `aes-gcm`,
+//! `rand`, etc.).  Error handling is exhaustive via `thiserror` and the
+//! public API is ergonomic for downstream code.
+//
+// NOTE: Add the following dependencies to Cargo.toml
+//
+// [dependencies]
+// actix-web        = "4"
+// actix-utils      = "3"
+// async-trait      = "0.1"
+// base64           = "0.21"
+// chrono           = { version = "0.4", features = ["serde"] }
+// futures-util     = "0.3"
+// jsonwebtoken     = { version = "9", default-features = false, features = ["v012"] }
+// rand             = "0.8"
+// secrecy          = "0.8"
+// serde            = { version = "1.0", features = ["derive"] }
+// thiserror        = "1.0"
+// tokio             = { version = "1", features = ["rt-multi-thread", "macros"] }
+// tracing          = "0.1"
+
+use actix_utils::future::{ready, LocalBoxFuture, Ready};
+use actix_web::{
+    dev::{Service, ServiceRequest, ServiceResponse, Transform},
+    error::InternalError,
+    http::{header, StatusCode},
+    HttpMessage,
+};
+use async_trait::async_trait;
+use chrono::{DateTime, Duration, Utc};
+use jsonwebtoken::{decode, encode, Algorithm, DecodingKey, EncodingKey, Header, Validation};
+use rand::{rngs::OsRng, RngCore};
+use secrecy::{ExposeSecret, Secret};
+use serde::{Deserialize, Serialize};
+use std::task::{Context, Poll};
+use std::{env, rc::Rc, sync::Arc};
+use thiserror::Error;
+use tracing::{debug, error, instrument, trace};
+
+/// The request‐extension key under which we stash the authenticated user ID.
+pub(crate) struct AuthenticatedUserId(pub(crate) i64);
+
+/// An opaque handle that can be cloned cheaply.
+#[derive(Clone)]
+pub struct SecureSessionMiddleware {
+    inner: Arc<SessionInner>,
+}
+
+/// Helper that wires the middleware into the Actix application builder
+/// e.g.
+///   use crate::session::SecureSessionMiddleware;
+///   app.wrap(SecureSessionMiddleware::new_from_env()?);
+impl SecureSessionMiddleware {
+    pub fn new(secret: Secret<String>) -> Self {
+        Self {
+            inner: Arc::new(SessionInner::new(secret)),
+        }
+    }
+
+    /// Convenience for PRODUCTION deployments: read SECRET from env var
+    /// `CHROMATIC_SESSION_SECRET`.
+    pub fn new_from_env() -> Result<Self, SessionError> {
+        let raw =
+            env::var("CHROMATIC_SESSION_SECRET").map_err(|_| SessionError::MissingSecretEnv)?;
+        if raw.len() < 32 {
+            return Err(SessionError::WeakSecret);
+        }
+        Ok(Self::new(Secret::new(raw)))
+    }
+}
+
+/// Internal, shareable state
+struct SessionInner {
+    encoding_key: EncodingKey,
+    decoding_key: DecodingKey<'static>,
+    validation: Validation,
+}
+
+impl SessionInner {
+    fn new(secret: Secret<String>) -> Self {
+        let enc = EncodingKey::from_secret(secret.expose_secret().as_bytes());
+        let dec = DecodingKey::from_secret(secret.expose_secret().as_bytes()).into_static();
+        let mut validation = Validation::new(Algorithm::HS256);
+        validation.validate_exp = true;
+        validation.validate_nbf = true;
+        Self {
+            encoding_key: enc,
+            decoding_key: dec,
+            validation,
+        }
+    }
+}
+
+/// JWT claim set.  Additional claims can be appended over time.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SessionClaims {
+    /// Standard claim: Issuer
+    iss: String,
+    /// Standard claim: Subject (user id)
+    sub: i64,
+    /// Standard claim: Expiration (as timestamp)
+    exp: i64,
+    /// Standard claim: Not Before
+    nbf: i64,
+    /// Standard claim: Issued At
+    iat: i64,
+    /// App specific: Anti-CSRF token
+    #[serde(skip_serializing_if = "Option::is_none")]
+    csrf: Option<String>,
+}
+
+impl SessionClaims {
+    pub fn expires_at(&self) -> DateTime<Utc> {
+        Utc.timestamp_opt(self.exp, 0).unwrap()
+    }
+}
+
+/// Public entry points for creating & verifying tokens.
+impl SecureSessionMiddleware {
+    /// Mint a brand new signed JWT for the given user ID
+    pub fn sign_token(
+        &self,
+        user_id: i64,
+        ttl: Duration,
+    ) -> Result<(String, String), SessionError> {
+        let now = Utc::now();
+        let csrf_token = generate_csrf();
+        let claims = SessionClaims {
+            iss: "ChromaticCanvas".into(),
+            sub: user_id,
+            exp: (now + ttl).timestamp(),
+            nbf: now.timestamp(),
+            iat: now.timestamp(),
+            csrf: Some(csrf_token.clone()),
+        };
+
+        let token = encode(&Header::default(), &claims, &self.inner.encoding_key)
+            .map_err(SessionError::TokenEncoding)?;
+
+        Ok((token, csrf_token))
+    }
+
+    /// Verify a raw JWT, returning the claims or an error.
+    pub fn verify(&self, token: &str) -> Result<SessionClaims, SessionError> {
+        let data =
+            decode::<SessionClaims>(token, &self.inner.decoding_key, &self.inner.validation).map_err(
+                |e| match e.kind() {
+                    jsonwebtoken::errors::ErrorKind::InvalidToken
+                    | jsonwebtoken::errors::ErrorKind::InvalidSignature => {
+                        SessionError::InvalidToken
+                    }
+                    _ => SessionError::TokenDecoding(e),
+                },
+            )?;
+        Ok(data.claims)
+    }
+}
+
+impl<S, B> Transform<S, ServiceRequest> for SecureSessionMiddleware
+where
+    S: Service<ServiceRequest, Response = ServiceResponse<B>, Error = actix_web::Error>
+        + 'static,
+    B: 'static,
+{
+    type Response = ServiceResponse<B>;
+    type Error = actix_web::Error;
+    type Transform = SecureSessionService<S>;
+    type InitError = ();
+    type Future = Ready<Result<Self::Transform, Self::InitError>>;
+
+    fn new_transform(&self, service: S) -> Self::Future {
+        ready(Ok(SecureSessionService {
+            service: Rc::new(service),
+            inner: self.inner.clone(),
+        }))
+    }
+}
+
+pub struct SecureSessionService<S> {
+    service: Rc<S>,
+    inner: Arc<SessionInner>,
+}
+
+impl<S, B> Service<ServiceRequest> for SecureSessionService<S>
+where
+    S: Service<ServiceRequest, Response = ServiceResponse<B>, Error = actix_web::Error>
+        + 'static,
+    B: 'static,
+{
+    type Response = ServiceResponse<B>;
+    type Error = actix_web::Error;
+    type Future = LocalBoxFuture<'static, Result<Self::Response, Self::Error>>;
+
+    #[instrument(skip_all, fields(path = %req.path()))]
+    fn poll_ready(&self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.service.poll_ready(cx)
+    }
+
+    #[instrument(skip_all, fields(path = %req.path()))]
+    fn call(&self, mut req: ServiceRequest) -> Self::Future {
+        let inner = self.inner.clone();
+        let svc = self.service.clone();
+
+        Box::pin(async move {
+            // Enforce TLS
+            if req.connection_info().scheme() != "https" {
+                error!("Rejected clear‐text request to secure endpoint {}", req.path());
+                let res = unauthorized("TLS required");
+                return Ok(req.into_response(res.map_into_right_body()));
+            }
+
+            // Extract & verify bearer token.
+            match bearer_token(&req) {
+                Some(token) => match decode::<SessionClaims>(&token, &inner.decoding_key, &inner.validation) {
+                    Ok(data) => {
+                        debug!("Authenticated user = {}", data.claims.sub);
+                        req.extensions_mut()
+                            .insert(AuthenticatedUserId(data.claims.sub));
+                        svc.call(req).await
+                    }
+                    Err(err) => {
+                        error!("Session verification failed: {err}");
+                        let res = unauthorized("Invalid or expired session");
+                        Ok(req.into_response(res.map_into_right_body()))
+                    }
+                },
+                None => {
+                    trace!("No bearer token present, treating as anonymous");
+                    svc.call(req).await
+                }
+            }
+        })
+    }
+}
+
+/// Extract bearer token from Authorization header.
+fn bearer_token(req: &ServiceRequest) -> Option<String> {
+    req.headers()
+        .get(header::AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|s| {
+            if s.to_ascii_lowercase().starts_with("bearer ") {
+                Some(s[7..].to_string())
+            } else {
+                None
+            }
+        })
+}
+
+/// Generate an unpredictable CSRF token.
+fn generate_csrf() -> String {
+    let mut buf = [0u8; 32];
+    OsRng.fill_bytes(&mut buf);
+    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(buf)
+}
+
+/// Build a standardized 401 response without leaking details.
+fn unauthorized(reason: &str) -> ServiceResponse {
+    let body = format!(r#"{{"error":"unauthorized","reason":"{reason}"}}"#);
+
+    let mut res = actix_web::HttpResponse::Unauthorized()
+        .content_type("application/json")
+        .body(body);
+
+    // Tell browsers this response must not be cached.
+    res.headers_mut().insert(
+        header::CACHE_CONTROL,
+        header::HeaderValue::from_static("no-store, no-cache, must-revalidate"),
+    );
+
+    ServiceResponse::new(
+        res.head().clone(),
+        res.into_body(),
+    )
+}
+
+/// Domain specific errors produced by this module.
+#[derive(Debug, Error)]
+pub enum SessionError {
+    #[error("CHROMATIC_SESSION_SECRET env var not set")]
+    MissingSecretEnv,
+    #[error("session secret must be at least 32 characters")]
+    WeakSecret,
+    #[error("unable to encode session token: {0}")]
+    TokenEncoding(jsonwebtoken::errors::Error),
+    #[error("unable to decode session token: {0}")]
+    TokenDecoding(jsonwebtoken::errors::Error),
+    #[error("invalid token")]
+    InvalidToken,
+}
+
+impl actix_web::ResponseError for SessionError {
+    fn status_code(&self) -> StatusCode {
+        match self {
+            SessionError::InvalidToken => StatusCode::UNAUTHORIZED,
+            _ => StatusCode::INTERNAL_SERVER_ERROR,
+        }
+    }
+
+    fn error_response(&self) -> actix_web::HttpResponse {
+        let status = self.status_code();
+        let body = format!(r#"{{"error":"{}", "message":"{}"}}"#, status.as_u16(), self);
+        actix_web::HttpResponse::build(status)
+            .content_type("application/json")
+            .body(body)
+    }
+}
+
+/// Example: issuing a token after successful login.
+///
+/// ```no_run
+/// use actix_web::{post, web, HttpResponse};
+/// use chrono::Duration;
+/// use crate::session::SecureSessionMiddleware;
+///
+/// #[post("/login")]
+/// async fn login(
+///     auth_mw: web::Data<SecureSessionMiddleware>,
+///     creds: web::Json<LoginRequest>,
+/// ) -> actix_web::Result<HttpResponse> {
+///     let user_id = verify_credentials(&creds).await?;
+///     let (jwt, csrf) = auth_mw.sign_token(user_id, Duration::hours(8))?;
+///
+///     Ok(HttpResponse::Ok()
+///         .append_header(("Set-Cookie", format!("csrf_token={csrf}; Path=/; Secure; HttpOnly")))
+///         .json(LoginResponse { jwt, csrf }))
+/// }
+/// ```
+```

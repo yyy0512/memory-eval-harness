@@ -1,0 +1,775 @@
+{
+  "schema_version": "memory_eval_prepared_v2_immutable",
+  "prepared_dataset_sha256": "ce1a5e3831c3b42b672f7b85de909aa1b4be2fa6abec2f2ec92977a1153c97fc",
+  "case_count": 10,
+  "category": "extended_development_projects",
+  "cases": [
+    "c_data_streaming_hard_013_multi_session_development_easy_01",
+    "c_ml_computer_vision_medium_090_multi_session_development_easy_01",
+    "cpp_api_graphql_hard_007_multi_session_development_expert_01",
+    "cpp_api_microservice_hard_044_multi_session_development_easy_01",
+    "java_api_rest_hard_042_multi_session_development_hard_01",
+    "javascript_fintech_payment_expert_029_multi_session_development_expert_01",
+    "php_system_security_hard_028_multi_session_development_hard_01",
+    "python_mobile_game_hard_060_multi_session_development_expert_01",
+    "rust_web_dashboard_hard_039_multi_session_development_easy_01",
+    "typescript_api_gateway_expert_045_multi_session_development_hard_01"
+  ],
+  "contract_overlay": "/home/yyy/projects/LoCoBench-Agent/.claude/worktrees/memory-eval-harness/configs/memory_contracts_v4.json",
+  "memory_contract_count": 5,
+  "dataset_stats": {
+    "difficulty_distribution": {
+      "easy": 4,
+      "expert": 3,
+      "hard": 3
+    },
+    "task_type_distribution": {
+      "multi_session_development": 10
+    },
+    "programming_language_distribution": {
+      "c": 2,
+      "cpp": 2,
+      "java": 1,
+      "javascript": 1,
+      "php": 1,
+      "python": 1,
+      "rust": 1,
+      "typescript": 1
+    },
+    "contract_stats": {
+      "contracts_per_case_distribution": {
+        "5": 10
+      },
+      "contract_id_distribution": {
+        "experience_tomato_safe_path_lesson": 10,
+        "feedback_tomato_review_note": 10,
+        "project_tomato_bridge_token": 10,
+        "reference_tomato_canon_pointer": 10,
+        "user_tomato_preference_marker": 10
+      },
+      "contract_category_distribution": {
+        "synthetic_memory_experience_lesson": 10,
+        "synthetic_memory_feedback_continuity": 10,
+        "synthetic_memory_project_convention": 10,
+        "synthetic_memory_reference_pointer": 10,
+        "synthetic_memory_user_preference": 10
+      },
+      "contract_memory_type_distribution": {
+        "experience": 10,
+        "feedback": 10,
+        "project": 10,
+        "reference": 10,
+        "user": 10
+      },
+      "workspace_checkable_contracts_per_case_distribution": {
+        "5": 10
+      },
+      "memory_fact_contracts_per_case_distribution": {
+        "5": 10
+      },
+      "case_contracts": [
+        {
+          "scenario_id": "c_data_streaming_hard_013_multi_session_development_easy_01",
+          "case_id": "c_data_streaming_hard_013",
+          "contract_count": 5,
+          "memory_fact_contract_count": 5,
+          "workspace_checkable_contract_count": 5,
+          "contract_ids": [
+            "user_tomato_preference_marker",
+            "feedback_tomato_review_note",
+            "project_tomato_bridge_token",
+            "reference_tomato_canon_pointer",
+            "experience_tomato_safe_path_lesson"
+          ],
+          "memory_fact_contract_ids": [
+            "user_tomato_preference_marker",
+            "feedback_tomato_review_note",
+            "project_tomato_bridge_token",
+            "reference_tomato_canon_pointer",
+            "experience_tomato_safe_path_lesson"
+          ],
+          "workspace_checkable_contract_ids": [
+            "user_tomato_preference_marker",
+            "feedback_tomato_review_note",
+            "project_tomato_bridge_token",
+            "reference_tomato_canon_pointer",
+            "experience_tomato_safe_path_lesson"
+          ],
+          "contract_categories": [
+            "synthetic_memory_experience_lesson",
+            "synthetic_memory_feedback_continuity",
+            "synthetic_memory_project_convention",
+            "synthetic_memory_reference_pointer",
+            "synthetic_memory_user_preference"
+          ],
+          "memory_types": [
+            "experience",
+            "feedback",
+            "project",
+            "reference",
+            "user"
+          ]
+        },
+        {
+          "scenario_id": "c_ml_computer_vision_medium_090_multi_session_development_easy_01",
+          "case_id": "c_ml_computer_vision_medium_090",
+          "contract_count": 5,
+          "memory_fact_contract_count": 5,
+          "workspace_checkable_contract_count": 5,
+          "contract_ids": [
+            "user_tomato_preference_marker",
+            "feedback_tomato_review_note",
+            "project_tomato_bridge_token",
+            "reference_tomato_canon_pointer",
+            "experience_tomato_safe_path_lesson"
+          ],
+          "memory_fact_contract_ids": [
+            "user_tomato_preference_marker",
+            "feedback_tomato_review_note",
+            "project_tomato_bridge_token",
+            "reference_tomato_canon_pointer",
+            "experience_tomato_safe_path_lesson"
+          ],
+          "workspace_checkable_contract_ids": [
+            "user_tomato_preference_marker",
+            "feedback_tomato_review_note",
+            "project_tomato_bridge_token",
+            "reference_tomato_canon_pointer",
+            "experience_tomato_safe_path_lesson"
+          ],
+          "contract_categories": [
+            "synthetic_memory_experience_lesson",
+            "synthetic_memory_feedback_continuity",
+            "synthetic_memory_project_convention",
+            "synthetic_memory_reference_pointer",
+            "synthetic_memory_user_preference"
+          ],
+          "memory_types": [
+            "experience",
+            "feedback",
+            "project",
+            "reference",
+            "user"
+          ]
+        },
+        {
+          "scenario_id": "cpp_api_graphql_hard_007_multi_session_development_expert_01",
+          "case_id": "cpp_api_graphql_hard_007",
+          "contract_count": 5,
+          "memory_fact_contract_count": 5,
+          "workspace_checkable_contract_count": 5,
+          "contract_ids": [
+            "user_tomato_preference_marker",
+            "feedback_tomato_review_note",
+            "project_tomato_bridge_token",
+            "reference_tomato_canon_pointer",
+            "experience_tomato_safe_path_lesson"
+          ],
+          "memory_fact_contract_ids": [
+            "user_tomato_preference_marker",
+            "feedback_tomato_review_note",
+            "project_tomato_bridge_token",
+            "reference_tomato_canon_pointer",
+            "experience_tomato_safe_path_lesson"
+          ],
+          "workspace_checkable_contract_ids": [
+            "user_tomato_preference_marker",
+            "feedback_tomato_review_note",
+            "project_tomato_bridge_token",
+            "reference_tomato_canon_pointer",
+            "experience_tomato_safe_path_lesson"
+          ],
+          "contract_categories": [
+            "synthetic_memory_experience_lesson",
+            "synthetic_memory_feedback_continuity",
+            "synthetic_memory_project_convention",
+            "synthetic_memory_reference_pointer",
+            "synthetic_memory_user_preference"
+          ],
+          "memory_types": [
+            "experience",
+            "feedback",
+            "project",
+            "reference",
+            "user"
+          ]
+        },
+        {
+          "scenario_id": "cpp_api_microservice_hard_044_multi_session_development_easy_01",
+          "case_id": "cpp_api_microservice_hard_044",
+          "contract_count": 5,
+          "memory_fact_contract_count": 5,
+          "workspace_checkable_contract_count": 5,
+          "contract_ids": [
+            "user_tomato_preference_marker",
+            "feedback_tomato_review_note",
+            "project_tomato_bridge_token",
+            "reference_tomato_canon_pointer",
+            "experience_tomato_safe_path_lesson"
+          ],
+          "memory_fact_contract_ids": [
+            "user_tomato_preference_marker",
+            "feedback_tomato_review_note",
+            "project_tomato_bridge_token",
+            "reference_tomato_canon_pointer",
+            "experience_tomato_safe_path_lesson"
+          ],
+          "workspace_checkable_contract_ids": [
+            "user_tomato_preference_marker",
+            "feedback_tomato_review_note",
+            "project_tomato_bridge_token",
+            "reference_tomato_canon_pointer",
+            "experience_tomato_safe_path_lesson"
+          ],
+          "contract_categories": [
+            "synthetic_memory_experience_lesson",
+            "synthetic_memory_feedback_continuity",
+            "synthetic_memory_project_convention",
+            "synthetic_memory_reference_pointer",
+            "synthetic_memory_user_preference"
+          ],
+          "memory_types": [
+            "experience",
+            "feedback",
+            "project",
+            "reference",
+            "user"
+          ]
+        },
+        {
+          "scenario_id": "java_api_rest_hard_042_multi_session_development_hard_01",
+          "case_id": "java_api_rest_hard_042",
+          "contract_count": 5,
+          "memory_fact_contract_count": 5,
+          "workspace_checkable_contract_count": 5,
+          "contract_ids": [
+            "user_tomato_preference_marker",
+            "feedback_tomato_review_note",
+            "project_tomato_bridge_token",
+            "reference_tomato_canon_pointer",
+            "experience_tomato_safe_path_lesson"
+          ],
+          "memory_fact_contract_ids": [
+            "user_tomato_preference_marker",
+            "feedback_tomato_review_note",
+            "project_tomato_bridge_token",
+            "reference_tomato_canon_pointer",
+            "experience_tomato_safe_path_lesson"
+          ],
+          "workspace_checkable_contract_ids": [
+            "user_tomato_preference_marker",
+            "feedback_tomato_review_note",
+            "project_tomato_bridge_token",
+            "reference_tomato_canon_pointer",
+            "experience_tomato_safe_path_lesson"
+          ],
+          "contract_categories": [
+            "synthetic_memory_experience_lesson",
+            "synthetic_memory_feedback_continuity",
+            "synthetic_memory_project_convention",
+            "synthetic_memory_reference_pointer",
+            "synthetic_memory_user_preference"
+          ],
+          "memory_types": [
+            "experience",
+            "feedback",
+            "project",
+            "reference",
+            "user"
+          ]
+        },
+        {
+          "scenario_id": "javascript_fintech_payment_expert_029_multi_session_development_expert_01",
+          "case_id": "javascript_fintech_payment_expert_029",
+          "contract_count": 5,
+          "memory_fact_contract_count": 5,
+          "workspace_checkable_contract_count": 5,
+          "contract_ids": [
+            "user_tomato_preference_marker",
+            "feedback_tomato_review_note",
+            "project_tomato_bridge_token",
+            "reference_tomato_canon_pointer",
+            "experience_tomato_safe_path_lesson"
+          ],
+          "memory_fact_contract_ids": [
+            "user_tomato_preference_marker",
+            "feedback_tomato_review_note",
+            "project_tomato_bridge_token",
+            "reference_tomato_canon_pointer",
+            "experience_tomato_safe_path_lesson"
+          ],
+          "workspace_checkable_contract_ids": [
+            "user_tomato_preference_marker",
+            "feedback_tomato_review_note",
+            "project_tomato_bridge_token",
+            "reference_tomato_canon_pointer",
+            "experience_tomato_safe_path_lesson"
+          ],
+          "contract_categories": [
+            "synthetic_memory_experience_lesson",
+            "synthetic_memory_feedback_continuity",
+            "synthetic_memory_project_convention",
+            "synthetic_memory_reference_pointer",
+            "synthetic_memory_user_preference"
+          ],
+          "memory_types": [
+            "experience",
+            "feedback",
+            "project",
+            "reference",
+            "user"
+          ]
+        },
+        {
+          "scenario_id": "php_system_security_hard_028_multi_session_development_hard_01",
+          "case_id": "php_system_security_hard_028",
+          "contract_count": 5,
+          "memory_fact_contract_count": 5,
+          "workspace_checkable_contract_count": 5,
+          "contract_ids": [
+            "user_tomato_preference_marker",
+            "feedback_tomato_review_note",
+            "project_tomato_bridge_token",
+            "reference_tomato_canon_pointer",
+            "experience_tomato_safe_path_lesson"
+          ],
+          "memory_fact_contract_ids": [
+            "user_tomato_preference_marker",
+            "feedback_tomato_review_note",
+            "project_tomato_bridge_token",
+            "reference_tomato_canon_pointer",
+            "experience_tomato_safe_path_lesson"
+          ],
+          "workspace_checkable_contract_ids": [
+            "user_tomato_preference_marker",
+            "feedback_tomato_review_note",
+            "project_tomato_bridge_token",
+            "reference_tomato_canon_pointer",
+            "experience_tomato_safe_path_lesson"
+          ],
+          "contract_categories": [
+            "synthetic_memory_experience_lesson",
+            "synthetic_memory_feedback_continuity",
+            "synthetic_memory_project_convention",
+            "synthetic_memory_reference_pointer",
+            "synthetic_memory_user_preference"
+          ],
+          "memory_types": [
+            "experience",
+            "feedback",
+            "project",
+            "reference",
+            "user"
+          ]
+        },
+        {
+          "scenario_id": "python_mobile_game_hard_060_multi_session_development_expert_01",
+          "case_id": "python_mobile_game_hard_060",
+          "contract_count": 5,
+          "memory_fact_contract_count": 5,
+          "workspace_checkable_contract_count": 5,
+          "contract_ids": [
+            "user_tomato_preference_marker",
+            "feedback_tomato_review_note",
+            "project_tomato_bridge_token",
+            "reference_tomato_canon_pointer",
+            "experience_tomato_safe_path_lesson"
+          ],
+          "memory_fact_contract_ids": [
+            "user_tomato_preference_marker",
+            "feedback_tomato_review_note",
+            "project_tomato_bridge_token",
+            "reference_tomato_canon_pointer",
+            "experience_tomato_safe_path_lesson"
+          ],
+          "workspace_checkable_contract_ids": [
+            "user_tomato_preference_marker",
+            "feedback_tomato_review_note",
+            "project_tomato_bridge_token",
+            "reference_tomato_canon_pointer",
+            "experience_tomato_safe_path_lesson"
+          ],
+          "contract_categories": [
+            "synthetic_memory_experience_lesson",
+            "synthetic_memory_feedback_continuity",
+            "synthetic_memory_project_convention",
+            "synthetic_memory_reference_pointer",
+            "synthetic_memory_user_preference"
+          ],
+          "memory_types": [
+            "experience",
+            "feedback",
+            "project",
+            "reference",
+            "user"
+          ]
+        },
+        {
+          "scenario_id": "rust_web_dashboard_hard_039_multi_session_development_easy_01",
+          "case_id": "rust_web_dashboard_hard_039",
+          "contract_count": 5,
+          "memory_fact_contract_count": 5,
+          "workspace_checkable_contract_count": 5,
+          "contract_ids": [
+            "user_tomato_preference_marker",
+            "feedback_tomato_review_note",
+            "project_tomato_bridge_token",
+            "reference_tomato_canon_pointer",
+            "experience_tomato_safe_path_lesson"
+          ],
+          "memory_fact_contract_ids": [
+            "user_tomato_preference_marker",
+            "feedback_tomato_review_note",
+            "project_tomato_bridge_token",
+            "reference_tomato_canon_pointer",
+            "experience_tomato_safe_path_lesson"
+          ],
+          "workspace_checkable_contract_ids": [
+            "user_tomato_preference_marker",
+            "feedback_tomato_review_note",
+            "project_tomato_bridge_token",
+            "reference_tomato_canon_pointer",
+            "experience_tomato_safe_path_lesson"
+          ],
+          "contract_categories": [
+            "synthetic_memory_experience_lesson",
+            "synthetic_memory_feedback_continuity",
+            "synthetic_memory_project_convention",
+            "synthetic_memory_reference_pointer",
+            "synthetic_memory_user_preference"
+          ],
+          "memory_types": [
+            "experience",
+            "feedback",
+            "project",
+            "reference",
+            "user"
+          ]
+        },
+        {
+          "scenario_id": "typescript_api_gateway_expert_045_multi_session_development_hard_01",
+          "case_id": "typescript_api_gateway_expert_045",
+          "contract_count": 5,
+          "memory_fact_contract_count": 5,
+          "workspace_checkable_contract_count": 5,
+          "contract_ids": [
+            "user_tomato_preference_marker",
+            "feedback_tomato_review_note",
+            "project_tomato_bridge_token",
+            "reference_tomato_canon_pointer",
+            "experience_tomato_safe_path_lesson"
+          ],
+          "memory_fact_contract_ids": [
+            "user_tomato_preference_marker",
+            "feedback_tomato_review_note",
+            "project_tomato_bridge_token",
+            "reference_tomato_canon_pointer",
+            "experience_tomato_safe_path_lesson"
+          ],
+          "workspace_checkable_contract_ids": [
+            "user_tomato_preference_marker",
+            "feedback_tomato_review_note",
+            "project_tomato_bridge_token",
+            "reference_tomato_canon_pointer",
+            "experience_tomato_safe_path_lesson"
+          ],
+          "contract_categories": [
+            "synthetic_memory_experience_lesson",
+            "synthetic_memory_feedback_continuity",
+            "synthetic_memory_project_convention",
+            "synthetic_memory_reference_pointer",
+            "synthetic_memory_user_preference"
+          ],
+          "memory_types": [
+            "experience",
+            "feedback",
+            "project",
+            "reference",
+            "user"
+          ]
+        }
+      ]
+    },
+    "test_availability_stats": {
+      "with_test_like_files": 9,
+      "without_test_like_files": 1
+    },
+    "test_plan_stats": {
+      "configured": 10
+    },
+    "requirement_check_stats": {
+      "checks_per_case_distribution": {
+        "3": 1,
+        "4": 4,
+        "5": 5
+      },
+      "status_distribution": {
+        "configured": 10
+      },
+      "configured_cases": 10,
+      "not_configured_cases": 0,
+      "source_distribution": {
+        "overlay": 44
+      },
+      "strength_distribution": {
+        "explicit": 44
+      },
+      "signal_kind_distribution": {
+        "algorithm": 1,
+        "api_contract": 2,
+        "business_rule": 2,
+        "config_parser": 1,
+        "config_schema": 4,
+        "config_value": 5,
+        "documentation": 3,
+        "domain_model": 5,
+        "event_contract": 1,
+        "implementation_signal": 1,
+        "path": 5,
+        "runtime_integration": 9,
+        "service_contract": 1,
+        "test_coverage": 4
+      },
+      "rejection_reason_distribution": {},
+      "configured_by_overlay_cases": 10,
+      "configured_by_auto_cases": 0,
+      "case_requirement_checks": [
+        {
+          "scenario_id": "c_data_streaming_hard_013_multi_session_development_easy_01",
+          "case_id": "c_data_streaming_hard_013",
+          "check_count": 4,
+          "status": "configured",
+          "source": "overlay",
+          "reason": null,
+          "check_ids": [
+            "has_heartbeat_interval_config_value",
+            "runtime_config_has_heartbeat_field",
+            "config_parser_reads_heartbeat_interval",
+            "ingestion_service_uses_heartbeat_interval"
+          ],
+          "signal_kinds": [
+            "config_parser",
+            "config_schema",
+            "config_value",
+            "runtime_integration"
+          ],
+          "strengths": [
+            "explicit"
+          ]
+        },
+        {
+          "scenario_id": "c_ml_computer_vision_medium_090_multi_session_development_easy_01",
+          "case_id": "c_ml_computer_vision_medium_090",
+          "check_count": 4,
+          "status": "configured",
+          "source": "overlay",
+          "reason": null,
+          "check_ids": [
+            "pipeline_config_enable_grayscale",
+            "image_filter_type_grayscale",
+            "grayscale_filter_stub_implemented",
+            "pipeline_calls_grayscale_conditionally"
+          ],
+          "signal_kinds": [
+            "api_contract",
+            "config_schema",
+            "implementation_signal",
+            "runtime_integration"
+          ],
+          "strengths": [
+            "explicit"
+          ]
+        },
+        {
+          "scenario_id": "cpp_api_graphql_hard_007_multi_session_development_expert_01",
+          "case_id": "cpp_api_graphql_hard_007",
+          "check_count": 5,
+          "status": "configured",
+          "source": "overlay",
+          "reason": null,
+          "check_ids": [
+            "asset_archived_field",
+            "archive_asset_command_files",
+            "archive_asset_handler_prevents_scene_refs",
+            "graphql_archive_asset_mutation",
+            "graphql_docs_include_archive"
+          ],
+          "signal_kinds": [
+            "api_contract",
+            "business_rule",
+            "documentation",
+            "domain_model",
+            "path"
+          ],
+          "strengths": [
+            "explicit"
+          ]
+        },
+        {
+          "scenario_id": "cpp_api_microservice_hard_044_multi_session_development_easy_01",
+          "case_id": "cpp_api_microservice_hard_044",
+          "check_count": 3,
+          "status": "configured",
+          "source": "overlay",
+          "reason": null,
+          "check_ids": [
+            "config_example_log_level",
+            "application_config_log_level",
+            "main_uses_configured_log_level"
+          ],
+          "signal_kinds": [
+            "config_schema",
+            "config_value",
+            "runtime_integration"
+          ],
+          "strengths": [
+            "explicit"
+          ]
+        },
+        {
+          "scenario_id": "java_api_rest_hard_042_multi_session_development_hard_01",
+          "case_id": "java_api_rest_hard_042",
+          "check_count": 5,
+          "status": "configured",
+          "source": "overlay",
+          "reason": null,
+          "check_ids": [
+            "audit_log_model_exists",
+            "audit_logger_exists",
+            "order_creation_audit_logged",
+            "vitals_ingestion_audit_logged",
+            "architecture_docs_audit"
+          ],
+          "signal_kinds": [
+            "documentation",
+            "domain_model",
+            "runtime_integration",
+            "service_contract"
+          ],
+          "strengths": [
+            "explicit"
+          ]
+        },
+        {
+          "scenario_id": "javascript_fintech_payment_expert_029_multi_session_development_expert_01",
+          "case_id": "javascript_fintech_payment_expert_029",
+          "check_count": 5,
+          "status": "configured",
+          "source": "overlay",
+          "reason": null,
+          "check_ids": [
+            "user_throttling_status_domain",
+            "throttling_event_schema",
+            "risk_service_sets_throttling",
+            "transaction_handler_blocks_throttled_user",
+            "cqrs_docs_updated"
+          ],
+          "signal_kinds": [
+            "business_rule",
+            "documentation",
+            "domain_model",
+            "event_contract",
+            "runtime_integration"
+          ],
+          "strengths": [
+            "explicit"
+          ]
+        },
+        {
+          "scenario_id": "php_system_security_hard_028_multi_session_development_hard_01",
+          "case_id": "php_system_security_hard_028",
+          "check_count": 5,
+          "status": "configured",
+          "source": "overlay",
+          "reason": null,
+          "check_ids": [
+            "quarantine_command_exists",
+            "quarantine_handler_exists",
+            "resource_quarantined_event_exists",
+            "monitored_resource_quarantine_method",
+            "quarantine_tests"
+          ],
+          "signal_kinds": [
+            "domain_model",
+            "path",
+            "test_coverage"
+          ],
+          "strengths": [
+            "explicit"
+          ]
+        },
+        {
+          "scenario_id": "python_mobile_game_hard_060_multi_session_development_expert_01",
+          "case_id": "python_mobile_game_hard_060",
+          "check_count": 4,
+          "status": "configured",
+          "source": "overlay",
+          "reason": null,
+          "check_ids": [
+            "guild_challenges_feature_flag",
+            "challenge_model_progress",
+            "guild_leave_notification",
+            "guild_challenge_tests"
+          ],
+          "signal_kinds": [
+            "config_value",
+            "domain_model",
+            "runtime_integration",
+            "test_coverage"
+          ],
+          "strengths": [
+            "explicit"
+          ]
+        },
+        {
+          "scenario_id": "rust_web_dashboard_hard_039_multi_session_development_easy_01",
+          "case_id": "rust_web_dashboard_hard_039",
+          "check_count": 4,
+          "status": "configured",
+          "source": "overlay",
+          "reason": null,
+          "check_ids": [
+            "session_timeout_config",
+            "session_timeout_struct",
+            "session_timeout_runtime_usage",
+            "session_timeout_test"
+          ],
+          "signal_kinds": [
+            "config_schema",
+            "config_value",
+            "runtime_integration",
+            "test_coverage"
+          ],
+          "strengths": [
+            "explicit"
+          ]
+        },
+        {
+          "scenario_id": "typescript_api_gateway_expert_045_multi_session_development_hard_01",
+          "case_id": "typescript_api_gateway_expert_045",
+          "check_count": 5,
+          "status": "configured",
+          "source": "overlay",
+          "reason": null,
+          "check_ids": [
+            "rate_limit_config",
+            "rate_limiter_module",
+            "token_bucket_logic",
+            "gateway_returns_429",
+            "rate_limiter_tests"
+          ],
+          "signal_kinds": [
+            "algorithm",
+            "config_value",
+            "path",
+            "runtime_integration",
+            "test_coverage"
+          ],
+          "strengths": [
+            "explicit"
+          ]
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,10 @@
+You are working in the repository at the current working directory. This is session 2 of a 3-session development task. The previous session has ended and conversation context is unavailable. Use the repository state to continue the task. Do not ask for previous conversation context. Complete only the requirements for this session.
+
+You are tasked with implementing the Canary Deployment feature. This will be done over several sessions. Follow the instructions for each session carefully, building upon your previous work.
+
+**Session 2: Core Deployment Logic**
+Now that the configuration is defined, implement the initial phase of the canary deployment in the `DeploymentCoordinator`.
+1.  Modify `vitalops_orchestrator/vitalops/coordinators/deployment.py`: In the `DeploymentCoordinator` class, update the `execute_deployment` method. It should now check if the `deployment_config.strategy` is 'canary'.
+2.  If the strategy is 'canary', implement the logic to calculate the number of canary instances based on `traffic_percentage`. 
+3.  Implement a new private method, `_deploy_canary_instances`, that deploys the new version only to the calculated canary instances, leaving the rest of the fleet on the old version.
+4.  For now, after deploying the canaries, simply log a message like "Canary deployed. Awaiting analysis." We will implement the analysis in the next session.

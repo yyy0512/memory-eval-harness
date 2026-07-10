@@ -1,0 +1,8 @@
+You are working in the repository at the current working directory. This is session 2 of a 3-session development task. The previous session has ended and conversation context is unavailable. Use the repository state to continue the task. Do not ask for previous conversation context. Complete only the requirements for this session.
+
+You will implement a new configurable session timeout over three sessions. Follow the instructions for each session precisely.
+
+**Session 2: Apply Configuration**
+Welcome back. In this session, you will use the new configuration value.
+1. Based on your work in the previous session, locate the session management logic within the application. It currently uses a hardcoded timeout value.
+2. Replace the hardcoded timeout with the `session_timeout_seconds` value loaded from the configuration. You will likely need to access it through a shared application state or context.

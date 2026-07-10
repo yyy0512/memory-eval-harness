@@ -1,0 +1,256 @@
+```rust
+//! children.rs
+//!
+//! A concurrent, event-driven registry that tracks “child” dashboard
+//! components (tiles, widgets, swatches, etc.).  
+//! The registry is responsible for:
+//!   • Fast, thread-safe CRUD operations  
+//!   • Real-time change notifications via `tokio::broadcast`  
+//!   • Minimal business-rule enforcement (e.g. non-empty names)  
+//!
+//! Down-stream systems (REST controllers, WebSocket hubs, Yew live-updates)
+//! can `subscribe()` to the event stream to react to mutations.
+//!
+//! This module intentionally remains agnostic of the outer web framework
+//! (Actix-Web, Axum, etc.) to keep the core domain logic clean and testable.
+
+use std::sync::Arc;
+
+use chrono::{DateTime, Utc};
+use dashmap::DashMap;
+use serde::{Deserialize, Serialize};
+use thiserror::Error;
+use tokio::sync::broadcast;
+use tracing::{error, info};
+use uuid::Uuid;
+
+/// Unique identifier for a child component.
+pub type ChildId = Uuid;
+
+/// Events emitted by the registry.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "type", content = "payload")]
+pub enum ChildEvent {
+    Added(ChildMetadata),
+    Updated(ChildMetadata),
+    Removed(ChildId),
+    /// Emitted when the internal state could not be computed correctly.
+    Fault(String),
+}
+
+/// Canonical data we keep per child component.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ChildMetadata {
+    pub id: ChildId,
+    pub name: String,
+    pub description: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub last_updated: DateTime<Utc>,
+}
+
+impl ChildMetadata {
+    fn new<N: Into<String>>(name: N, description: Option<String>) -> Result<Self, ChildError> {
+        let name = name.into();
+        if name.trim().is_empty() {
+            return Err(ChildError::InvalidName);
+        }
+
+        let now = Utc::now();
+        Ok(Self {
+            id: Uuid::new_v4(),
+            name,
+            description,
+            created_at: now,
+            last_updated: now,
+        })
+    }
+}
+
+/// Public facade for interacting with the registry.
+///
+/// Internally backed by `dashmap::DashMap` for lock-free concurrent reads.
+#[derive(Clone)]
+pub struct ChildRegistry {
+    inner: Arc<DashMap<ChildId, ChildMetadata>>,
+    tx: broadcast::Sender<ChildEvent>,
+}
+
+impl ChildRegistry {
+    /// Construct a new registry and configure the size of the
+    /// broadcast channel’s ring-buffer.
+    pub fn with_channel_capacity(capacity: usize) -> Self {
+        let (tx, _) = broadcast::channel(capacity);
+        Self {
+            inner: Arc::new(DashMap::new()),
+            tx,
+        }
+    }
+
+    /// Add a new child component to the registry.
+    pub fn add_child<N: Into<String>>(
+        &self,
+        name: N,
+        description: Option<String>,
+    ) -> Result<ChildMetadata, ChildError> {
+        let child = ChildMetadata::new(name, description)?;
+        self.inner.insert(child.id, child.clone());
+        self.notify(ChildEvent::Added(child.clone()));
+        Ok(child)
+    }
+
+    /// Update mutable fields of an existing child component.
+    pub fn update_child(
+        &self,
+        id: ChildId,
+        name: Option<String>,
+        description: Option<Option<String>>,
+    ) -> Result<ChildMetadata, ChildError> {
+        match self.inner.get_mut(&id) {
+            Some(mut entry) => {
+                if let Some(n) = name {
+                    if n.trim().is_empty() {
+                        return Err(ChildError::InvalidName);
+                    }
+                    entry.name = n;
+                }
+
+                if let Some(desc) = description {
+                    entry.description = desc;
+                }
+
+                entry.last_updated = Utc::now();
+                let updated = entry.clone();
+                drop(entry); // Release `dashmap` guard ASAP
+                self.notify(ChildEvent::Updated(updated.clone()));
+                Ok(updated)
+            }
+            None => Err(ChildError::NotFound(id)),
+        }
+    }
+
+    /// Remove a child from the registry.
+    pub fn remove_child(&self, id: ChildId) -> Result<(), ChildError> {
+        if self.inner.remove(&id).is_some() {
+            self.notify(ChildEvent::Removed(id));
+            Ok(())
+        } else {
+            Err(ChildError::NotFound(id))
+        }
+    }
+
+    /// Retrieve a child by ID.
+    pub fn get_child(&self, id: ChildId) -> Result<ChildMetadata, ChildError> {
+        self.inner
+            .get(&id)
+            .map(|r| r.clone())
+            .ok_or(ChildError::NotFound(id))
+    }
+
+    /// List all children currently in the registry.
+    pub fn list_children(&self) -> Vec<ChildMetadata> {
+        self.inner.iter().map(|r| r.clone()).collect()
+    }
+
+    /// Perform a rudimentary search by (case-insensitive) substring.
+    pub fn search_by_name<S: AsRef<str>>(&self, needle: S) -> Vec<ChildMetadata> {
+        let needle = needle.as_ref().to_lowercase();
+        self.inner
+            .iter()
+            .filter(|r| r.name.to_lowercase().contains(&needle))
+            .map(|r| r.clone())
+            .collect()
+    }
+
+    /// Subscribe to registry events. Each call returns an independent
+    /// receiver. Dropping the receiver stops the subscription.
+    pub fn subscribe(&self) -> broadcast::Receiver<ChildEvent> {
+        self.tx.subscribe()
+    }
+
+    /// Instrumented internal helper for dispatching events.
+    fn notify(&self, evt: ChildEvent) {
+        if let Err(err) = self.tx.send(evt.clone()) {
+            error!("unable to publish ChildEvent: {err}");
+            // Emit a fault so subscribers know they missed something important.
+            let _ = self.tx.send(ChildEvent::Fault(err.to_string()));
+        } else {
+            info!(?evt, "child_registry_event");
+        }
+    }
+}
+
+impl Default for ChildRegistry {
+    fn default() -> Self {
+        Self::with_channel_capacity(64)
+    }
+}
+
+/// Domain-specific errors that can arise when manipulating children.
+#[derive(Error, Debug)]
+pub enum ChildError {
+    #[error("child id '{0}' does not exist")]
+    NotFound(ChildId),
+    #[error("child name cannot be empty")]
+    InvalidName,
+    #[error("internal error: {0}")]
+    Internal(String),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::task;
+
+    #[tokio::test]
+    async fn happy_path_add_update_remove() {
+        let registry = ChildRegistry::default();
+
+        // Add
+        let child = registry
+            .add_child("Test Component", Some("awesome".into()))
+            .expect("add");
+        assert_eq!(child.name, "Test Component");
+
+        // Update
+        let updated = registry
+            .update_child(child.id, Some("Updated".into()), None)
+            .expect("update");
+        assert_eq!(updated.name, "Updated");
+
+        // Remove
+        registry.remove_child(child.id).expect("remove");
+        assert!(registry.get_child(child.id).is_err());
+    }
+
+    #[tokio::test]
+    async fn event_stream_works() {
+        let registry = ChildRegistry::default();
+        let mut rx = registry.subscribe();
+
+        // Spawn a listener in the background.
+        let handle = task::spawn(async move {
+            let mut received = Vec::new();
+            while let Ok(evt) = rx.recv().await {
+                received.push(evt);
+                if received.len() == 2 {
+                    break received;
+                }
+            }
+            unreachable!();
+        });
+
+        let a = registry.add_child("Alpha", None).unwrap();
+        let _ = registry.update_child(a.id, Some("Beta".into()), None).unwrap();
+
+        let events = handle.await.unwrap();
+        assert_eq!(events.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn invalid_name_is_rejected() {
+        let registry = ChildRegistry::default();
+        let err = registry.add_child("", None).unwrap_err();
+        matches!(err, ChildError::InvalidName);
+    }
+}
+```

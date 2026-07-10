@@ -1,0 +1,397 @@
+{
+  "specification": {
+    "unique_id": "javascript_system_networking_hard_099",
+    "name": "StreamPulse Nexus",
+    "description": "StreamPulse Nexus is a component-based networking platform that powers large-scale, interactive entertainment streams (e-sports tournaments, live concerts, virtual festivals) with carrier-grade reliability. Each node in the system orchestrates media packets, chat traffic, game telemetry, and real-time audience interactions while continuously monitoring health, balancing load, and enforcing zero-trust security\u2014creating a seamless, high-energy experience for millions of concurrent viewers.\n\nBuilt from loosely-coupled components, the project divides networking concerns (ingress, egress, edge caching, transcoding, analytics, alerting, backup/recovery) into swappable runtime modules. Observer and Event-Driven patterns let media routers broadcast state changes to dashboards, while the Command and Chain-of-Responsibility patterns coordinate disaster-recovery commands that cascade through clusters. Strategy pattern injects custom load-balancing algorithms that adapt to show formats (e.g., battle-royale vs. DJ set) and real-time audience heat maps. This architecture lets entertainment engineers remix new interactive features\u2014like synchronized AR effects or timed trivia\u2014without rewriting the core network stack.\n\nEntertainment value is amplified through real-time performance metrics that drive on-screen overlays, live leaderboards, and audience achievements. Log aggregation feeds machine-learning models that surface highlight reels automatically, turning operational telemetry into compelling content. Automated backup and recovery guarantee that captured footage and user engagements remain safe, ready for instant replay or post-event VOD monetization.",
+    "domain": "system_networking",
+    "complexity": "hard",
+    "language": "javascript",
+    "architecture": "component_based",
+    "theme": "entertainment",
+    "target_file_count": 80,
+    "target_token_count": 388599,
+    "features": [
+      "system_monitoring",
+      "security_scanning",
+      "backup_recovery",
+      "configuration_management",
+      "alerting",
+      "load_balancing",
+      "performance_metrics",
+      "log_aggregation"
+    ],
+    "architecture_patterns": [
+      "Observer_Pattern",
+      "Command_Pattern",
+      "Event_Driven",
+      "Strategy_Pattern",
+      "Chain_of_Responsibility"
+    ],
+    "dependencies": [
+      "Node.js 20.x",
+      "TypeScript",
+      "React 18 (for operator & viewer dashboards)",
+      "Redux Toolkit",
+      "RxJS",
+      "Express",
+      "Socket.io (WebSocket abstraction)",
+      "ws (low-level WebSocket server for media control)",
+      "NATS Streaming or RabbitMQ (event bus)",
+      "PM2 (process manager)",
+      "Docker & Docker-Compose",
+      "Kubernetes (or K8s-lite like k3s) for cluster orchestration",
+      "Envoy or NGINX for edge load balancing",
+      "Redis (session & cache)",
+      "PostgreSQL (config & metadata storage)",
+      "MinIO or AWS S3 SDK (backup/recovery blobs)",
+      "OpenTelemetry + Jaeger (distributed tracing)",
+      "Prometheus + Grafana (performance metrics)",
+      "ElasticSearch + Kibana (log aggregation)",
+      "Winston & Pino (structured logging)",
+      "JWT & Passport.js (auth/security scanning hooks)",
+      "OWASP ZAP CLI or Snyk (security scanning pipeline)",
+      "Joi / Ajv (schema validation)",
+      "Lodash",
+      "Chalk (CLI output)",
+      "Bunyan-Slack or PagerDuty SDK (alerting integration)"
+    ],
+    "seed": 320827
+  },
+  "generated_timestamp": 1754355670.306375,
+  "phase_1_complete": true,
+  "uniqueness_factors": {
+    "domain": "system_networking",
+    "complexity": "hard",
+    "architecture": "component_based",
+    "theme": "entertainment",
+    "seed": 320827
+  },
+  "files": [
+    {
+      "path": "streampulse-nexus/README.md",
+      "type": "documentation"
+    },
+    {
+      "path": "streampulse-nexus/LICENSE",
+      "type": "source"
+    },
+    {
+      "path": "streampulse-nexus/package.json",
+      "type": "config"
+    },
+    {
+      "path": "streampulse-nexus/.nvmrc",
+      "type": "source"
+    },
+    {
+      "path": "streampulse-nexus/docker-compose.yml",
+      "type": "documentation"
+    },
+    {
+      "path": "streampulse-nexus/docs/architecture/README.md",
+      "type": "documentation"
+    },
+    {
+      "path": "streampulse-nexus/docs/architecture/diagrams/system_architecture.puml",
+      "type": "documentation"
+    },
+    {
+      "path": "streampulse-nexus/docs/architecture/diagrams/event_flow.puml",
+      "type": "documentation"
+    },
+    {
+      "path": "streampulse-nexus/docs/architecture/adr/README.md",
+      "type": "documentation"
+    },
+    {
+      "path": "streampulse-nexus/docs/architecture/adr/001-microservices-over-monolith.md",
+      "type": "documentation"
+    },
+    {
+      "path": "streampulse-nexus/docs/architecture/adr/002-rabbitmq-for-event-bus.md",
+      "type": "documentation"
+    },
+    {
+      "path": "streampulse-nexus/docs/architecture/adr/003-zero-trust-security-model.md",
+      "type": "documentation"
+    },
+    {
+      "path": "streampulse-nexus/docs/architecture/patterns.md",
+      "type": "documentation"
+    },
+    {
+      "path": "streampulse-nexus/docs/api/openapi.yaml",
+      "type": "documentation"
+    },
+    {
+      "path": "streampulse-nexus/docs/guides/01-developer-setup.md",
+      "type": "documentation"
+    },
+    {
+      "path": "streampulse-nexus/docs/guides/02-deployment-pipeline.md",
+      "type": "documentation"
+    },
+    {
+      "path": "streampulse-nexus/docs/guides/03-disaster-recovery-plan.md",
+      "type": "documentation"
+    },
+    {
+      "path": "streampulse-nexus/docs/guides/04-monitoring-and-alerting.md",
+      "type": "documentation"
+    },
+    {
+      "path": "streampulse-nexus/ops/kubernetes/base/kustomization.yaml",
+      "type": "source"
+    },
+    {
+      "path": "streampulse-nexus/ops/kubernetes/base/namespace.yaml",
+      "type": "source"
+    },
+    {
+      "path": "streampulse-nexus/ops/kubernetes/overlays/production/kustomization.yaml",
+      "type": "source"
+    },
+    {
+      "path": "streampulse-nexus/ops/kubernetes/overlays/production/replicas.yaml",
+      "type": "source"
+    },
+    {
+      "path": "streampulse-nexus/ops/kubernetes/overlays/staging/kustomization.yaml",
+      "type": "source"
+    },
+    {
+      "path": "streampulse-nexus/ops/kubernetes/services/ingress-gateway.yaml",
+      "type": "source"
+    },
+    {
+      "path": "streampulse-nexus/ops/kubernetes/services/media-orchestrator.yaml",
+      "type": "source"
+    },
+    {
+      "path": "streampulse-nexus/ops/scripts/ci-build.sh",
+      "type": "source"
+    },
+    {
+      "path": "streampulse-nexus/ops/scripts/deploy.sh",
+      "type": "source"
+    },
+    {
+      "path": "streampulse-nexus/ops/security/snyk.yml",
+      "type": "source"
+    },
+    {
+      "path": "streampulse-nexus/ops/security/network-policies.yaml",
+      "type": "source"
+    },
+    {
+      "path": "streampulse-nexus/config/default.json",
+      "type": "config"
+    },
+    {
+      "path": "streampulse-nexus/config/development.json",
+      "type": "config"
+    },
+    {
+      "path": "streampulse-nexus/config/production.json.template",
+      "type": "config"
+    },
+    {
+      "path": "streampulse-nexus/packages/lib-shared/package.json",
+      "type": "config"
+    },
+    {
+      "path": "streampulse-nexus/packages/lib-shared/src/logger.js",
+      "type": "source"
+    },
+    {
+      "path": "streampulse-nexus/packages/lib-shared/src/eventBus.js",
+      "type": "source"
+    },
+    {
+      "path": "streampulse-nexus/packages/lib-shared/src/errors.js",
+      "type": "source"
+    },
+    {
+      "path": "streampulse-nexus/packages/lib-shared/src/schemas/events/stream.schema.json",
+      "type": "source"
+    },
+    {
+      "path": "streampulse-nexus/packages/lib-shared/src/schemas/events/telemetry.schema.json",
+      "type": "source"
+    },
+    {
+      "path": "streampulse-nexus/packages/service-ingress-gateway/README.md",
+      "type": "documentation"
+    },
+    {
+      "path": "streampulse-nexus/packages/service-ingress-gateway/package.json",
+      "type": "config"
+    },
+    {
+      "path": "streampulse-nexus/packages/service-ingress-gateway/Dockerfile",
+      "type": "documentation"
+    },
+    {
+      "path": "streampulse-nexus/packages/service-ingress-gateway/src/index.js",
+      "type": "source"
+    },
+    {
+      "path": "streampulse-nexus/packages/service-ingress-gateway/src/server.js",
+      "type": "source"
+    },
+    {
+      "path": "streampulse-nexus/packages/service-ingress-gateway/src/controllers/rtmp.controller.js",
+      "type": "source"
+    },
+    {
+      "path": "streampulse-nexus/packages/service-ingress-gateway/src/controllers/webrtc.controller.js",
+      "type": "source"
+    },
+    {
+      "path": "streampulse-nexus/packages/service-ingress-gateway/src/auth/streamKey.auth.js",
+      "type": "source"
+    },
+    {
+      "path": "streampulse-nexus/packages/service-ingress-gateway/test/auth.test.js",
+      "type": "test"
+    },
+    {
+      "path": "streampulse-nexus/packages/service-media-orchestrator/README.md",
+      "type": "documentation"
+    },
+    {
+      "path": "streampulse-nexus/packages/service-media-orchestrator/package.json",
+      "type": "config"
+    },
+    {
+      "path": "streampulse-nexus/packages/service-media-orchestrator/Dockerfile",
+      "type": "documentation"
+    },
+    {
+      "path": "streampulse-nexus/packages/service-media-orchestrator/src/index.js",
+      "type": "source"
+    },
+    {
+      "path": "streampulse-nexus/packages/service-media-orchestrator/src/core/StreamManager.js",
+      "type": "source"
+    },
+    {
+      "path": "streampulse-nexus/packages/service-media-orchestrator/src/core/NodeManager.js",
+      "type": "source"
+    },
+    {
+      "path": "streampulse-nexus/packages/service-media-orchestrator/src/patterns/observer/Subject.js",
+      "type": "source"
+    },
+    {
+      "path": "streampulse-nexus/packages/service-media-orchestrator/src/patterns/observer/DashboardObserver.js",
+      "type": "source"
+    },
+    {
+      "path": "streampulse-nexus/packages/service-media-orchestrator/src/patterns/observer/AnalyticsObserver.js",
+      "type": "source"
+    },
+    {
+      "path": "streampulse-nexus/packages/service-media-orchestrator/src/patterns/command/Command.js",
+      "type": "source"
+    },
+    {
+      "path": "streampulse-nexus/packages/service-media-orchestrator/src/patterns/command/FailoverNodeCommand.js",
+      "type": "source"
+    },
+    {
+      "path": "streampulse-nexus/packages/service-media-orchestrator/src/patterns/command/CommandInvoker.js",
+      "type": "source"
+    },
+    {
+      "path": "streampulse-nexus/packages/service-media-orchestrator/src/patterns/chain_of_responsibility/AbstractRecoveryHandler.js",
+      "type": "source"
+    },
+    {
+      "path": "streampulse-nexus/packages/service-media-orchestrator/src/patterns/chain_of_responsibility/NodeRecoveryHandler.js",
+      "type": "source"
+    },
+    {
+      "path": "streampulse-nexus/packages/service-media-orchestrator/src/patterns/chain_of_responsibility/ClusterRecoveryHandler.js",
+      "type": "source"
+    },
+    {
+      "path": "streampulse-nexus/packages/service-media-orchestrator/src/patterns/strategy/LoadBalancingContext.js",
+      "type": "source"
+    },
+    {
+      "path": "streampulse-nexus/packages/service-media-orchestrator/src/patterns/strategy/EsportsLoadBalancingStrategy.js",
+      "type": "source"
+    },
+    {
+      "path": "streampulse-nexus/packages/service-media-orchestrator/src/patterns/strategy/ConcertLoadBalancingStrategy.js",
+      "type": "source"
+    },
+    {
+      "path": "streampulse-nexus/packages/service-media-orchestrator/src/events/listeners/ingress.listener.js",
+      "type": "source"
+    },
+    {
+      "path": "streampulse-nexus/packages/service-media-orchestrator/src/events/publishers/orchestration.publisher.js",
+      "type": "source"
+    },
+    {
+      "path": "streampulse-nexus/packages/service-media-orchestrator/test/patterns/strategy.test.js",
+      "type": "test"
+    },
+    {
+      "path": "streampulse-nexus/packages/service-media-orchestrator/test/patterns/chain_of_responsibility.test.js",
+      "type": "test"
+    },
+    {
+      "path": "streampulse-nexus/packages/service-media-orchestrator/test/integration/stream-lifecycle.integration.test.js",
+      "type": "test"
+    },
+    {
+      "path": "streampulse-nexus/packages/service-transcoder/README.md",
+      "type": "documentation"
+    },
+    {
+      "path": "streampulse-nexus/packages/service-transcoder/package.json",
+      "type": "config"
+    },
+    {
+      "path": "streampulse-nexus/packages/service-transcoder/Dockerfile",
+      "type": "documentation"
+    },
+    {
+      "path": "streampulse-nexus/packages/service-transcoder/src/index.js",
+      "type": "source"
+    },
+    {
+      "path": "streampulse-nexus/packages/service-transcoder/src/worker.js",
+      "type": "source"
+    },
+    {
+      "path": "streampulse-nexus/packages/service-transcoder/src/ffmpeg.js",
+      "type": "source"
+    },
+    {
+      "path": "streampulse-nexus/packages/service-transcoder/src/storage.js",
+      "type": "source"
+    },
+    {
+      "path": "streampulse-nexus/packages/service-transcoder/test/ffmpeg.test.js",
+      "type": "test"
+    },
+    {
+      "path": "streampulse-nexus/packages/service-interaction/README.md",
+      "type": "documentation"
+    },
+    {
+      "path": "streampulse-nexus/packages/service-interaction/package.json",
+      "type": "config"
+    }
+  ],
+  "generated_stats": {
+    "files_count": 80,
+    "lines_count": 22037,
+    "generation_time": 1650.1760520935059,
+    "timestamp": 1754372073.581134
+  }
+}

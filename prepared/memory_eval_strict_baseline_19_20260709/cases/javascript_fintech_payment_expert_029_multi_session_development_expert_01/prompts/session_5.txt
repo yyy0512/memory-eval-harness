@@ -1,0 +1,11 @@
+You are working in the repository at the current working directory. This is session 5 of a 5-session development task. The previous session has ended and conversation context is unavailable. Use the repository state to continue the task. Do not ask for previous conversation context. Complete only the requirements for this session.
+
+You will implement this feature over several sessions. Each session represents a distinct phase of development. You must retain context from previous sessions to succeed.
+
+**Session 5: Integration Testing**
+Finally, ensure the end-to-end flow works as expected.
+- Create a new integration test file in `services/transactions-service/tests/integration/`.
+- The test should simulate a single user performing a series of rapid transactions.
+- Assert that the `UserThrottlingStatusChanged` event is eventually emitted.
+- Assert that after being throttled, a subsequent `CreateTransaction` command for that user is rejected.
+- (Bonus) Assert that after a simulated cooldown period, a new transaction from the user is successfully processed.

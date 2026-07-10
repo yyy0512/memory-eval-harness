@@ -1,0 +1,92 @@
+{
+  "_comment": "Example notifier configuration for LambdaUtility Orchestrator.\n            Copy this file to notifiers.json and adjust values or set the referenced\n            environment variables before deployment.",
+  "global": {
+    "default_timeout_ms": 3000,
+    "retry_policy": {
+      "max_attempts": 3,
+      "backoff_ms": 500
+    }
+  },
+  "notifiers": [
+    {
+      "_comment": "Slack notifier used for most operational messages.",
+      "id": "slack-primary",
+      "kind": "slack",
+      "enabled": true,
+      "webhook_url_env": "SLACK_WEBHOOK_URL",         /* Webhook URL retrieved at runtime from env var */
+      "channel": "#devops-alerts",
+      "username": "lambda-orchestrator",
+      "icon_emoji": ":robot_face:",
+      "format": "markdown",
+      "rate_limit_per_minute": 60
+    },
+    {
+      "_comment": "Email notifier for formal or verbose reports.",
+      "id": "email-ops",
+      "kind": "email",
+      "enabled": true,
+      "smtp": {
+        "host": "smtp.example.com",
+        "port": 587,
+        "secure": false,
+        "username_env": "SMTP_USER",
+        "password_env": "SMTP_PASS"
+      },
+      "from": "noreply@example.com",
+      "to": [
+        "ops@example.com",
+        "oncall@example.com"
+      ],
+      "subject_template": "[LambdaUtility] {{event}}"
+    },
+    {
+      "_comment": "SMS notifier—disabled by default to avoid accidental charges.",
+      "id": "sms-twilio",
+      "kind": "sms",
+      "enabled": false,
+      "provider": "twilio",
+      "account_sid_env": "TWILIO_SID",
+      "auth_token_env": "TWILIO_TOKEN",
+      "from": "+10000000000",
+      "to": [
+        "+19999999999"
+      ],
+      "rate_limit_per_minute": 30
+    }
+  ],
+  "routing_rules": [
+    {
+      "_comment": "Development and informational deployment events go only to Slack.",
+      "match": {
+        "event_type": "deployment",
+        "severity": "info"
+      },
+      "notify": [
+        "slack-primary"
+      ]
+    },
+    {
+      "_comment": "Warnings (e.g., backup delays) go to Slack and email.",
+      "match": {
+        "event_type": "backup",
+        "severity": "warning"
+      },
+      "notify": [
+        "slack-primary",
+        "email-ops"
+      ]
+    },
+    {
+      "_comment": "Critical incidents trigger all channels.",
+      "match": {
+        "event_type": "incident",
+        "severity": "critical"
+      },
+      "notify": [
+        "slack-primary",
+        "email-ops",
+        "sms-twilio"
+      ]
+    }
+  ]
+}

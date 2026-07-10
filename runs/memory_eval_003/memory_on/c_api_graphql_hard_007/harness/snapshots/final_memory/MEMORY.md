@@ -1,1 +1,0 @@
-- [Logging config session outcome](logging_config_session_outcome.md) — Session 2 logger log_level integration and verification blocker.

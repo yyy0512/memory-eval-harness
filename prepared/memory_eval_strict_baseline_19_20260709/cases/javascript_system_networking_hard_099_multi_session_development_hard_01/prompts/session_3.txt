@@ -1,0 +1,10 @@
+You are working in the repository at the current working directory. This is session 3 of a 3-session development task. The previous session has ended and conversation context is unavailable. Use the repository state to continue the task. Do not ask for previous conversation context. Complete only the requirements for this session.
+
+You are tasked with implementing Geofencing for stream publishing over three distinct sessions.
+
+**Session 3: API Exposure and Documentation**
+With the backend logic and configuration in place, the final step is to expose this feature to users via the API and provide clear documentation.
+
+*   **Action:** Update the API definition in `docs/api/openapi.yaml`. Add the new `geofencing` property to the request body schemas for creating and updating streams.
+*   **Action:** Create a new guide document: `streampulse-nexus/docs/guides/05-geofencing-setup.md`.
+*   **Action:** In this new document, explain what the geofencing feature is, why it's used, and provide a clear example of how to configure it for a stream using the API (show the JSON payload).

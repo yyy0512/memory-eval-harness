@@ -1,0 +1,447 @@
+// Shared type definitions and utilities for the ChromaticCanvas Control Center.
+//
+// This module is intentionally kept dependency-light so it can be used from
+// both the server-side (native) and client-side (WASM) crates. Conditional
+// compilation is used to avoid pulling in heavy dependencies on the frontend.
+//
+#![allow(clippy::module_name_repetitions)]
+
+use std::fmt;
+use std::time::{Duration, SystemTime};
+
+use serde::{Deserialize, Serialize};
+use uuid::Uuid;
+
+#[cfg(feature = "backend")]
+use {
+    actix_web::{http::StatusCode, HttpResponse, ResponseError},
+    chrono::{DateTime, Utc},
+    derive_more::{Display, From},
+    sqlx::{self, postgres::PgPoolOptions, PgPool},
+    thiserror::Error,
+    validator::Validate,
+};
+
+#[cfg(feature = "frontend")]
+use {
+    chrono::{DateTime, Utc},
+    wasm_bindgen::prelude::*,
+};
+
+// ---------- Strongly-typed domain identifiers ----------
+
+macro_rules! id_newtype {
+    ($(#[$outer:meta])* $vis:vis struct $name:ident;) => {
+        $(#[$outer])*
+        #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+        $vis struct $name(Uuid);
+
+        impl $name {
+            pub fn new() -> Self {
+                Self(Uuid::new_v4())
+            }
+
+            pub fn from_uuid(value: Uuid) -> Self {
+                Self(value)
+            }
+
+            pub fn into_inner(self) -> Uuid {
+                self.0
+            }
+        }
+
+        impl fmt::Display for $name {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                self.0.fmt(f)
+            }
+        }
+
+        impl From<Uuid> for $name {
+            fn from(value: Uuid) -> Self {
+                Self(value)
+            }
+        }
+
+        #[cfg(feature = "backend")]
+        impl<'r> sqlx::Decode<'r, sqlx::Postgres> for $name {
+            fn decode(
+                value: <sqlx::Postgres as sqlx::Database>::ValueRef<'r>,
+            ) -> Result<Self, sqlx::error::BoxDynError> {
+                <Uuid as sqlx::Decode<sqlx::Postgres>>::decode(value).map(Self)
+            }
+        }
+
+        #[cfg(feature = "backend")]
+        impl sqlx::Type<sqlx::Postgres> for $name {
+            fn type_info() -> sqlx::postgres::PgTypeInfo {
+                <Uuid as sqlx::Type<sqlx::Postgres>>::type_info()
+            }
+        }
+
+        #[cfg(feature = "backend")]
+        impl<'q> sqlx::Encode<'q, sqlx::Postgres> for $name {
+            fn encode_by_ref(
+                &self,
+                buf: &mut <sqlx::Postgres as sqlx::database::HasArguments<'q>>::ArgumentBuffer,
+            ) -> sqlx::encode::IsNull {
+                <Uuid as sqlx::Encode<sqlx::Postgres>>::encode(&self.0, buf)
+            }
+
+            fn size_hint(&self) -> usize {
+                <Uuid as sqlx::Encode<sqlx::Postgres>>::size_hint(&self.0)
+            }
+        }
+    };
+}
+
+id_newtype!(
+    /// Unique identifier for a user account.
+    pub struct UserId;
+);
+id_newtype!(
+    /// Unique identifier for an authenticated session.
+    pub struct SessionId;
+);
+id_newtype!(
+    /// Unique identifier for a dashboard component (“color swatch”).
+    pub struct ComponentId;
+);
+id_newtype!(
+    /// Unique identifier for an asset (artwork, file, media, etc.).
+    pub struct AssetId;
+);
+
+// ---------- User & Session types ----------
+
+/// Role-based access control descriptor.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum Role {
+    Guest,
+    Artist,
+    StudioAdmin,
+    SuperAdmin,
+}
+
+impl Role {
+    /// Returns `true` when the current role has at least the privileges of the
+    /// provided `required` role.
+    ///
+    /// The hierarchy from least to most privileged is:
+    /// Guest < Artist < StudioAdmin < SuperAdmin.
+    pub fn allows(self, required: Role) -> bool {
+        matches!(
+            (self, required),
+            (Role::SuperAdmin, _)
+                | (Role::StudioAdmin, Role::StudioAdmin | Role::Artist | Role::Guest)
+                | (Role::Artist, Role::Artist | Role::Guest)
+                | (Role::Guest, Role::Guest)
+        )
+    }
+}
+
+/// Public information that can be safely disclosed downstream.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PublicUserProfile {
+    pub id: UserId,
+    pub display_name: String,
+    pub avatar_url: Option<String>,
+}
+
+/// Internal representation of an authenticated user session.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Session {
+    pub id: SessionId,
+    pub user_id: UserId,
+    pub role: Role,
+    pub issued_at: SystemTime,
+    /// When the session should be considered invalid.
+    pub expires_at: SystemTime,
+}
+
+impl Session {
+    pub const DEFAULT_TTL: Duration = Duration::from_secs(60 * 60 * 8); // 8h
+
+    /// Creates a new session expiring in [`Session::DEFAULT_TTL`].
+    pub fn start(user_id: UserId, role: Role) -> Self {
+        let now = SystemTime::now();
+        Self {
+            id: SessionId::new(),
+            user_id,
+            role,
+            issued_at: now,
+            expires_at: now + Self::DEFAULT_TTL,
+        }
+    }
+
+    /// Returns `true` if the session is expired.
+    pub fn is_expired(&self) -> bool {
+        SystemTime::now() >= self.expires_at
+    }
+}
+
+// ---------- Input validation wrappers ----------
+
+#[cfg_attr(feature = "backend", derive(Validate))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EmailAddress(
+    #[cfg_attr(feature = "backend", validate(email))] pub String
+);
+
+impl fmt::Display for EmailAddress {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Password(pub String);
+
+impl Password {
+    /// Ensure the password meets the minimum requirements for length and
+    /// complexity. This is only a shallow check and should be combined with
+    /// server-side enforcement such as Argon2 hashing.
+    #[inline]
+    pub fn is_valid(&self) -> bool {
+        self.0.len() >= 12
+            && self.0.chars().any(|c| c.is_ascii_uppercase())
+            && self.0.chars().any(|c| c.is_ascii_lowercase())
+            && self.0.chars().any(|c| c.is_ascii_digit())
+            && self
+                .0
+                .chars()
+                .any(|c| !c.is_ascii_alphanumeric() && !c.is_whitespace())
+    }
+}
+
+// ---------- Errors & Rejections (backend only) ----------
+
+#[cfg(feature = "backend")]
+#[derive(Debug, Display, Error, From)]
+pub enum ApiError {
+    #[display(fmt = "Resource not found")]
+    NotFound,
+
+    #[display(fmt = "Insufficient permissions")]
+    Forbidden,
+
+    #[display(fmt = "Invalid credentials")]
+    Unauthorized,
+
+    #[display(fmt = "Validation error: {_0}")]
+    Validation(String),
+
+    #[display(fmt = "Database error: {_0}")]
+    Database(sqlx::Error),
+
+    #[display(fmt = "I/O error: {_0}")]
+    Io(std::io::Error),
+
+    #[display(fmt = "Internal server error")]
+    Internal(#[error(not(source))] anyhow::Error),
+}
+
+#[cfg(feature = "backend")]
+impl ResponseError for ApiError {
+    fn status_code(&self) -> StatusCode {
+        match self {
+            ApiError::NotFound => StatusCode::NOT_FOUND,
+            ApiError::Forbidden => StatusCode::FORBIDDEN,
+            ApiError::Unauthorized => StatusCode::UNAUTHORIZED,
+            ApiError::Validation(_) => StatusCode::BAD_REQUEST,
+            ApiError::Database(_) | ApiError::Io(_) | ApiError::Internal(_) => {
+                StatusCode::INTERNAL_SERVER_ERROR
+            }
+        }
+    }
+
+    fn error_response(&self) -> HttpResponse {
+        let body = serde_json::json!({
+            "error": self.to_string(),
+        });
+        HttpResponse::build(self.status_code()).json(body)
+    }
+}
+
+// ---------- Database helpers (backend only) ----------
+
+#[cfg(feature = "backend")]
+pub mod db {
+    //! Thin wrapper for constructing a connection pool with sane defaults.
+
+    use super::*;
+
+    /// Type alias for our primary database connection pool.
+    pub type DbPool = PgPool;
+
+    /// Create a connection pool with exponential back-off retry.
+    pub async fn create_pool(database_url: &str) -> Result<DbPool, anyhow::Error> {
+        let mut backoff = Duration::from_secs(1);
+
+        for _ in 0..5 {
+            match PgPoolOptions::new()
+                .max_connections(20)
+                .connect(database_url)
+                .await
+            {
+                Ok(pool) => return Ok(pool),
+                Err(e) => {
+                    tracing::warn!("Failed to connect to postgres: {e:#}. Retrying in {backoff:?}");
+                    tokio::time::sleep(backoff).await;
+                    backoff *= 2;
+                }
+            }
+        }
+
+        Err(anyhow::anyhow!("Could not establish database connection"))
+    }
+}
+
+// ---------- Component definitions (shared) ----------
+
+/// The render mode requested by the client.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum RenderMode {
+    /// Static drawing only. Useful for low-power devices or print exports.
+    Raster,
+    /// Vector drawing with dynamic scaling.
+    Vector,
+    /// Real-time interactive canvas (WebGL/WebGPU).
+    Interactive,
+}
+
+/// Common metadata stored alongside every dashboard component.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ComponentMeta {
+    pub id: ComponentId,
+    pub title: String,
+    pub created_at: SystemTime,
+    pub updated_at: SystemTime,
+}
+
+/// Trait implemented by each self-contained dashboard component.
+pub trait Component {
+    /// The opaque settings blob used to configure the component.
+    type Config: Serialize + for<'de> Deserialize<'de>;
+
+    /// Execute a render cycle (server-side pre-render or client-side hydrate).
+    fn render(&self, mode: RenderMode) -> Result<String, String>;
+
+    /// Returns the current config.
+    fn config(&self) -> &Self::Config;
+
+    /// Returns mutable access to the config.
+    fn config_mut(&mut self) -> &mut Self::Config;
+
+    /// Metadata accessor.
+    fn meta(&self) -> &ComponentMeta;
+
+    /// Mutable metadata accessor.
+    fn meta_mut(&mut self) -> &mut ComponentMeta;
+}
+
+// ---------- Utility helpers ----------
+
+/// Attempts to parse a `Uuid` from any type that can be referenced as a string.
+pub fn parse_uuid<S: AsRef<str>>(input: S) -> Result<Uuid, ApiPlainError> {
+    Uuid::parse_str(input.as_ref()).map_err(|_| ApiPlainError::InvalidUuid)
+}
+
+/// A lightweight error type used where bringing the full [`ApiError`] is
+/// over-kill (e.g. in a purely client-side context).
+#[derive(Debug)]
+pub enum ApiPlainError {
+    InvalidUuid,
+    InvalidUrl,
+    Unexpected(String),
+}
+
+impl fmt::Display for ApiPlainError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        use ApiPlainError::*;
+        match self {
+            InvalidUuid => write!(f, "Invalid UUID string"),
+            InvalidUrl => write!(f, "Invalid URL"),
+            Unexpected(msg) => write!(f, "{msg}"),
+        }
+    }
+}
+
+impl std::error::Error for ApiPlainError {}
+
+#[cfg(feature = "backend")]
+impl From<ApiPlainError> for ApiError {
+    fn from(value: ApiPlainError) -> Self {
+        match value {
+            ApiPlainError::InvalidUuid | ApiPlainError::InvalidUrl => {
+                ApiError::Validation(value.to_string())
+            }
+            ApiPlainError::Unexpected(msg) => ApiError::Internal(anyhow::anyhow!(msg)),
+        }
+    }
+}
+
+// ---------- SSL / TLS helper (backend only) ----------
+
+#[cfg(all(feature = "backend", feature = "tls"))]
+pub mod ssl {
+    //! SSL/TLS utility functions, abstracted behind feature flags so that unit
+    //! tests and client-side builds can remain dependency-free.
+
+    use super::*;
+    use rustls::{Certificate, PrivateKey, ServerConfig};
+    use std::{fs, io::BufReader, path::Path};
+
+    /// Load X.509 certificates from `path`.
+    pub fn load_certs<P: AsRef<Path>>(path: P) -> Result<Vec<Certificate>, ApiError> {
+        let certfile = fs::File::open(path).map_err(ApiError::from)?;
+        let mut reader = BufReader::new(certfile);
+        rustls_pemfile::certs(&mut reader)
+            .map_err(|e| ApiError::Internal(anyhow::anyhow!(e)))
+            .map(|certs| certs.into_iter().map(Certificate).collect())
+    }
+
+    /// Load a private key from `path`.
+    pub fn load_private_key<P: AsRef<Path>>(path: P) -> Result<PrivateKey, ApiError> {
+        let keyfile = fs::File::open(path).map_err(ApiError::from)?;
+        let mut reader = BufReader::new(keyfile);
+        let keys = rustls_pemfile::pkcs8_private_keys(&mut reader)
+            .map_err(|e| ApiError::Internal(anyhow::anyhow!(e)))?;
+
+        keys.into_iter()
+            .next()
+            .map(PrivateKey)
+            .ok_or_else(|| ApiError::Internal(anyhow::anyhow!("No private key found in file")))
+    }
+
+    /// Construct a `rustls::ServerConfig` from the given cert and key files.
+    pub fn tls_config<P: AsRef<Path>>(cert_path: P, key_path: P) -> Result<ServerConfig, ApiError> {
+        let certs = load_certs(cert_path)?;
+        let key = load_private_key(key_path)?;
+
+        let config = ServerConfig::builder()
+            .with_safe_defaults()
+            .with_no_client_auth()
+            .with_single_cert(certs, key)
+            .map_err(|e| ApiError::Internal(anyhow::anyhow!(e)))?;
+
+        Ok(config)
+    }
+}
+
+// ---------- Time helpers ----------
+
+/// A helper function to convert [`SystemTime`] into an RFC 3339 string.
+#[inline]
+pub fn to_rfc3339(time: SystemTime) -> String {
+    let datetime: DateTime<Utc> = time.into();
+    datetime.to_rfc3339()
+}
+
+/// Parse an RFC 3339 timestamp into [`SystemTime`].
+pub fn parse_rfc3339<S: AsRef<str>>(input: S) -> Result<SystemTime, ApiPlainError> {
+    DateTime::parse_from_rfc3339(input.as_ref())
+        .map(|dt| SystemTime::from(dt))
+        .map_err(|_| ApiPlainError::Unexpected("Invalid timestamp".into()))
+}
+
+// End of module

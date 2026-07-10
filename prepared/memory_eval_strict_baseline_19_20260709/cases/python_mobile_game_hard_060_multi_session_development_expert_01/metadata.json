@@ -1,0 +1,52 @@
+{
+  "scenario_id": "python_mobile_game_hard_060_multi_session_development_expert_01",
+  "case_id": "python_mobile_game_hard_060",
+  "title": "Implement Guild-Based Weekly Challenges with Targeted Notifications",
+  "description": "The project 'QuestSmith: Productivity RPG Forge' aims to increase long-term user engagement. The product team has requested a new feature: 'Weekly Guild Challenges'. This feature will allow players who have joined a 'Guild' to collaborate on a shared, weekly objective. Completing the objective will yield rewards for all guild members. This task requires a phased implementation, starting with planning, moving to core logic, integrating with existing systems like notifications and social sharing, and finally, testing and bug fixing. The existing codebase is large and modular, and the agent must navigate it to find the correct integration points.",
+  "difficulty": "expert",
+  "project_spec": {
+    "unique_id": "python_mobile_game_hard_060",
+    "name": "QuestSmith: Productivity RPG Forge",
+    "description": "QuestSmith turns daily tasks and habits into an immersive role-playing adventure where progress in real life fuels advancement in the game world. Users ‘forge’ quests out of calendar events, reminders, and location-based triggers; completing them grants experience, crafting materials, and in-game currency that can be spent on power-ups or cosmetic items. Real-time analytics, adaptive difficulty, and social leaderboards keep players engaged while reinforcing productive behavior.\n\nBuilt as a single, self-contained Python/Kivy application, QuestSmith employs MVVM for clean UI–logic separation and the Repository Pattern to centralize data access to a unified SQLite store that works both online and offline. Biometric authentication secures user profiles, while an Observer-based event bus propagates quest status changes to UI widgets, push-notification schedulers, and the analytics engine. A Factory-driven adapter layer wraps platform services (location, IAP, social sharing) so the core game logic remains pure Python—even crash-reporting hooks are injected via factories—keeping the entire experience cohesive inside one monolith optimized for mobile performance and offline reliability.",
+    "domain": "mobile_game",
+    "complexity": "hard",
+    "language": "python",
+    "architecture": "monolithic",
+    "theme": "productivity",
+    "target_file_count": 52,
+    "target_token_count": 428091,
+    "features": [
+      "biometric_auth",
+      "crash_reporting",
+      "push_notifications",
+      "location_services",
+      "social_sharing",
+      "responsive_ui",
+      "offline_sync",
+      "in_app_purchases",
+      "analytics"
+    ],
+    "architecture_patterns": [
+      "Repository_Pattern",
+      "Observer_Pattern",
+      "Factory_Pattern",
+      "MVVM",
+      "Adapter_Pattern"
+    ],
+    "dependencies": [
+      "kivy==2.3.0              # responsive cross-platform UI",
+      "kivymd>=1.1.0            # Material components for productivity screens",
+      "plyer>=2.1.0             # adapter to mobile APIs: biometrics, location, notifications",
+      "sqlite3 (stdlib)         # lightweight monolithic data store",
+      "requests>=2.31.0         # REST sync & crash-report uploads",
+      "sentry-sdk>=1.40.0       # crash_reporting integration",
+      "PyJWT>=2.8.0             # secure auth tokens for offline_sync",
+      "pandas>=2.2.0            # local analytics & trend calculations",
+      "google-play-billing==1.0 # in_app_purchases (Android adapter)",
+      "facebook-sdk>=3.1        # social_sharing hooks",
+      "numpy>=1.26.0            # game mechanics & analytics math",
+      "pytest>=8.1.0            # internal monolith test suite"
+    ],
+    "seed": 776392
+  }
+}

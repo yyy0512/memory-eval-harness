@@ -1,8 +1,0 @@
-You are working in the repository at the current working directory. This is session 1 of a multi-session development task. Complete only the requirements for this session. At the end, save any useful project-specific memory for future sessions.
-
-Your overall goal is to implement the 'Check-in Quest' feature. We will build this incrementally.
-
-**Session 1: Data Layer Foundation**
-Your first task is to update the core data structures to support this new feature. 
-1. Modify the `bq_task_t` struct in `beatquest/include/beatquest/models/bq_task_model.h` to include the necessary fields for location-based verification. You'll need a boolean flag to identify these quests, latitude and longitude coordinates, and a place to store the path to the verification photo upon completion.
-2. Update the task repository in `beatquest/src/repositories/bq_task_repository.c` and its header to ensure these new fields are correctly saved to and loaded from local storage. The storage format is managed within this file; you must maintain its integrity.

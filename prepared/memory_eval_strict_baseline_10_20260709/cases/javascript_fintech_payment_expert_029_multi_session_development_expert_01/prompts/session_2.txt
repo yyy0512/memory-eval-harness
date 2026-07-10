@@ -1,0 +1,10 @@
+You are working in the repository at the current working directory. This is session 2 of a 5-session development task. The previous session has ended and conversation context is unavailable. Use the repository state to continue the task. Do not ask for previous conversation context. Complete only the requirements for this session.
+
+You will implement this feature over several sessions. Each session represents a distinct phase of development. You must retain context from previous sessions to succeed.
+
+**Session 2: Enhancing the Risk Service**
+Based on your approved plan, begin implementation in the `risk-service`.
+- Modify `services/risk-service/src/domain/risk-scorer.js` to calculate a 'transaction velocity' score. This will require tracking the timestamps of recent transactions for each user. You must identify a suitable way to store this short-term data (e.g., an in-memory cache or Redis).
+- When the velocity score exceeds a defined threshold, the service should trigger a throttling event.
+- Define a new event, like `UserThrottlingStatusChanged`, in `packages/event-schemas/` using Protocol Buffers, similar to `user.proto` and `transaction.proto`.
+- Modify the `risk-service` to publish this new event when a user's status changes.

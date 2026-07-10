@@ -1,0 +1,237 @@
+```typescript
+/**
+ * SocialPulse Gateway • Shared Type Utilities
+ * -------------------------------------------
+ * This module centralises the type-level primitives that are reused
+ * across all layers (presentation, application, domain, infrastructure).
+ *
+ * • Nominal branded IDs for domain aggregates
+ * • Generic Result/Either helpers with discriminated unions
+ * • API/GraphQL response envelopes & pagination contracts
+ * • Version & cache descriptors used by routing middleware
+ * • Misc. utility types (DeepReadonly, Nullable, etc.)
+ *
+ * NOTE: The file is libraries-only (no side-effects) so it can
+ * safely be imported from anywhere in the code-base.
+ */
+
+import { z } from 'zod';
+
+// -----------------------------------------------------------------------------
+// 1. Nominal-typing helpers
+// -----------------------------------------------------------------------------
+
+/**
+ * Creates a nominal branded type based on a primitive.
+ * Prevents accidental mix-up of IDs across aggregates.
+ */
+type Brand<T, TBrand extends string> = T & { readonly __brand: TBrand };
+
+/** Domain-specific identifiers (Mongo/ObjectId, UUID, Snowflake, etc.) */
+export type UserId    = Brand<string, 'UserId'>;
+export type PostId    = Brand<string, 'PostId'>;
+export type StoryId   = Brand<string, 'StoryId'>;
+export type ChatId    = Brand<string, 'ChatId'>;
+export type MediaId   = Brand<string, 'MediaId'>;
+export type CommentId = Brand<string, 'CommentId'>;
+
+/** Convenience guard to assert that a string is a branded ID */
+export const idSchema = <B extends string>(brandName: B) =>
+  z.string().uuid({ message: `${brandName} must be a valid UUID` }) as unknown as z.ZodType<Brand<string, B>>;
+
+// -----------------------------------------------------------------------------
+// 2. Utility type helpers
+// -----------------------------------------------------------------------------
+
+export type Nullable<T>      = T | null;
+export type Optional<T>      = T | undefined;
+export type Dictionary<T>    = Record<string, T>;
+export type ISODateString    = Brand<string, 'ISODateString'>;
+
+/** Recursive deep readonly */
+export type DeepReadonly<T> = {
+  readonly [P in keyof T]: DeepReadonly<T[P]>;
+};
+
+/** Recursive deep partial (useful for update DTOs) */
+export type DeepPartial<T> = {
+  [P in keyof T]?: DeepPartial<T[P]>;
+};
+
+// -----------------------------------------------------------------------------
+// 3. Result / Either pattern
+// -----------------------------------------------------------------------------
+
+/** Error shape returned from use-cases */
+export interface AppError {
+  readonly message: string;
+  readonly code:    string; // e.g. 'VALIDATION_ERROR' | 'NOT_FOUND'
+  readonly details?: unknown;
+}
+
+/**
+ * Discriminated union representing either a successful result (Ok) or failure (Err).
+ * Forces callers to handle both cases explicitly (similar to Rust/FP Either).
+ */
+export type Result<T, E extends AppError = AppError> =
+  | { readonly ok: true;  readonly value: T }
+  | { readonly ok: false; readonly error: E };
+
+export const Ok = <T>(value: T): Result<T> => ({ ok: true,  value });
+export const Err = <E extends AppError>(error: E): Result<never, E> => ({ ok: false, error });
+
+// -----------------------------------------------------------------------------
+// 4. API specific contracts
+// -----------------------------------------------------------------------------
+
+/** Cursor-based paginated response envelope (RFC 5988 compatible) */
+export interface Paginated<T> {
+  readonly data: readonly T[];
+  readonly pageInfo: {
+    readonly hasNextPage: boolean;
+    readonly endCursor:   Nullable<string>;
+  };
+}
+
+/** Consistent REST/GraphQL success envelope */
+export interface ApiSuccess<T> {
+  readonly status: 'success';
+  readonly payload: T;
+}
+
+/** Consistent REST/GraphQL error envelope */
+export interface ApiFailure {
+  readonly status: 'error';
+  readonly errors: readonly AppError[];
+}
+
+export type ApiResponse<T> = ApiSuccess<T> | ApiFailure;
+
+/**
+ * Helper to wrap a Result into an ApiResponse with sensible HTTP status codes.
+ *
+ * Example usage in an Express controller:
+ *    const result = await svc.execute(req.body);
+ *    const { body, status } = toApiResponse(result);
+ *    res.status(status).json(body);
+ */
+export const toApiResponse = <T>(
+  result: Result<T>
+): { status: number; body: ApiResponse<T> } => {
+  if (result.ok) {
+    return { status: 200, body: { status: 'success', payload: result.value } };
+  }
+
+  const httpStatus = result.error.code === 'NOT_FOUND'        ? 404
+                   : result.error.code === 'UNAUTHORIZED'      ? 401
+                   : result.error.code === 'FORBIDDEN'         ? 403
+                   : result.error.code === 'VALIDATION_ERROR'  ? 422
+                   :                                            500;
+
+  return {
+    status: httpStatus,
+    body: { status: 'error', errors: [result.error] },
+  };
+};
+
+// -----------------------------------------------------------------------------
+// 5. Versioning & caching meta
+// -----------------------------------------------------------------------------
+
+/** Semantic API version identifier (e.g., 'v1', 'v2-beta') */
+export type ApiVersion = `v${number}${'' | `-${string}`}`;
+
+/** Dot-separated semantic model version (e.g., '1.0.0') */
+export type SemVer = `${number}.${number}.${number}`;
+
+/** Describes version information attached to a handler */
+export interface VersionDescriptor {
+  readonly api: ApiVersion;
+  readonly model?: SemVer;
+  /** Optional deprecation message surfaced via OpenAPI/GraphQL directives */
+  readonly deprecated?: string;
+}
+
+/** Cache control options leveraged by response caching middleware/headers */
+export interface CacheOptions {
+  /** Redis TTL in seconds */
+  readonly ttl: number;
+  /** When true, a dedicated fan-out channel will be created for this resource */
+  readonly fanOut?: boolean;
+  /** Vary key parts (e.g., locale, device) to avoid cache poisoning */
+  readonly varyBy?: readonly string[];
+}
+
+// -----------------------------------------------------------------------------
+// 6. WebSocket / GraphQL subscription events
+// -----------------------------------------------------------------------------
+
+export type EventTopic =
+  | 'POST_CREATED'
+  | 'POST_LIKED'
+  | 'COMMENT_ADDED'
+  | 'USER_ONLINE'
+  | 'USER_OFFLINE';
+
+export interface DomainEvent<TPayload = unknown> {
+  readonly id: Brand<string, 'EventId'>;
+  readonly topic: EventTopic;
+  readonly payload: TPayload;
+  readonly occurredAt: ISODateString;
+}
+
+/**
+ * GraphQL context object enriched throughout the request lifecycle
+ * (authZ, tracing, dataloaders, etc.).
+ */
+export interface GraphQLContext {
+  readonly requestId: string;
+  readonly userId:     Nullable<UserId>;
+  readonly ip:         string;
+  /** Dataloader map keyed by entity name */
+  readonly loaders:    Dictionary<unknown>;
+  /** Correlation ID for distributed-tracing (Jaeger, Zipkin) */
+  readonly traceId?: string;
+}
+
+// -----------------------------------------------------------------------------
+// 7. Validation schemas (runtime)
+// -----------------------------------------------------------------------------
+
+/** ISO-8601 date string (no time component) */
+export const isoDateSchema = z
+  .string()
+  .refine(str => !Number.isNaN(Date.parse(str)), { message: 'Invalid ISO-8601 date' })
+  .transform(str => str as ISODateString);
+
+/**
+ * Generic pagination cursor schema: base64 encoded string.
+ * Decoded value is implementation-specific JSON.
+ */
+export const cursorSchema = z
+  .string()
+  .regex(/^[A-Za-z0-9+/=]+$/, { message: 'Cursor must be a base64 string' });
+
+/**
+ * Standardized pagination query parameters for REST controllers
+ * (`?first=20&after=cursor`).
+ */
+export const paginationQuerySchema = z.object({
+  first: z.coerce.number().int().positive().max(100).default(20),
+  after: cursorSchema.optional(),
+});
+
+// -----------------------------------------------------------------------------
+// 8. Type-level assertion helpers
+// -----------------------------------------------------------------------------
+
+/** Asserts exhaustiveness in switch statements */
+export function assertNever(x: never): never {
+  throw new Error(`Unexpected object: ${x as unknown as string}`);
+}
+
+/** Prevents unreachable code (useful until TS 5 `using`  lands) */
+export const unreachable = (reason = 'unreachable'): never => {
+  throw new Error(reason);
+};
+```

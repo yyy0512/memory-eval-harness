@@ -1,0 +1,10 @@
+You are working in the repository at the current working directory. This is session 3 of a 3-session development task. The previous session has ended and conversation context is unavailable. Use the repository state to continue the task. Do not ask for previous conversation context. Complete only the requirements for this session.
+
+You will implement a new transaction fee feature over three sessions. I will provide instructions for each session one by one. Do not proceed to the next session's work until instructed.
+
+**Session 3: Testing and Validation**
+With the feature implemented, the final step is to ensure its correctness and that it hasn't introduced any regressions.
+1.  Modify `tests/test_main.ts`: Update any existing transaction tests that are now failing due to the new fee deduction. Adjust their balance assertions to be correct.
+2.  Add two new, specific test cases to `tests/test_main.ts`:
+    a. A test that verifies a fee is correctly calculated using the `percentage` for a large transaction (where percentage fee > minimum fee).
+    b. A test that verifies the `minimumFee` is correctly applied for a small transaction (where percentage fee < minimum fee).

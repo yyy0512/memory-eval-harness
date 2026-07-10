@@ -1,1 +1,0 @@
-- [GraphQL request batching session 1](graphql_request_batching_session1.md) — Parser-level batch structs and JSON array parsing added; handler execution remains.

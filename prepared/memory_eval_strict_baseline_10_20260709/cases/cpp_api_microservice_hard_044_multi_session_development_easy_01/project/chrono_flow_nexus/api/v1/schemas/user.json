@@ -1,0 +1,259 @@
+```cpp
+/****************************************************************************************
+ * File: chrono_flow_nexus/api/v1/schemas/user.json (C++ TU)
+ *
+ * NOTE:
+ *  ─────
+ *  While the file is named “*.json” to preserve its semantic meaning inside the project
+ *  (i.e., “this represents the User JSON-Schema”), we compile it as a C++ translation
+ *  unit that embeds the actual JSON-Schema string and offers a thin wrapper around
+ *  nlohmann/json-schema for runtime validation.
+ *
+ *  This approach keeps the authoritative schema co-located with the C++ source that
+ *  validates requests/responses, eliminating duplication and accidental drift.
+ *
+ *  Public interface:
+ *      • chrono_flow_nexus::api::v1::schemas::UserSchema          – singleton accessor
+ *      • bool validateUser(const nlohmann::json& doc, std::string* errMsg = nullptr)
+ *      • const nlohmann::json& getUserSchema() noexcept
+ *
+ *  Dependencies (header-only, resolved via vcpkg/conan or vendored):
+ *      • nlohmann/json.hpp                    https://github.com/nlohmann/json
+ *      • json-schema.hpp (nlohmann adapter)   https://github.com/pboettch/json-schema-validator
+ *
+ *  Compile flags:
+ *      • -std=c++20 (required for char8_t literals on some compilers)
+ *      • Add ‑DNLOHMANN_JSON_SCHEMA_NO_EXTERNAL_REFS to disable external $ref fetching
+ ****************************************************************************************/
+
+#include <array>
+#include <atomic>
+#include <memory>
+#include <mutex>
+#include <stdexcept>
+#include <string>
+#include <string_view>
+
+#include <nlohmann/json.hpp>                  // nlohmann::json
+#include <json-schema.hpp>                    // nlohmann::json_schema::json_validator
+
+namespace chrono_flow_nexus::api::v1::schemas
+{
+using nlohmann::json;
+namespace schema = nlohmann::json_schema;
+
+/*--------------------------------------------------------------------------------------+
+ | Internal helpers                                                                     |
+ +--------------------------------------------------------------------------------------*/
+
+// Simple RAII logger stub (replace with real logger such as spdlog or Boost.Log)
+struct Logger
+{
+    enum Level { kInfo, kWarn, kError };
+
+    static void log(Level lvl, std::string_view msg) noexcept
+    {
+        const char* prefix = (lvl == kInfo) ? "[INFO] " : (lvl == kWarn) ? "[WARN] " : "[ERROR] ";
+        std::fprintf((lvl == kError) ? stderr : stdout, "%s%s\n", prefix, msg.data());
+    }
+};
+
+/*--------------------------------------------------------------------------------------+
+ | Embedded JSON-Schema                                                                 |
+ +--------------------------------------------------------------------------------------*/
+
+static constexpr std::string_view kUserSchemaJson = R"JSON(
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://chrono.flow/nexus/schemas/user",
+  "title": "User",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "username",
+    "email",
+    "created_at",
+    "timezone",
+    "roles"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "username": {
+      "type": "string",
+      "minLength": 3,
+      "maxLength": 32,
+      "pattern": "^[A-Za-z0-9_]+$"
+    },
+    "email": {
+      "type": "string",
+      "format": "email"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "timezone": {
+      "type": "string"
+    },
+    "roles": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": ["ADMIN", "MANAGER", "MEMBER", "VIEWER"]
+      },
+      "uniqueItems": true,
+      "minItems": 1
+    },
+    "preferences": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "theme": {
+          "type": "string",
+          "enum": ["light", "dark", "system"]
+        },
+        "notifications": {
+          "type": "boolean"
+        }
+      }
+    }
+  }
+}
+)JSON";
+
+/*--------------------------------------------------------------------------------------+
+ | UserSchema – runtime validator & schema accessor (thread-safe singleton)             |
+ +--------------------------------------------------------------------------------------*/
+
+class UserSchema final
+{
+public:
+    // Deleted special members – singleton
+    UserSchema(const UserSchema&)            = delete;
+    UserSchema(UserSchema&&)                 = delete;
+    UserSchema& operator=(const UserSchema&) = delete;
+    UserSchema& operator=(UserSchema&&)      = delete;
+
+    static const UserSchema& instance()
+    {
+        // Magic-static for thread-safe lazy initialisation (C++11)
+        static const UserSchema inst;
+        return inst;
+    }
+
+    // Validate a JSON document against the schema.
+    // Throws schema::invalid_schema or schema::schema_error on failure.
+    void validate(const json& document) const
+    {
+        try
+        {
+            validator_.validate(document);
+        }
+        catch (const std::exception& ex)
+        {
+            Logger::log(Logger::kWarn,
+                        std::string{"UserSchema validation failed: "} + ex.what());
+            throw;  // re-throw for caller to handle
+        }
+    }
+
+    // Access raw schema as nlohmann::json
+    const json& jsonSchema() const noexcept { return schema_; }
+
+private:
+    // Private constructor – loads and compiles the schema once.
+    UserSchema()
+    {
+        try
+        {
+            schema_ = json::parse(kUserSchemaJson);
+            validator_.set_root_schema(schema_);  // may throw
+            Logger::log(Logger::kInfo, "UserSchema initialised successfully");
+        }
+        catch (const std::exception& ex)
+        {
+            Logger::log(Logger::kError,
+                        std::string{"FATAL: could not initialise UserSchema: "} + ex.what());
+            throw;  // Fail fast – schema must be valid at startup.
+        }
+    }
+
+    json               schema_;
+    schema::json_validator validator_;
+};
+
+/*--------------------------------------------------------------------------------------+
+ | Convenience free functions                                                           |
+ +--------------------------------------------------------------------------------------*/
+
+// Validate a user JSON document; returns true if valid, false otherwise.
+inline bool validateUser(const json& document, std::string* errMsg = nullptr) noexcept
+{
+    try
+    {
+        UserSchema::instance().validate(document);
+        return true;
+    }
+    catch (const std::exception& ex)
+    {
+        if (errMsg) *errMsg = ex.what();
+        return false;
+    }
+}
+
+// Expose the raw schema (useful for auto-generating API docs or GraphQL types)
+inline const json& getUserSchema() noexcept
+{
+    return UserSchema::instance().jsonSchema();
+}
+
+}  // namespace chrono_flow_nexus::api::v1::schemas
+
+/*--------------------------------------------------------------------------------------+
+ | Unit-style self-check (can be excluded from TU via ‑DCHRONO_FLOW_NEXUS_NO_SELFTEST) |
+ +--------------------------------------------------------------------------------------*/
+#ifndef CHRONO_FLOW_NEXUS_NO_SELFTEST
+#include <cassert>
+
+namespace
+{
+    using chrono_flow_nexus::api::v1::schemas::validateUser;
+    using chrono_flow_nexus::api::v1::schemas::getUserSchema;
+}
+
+static void _runSelfTest()
+{
+    // Should succeed
+    nlohmann::json ok = {
+        {"id",         "550e8400-e29b-41d4-a716-446655440000"},
+        {"username",   "john_doe"},
+        {"email",      "john@example.com"},
+        {"created_at", "2022-11-04T10:45:03Z"},
+        {"updated_at", "2022-12-01T09:15:30Z"},
+        {"timezone",   "Europe/Berlin"},
+        {"roles",      {"MEMBER"}},
+        {"preferences", {{"theme", "dark"}, {"notifications", true}}}
+    };
+    assert(validateUser(ok));
+
+    // Should fail: missing required field
+    nlohmann::json bad = ok;
+    bad.erase("email");
+    std::string err;
+    assert(!validateUser(bad, &err) && !err.empty());
+}
+
+struct _SelfTestRunner
+{
+    _SelfTestRunner() { _runSelfTest(); }
+} _selfTestRunner;
+#endif  // CHRONO_FLOW_NEXUS_NO_SELFTEST
+```

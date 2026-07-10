@@ -1,0 +1,10 @@
+You are working in the repository at the current working directory. This is session 2 of a 3-session development task. The previous session has ended and conversation context is unavailable. Use the repository state to continue the task. Do not ask for previous conversation context. Complete only the requirements for this session.
+
+You are tasked with implementing a new audit logging feature. This will be done in three distinct sessions.
+
+**Session 2: Integrate with Order Management Service**
+Now, you will integrate the new audit logging capability into the `order-management-command` service.
+1.  Locate the `CreateOrderHandler.java` file within the `order-management-command` service.
+2.  Modify the handler's logic. After a new `MedicationOrder` is successfully created and saved by the `OrderService`, use the `AuditLogger` to log the event.
+3.  The `AuditLog` object must be populated correctly: extract the `principalId` from the request context, set the action to `CREATE_ORDER`, the entity type to `MedicationOrder`, use the newly generated order's ID for `entityId`, and add key information like medication name and patient ID to the `details` map.
+4.  Verify and, if necessary, add the `common-lib` module as a dependency in the `order-management-command/pom.xml` to make your new audit classes available.

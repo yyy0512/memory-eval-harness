@@ -1,0 +1,202 @@
+version: "3.9"
+
+###############################################################################
+# PaletteFlux GraphQL Studio – Production-grade Docker Compose specification  #
+# ----------------------------------------------------------------------------#
+# This stack wires up:                                                        #
+#   • paletteflux_api    – C++17 gRPC / GraphQL core compiled with clang-17   #
+#   • db                 – PostgreSQL 15 with the pgvector + postgis stack    #
+#   • cache              – Redis 7 for CQRS read-side projections             #
+#   • gateway            – Traefik v3 reverse proxy / TLS termination         #
+#   • prometheus         – Metrics collection                                 #
+#   • pushgateway        – Push-based metrics ingestion for short-lived jobs  #
+#   • grafana            – Metrics dashboards                                 #
+#   • docs               – Swagger-UI + GraphiQL served via NodeJS            #
+# Each service is attached to a private overlay network (`paletteflux-net`)   #
+# and ships with sane health-checks and restart policies.                     #
+###############################################################################
+
+networks:
+  paletteflux-net:
+    driver: bridge
+
+volumes:
+  db-data:
+  grafana-data:
+
+secrets:
+  # 🔒 Secrets are expected to be provided by `docker secret create` in swarm
+  #   or an `.env` file when running in compose-standalone mode.
+  postgres_password:
+    file: ./ops/secrets/postgres_password.txt
+
+services:
+
+  #─────────────────────────────── Core API ──────────────────────────────────#
+  api:
+    build:
+      context: .
+      dockerfile: ./docker/api.Dockerfile
+      # The Dockerfile supports multi-stage builds (dev, test, prod).
+      target: prod
+    image: ghcr.io/paletteflux/studio-api:${API_VERSION:-latest}
+    container_name: paletteflux_api
+    depends_on:
+      db:
+        condition: service_healthy
+      cache:
+        condition: service_started
+    environment:
+      # Runtime flags
+      APP_ENV: production
+      APP_LOG_LEVEL: info
+      # Connection strings
+      DATABASE_URL: postgres://paletteflux:${POSTGRES_PASSWORD}@db:5432/paletteflux_db
+      REDIS_URL: redis://cache:6379/0
+      # Observability
+      PROMETHEUS_PUSHGATEWAY_ADDRESS: http://pushgateway:9091
+      # GraphQL & REST
+      HTTP_PORT: 8080
+      WORKER_THREADS: 4
+    ports:
+      - "8080:8080"
+    restart: unless-stopped
+    networks:
+      - paletteflux-net
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8080/healthz || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    secrets:
+      - postgres_password
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 1G
+        reservations:
+          cpus: "0.25"
+          memory: 128M
+
+  #───────────────────────── PostgreSQL (CQRS write) ─────────────────────────#
+  db:
+    image: postgis/postgis:15-3.3
+    container_name: paletteflux_db
+    environment:
+      POSTGRES_DB: paletteflux_db
+      POSTGRES_USER: paletteflux
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    networks:
+      - paletteflux-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U paletteflux -d paletteflux_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    secrets:
+      - postgres_password
+
+  #──────────────────────────── Redis (CQRS read) ────────────────────────────#
+  cache:
+    image: redis:7-alpine
+    container_name: paletteflux_cache
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
+    networks:
+      - paletteflux-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+
+  #───────────────────────────── API Gateway ─────────────────────────────────#
+  gateway:
+    image: traefik:v3.0
+    container_name: paletteflux_gateway
+    command:
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      - "--certificatesresolvers.le.acme.tlschallenge=true"
+      - "--certificatesresolvers.le.acme.email=${ACME_EMAIL:-admin@paletteflux.io}"
+      - "--certificatesresolvers.le.acme.storage=/letsencrypt/acme.json"
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock:ro"
+      - "./ops/letsencrypt:/letsencrypt"
+    networks:
+      - paletteflux-net
+    restart: unless-stopped
+    labels:
+      # Expose the core API through Traefik
+      - "traefik.enable=true"
+      - "traefik.http.routers.paletteflux-api.rule=Host(`api.paletteflux.local`)"
+      - "traefik.http.routers.paletteflux-api.entrypoints=websecure"
+      - "traefik.http.routers.paletteflux-api.tls.certresolver=le"
+      - "traefik.http.services.paletteflux-api.loadbalancer.server.port=8080"
+
+  #──────────────────────────── Prometheus ───────────────────────────────────#
+  prometheus:
+    image: prom/prometheus:v2.48
+    container_name: paletteflux_prometheus
+    volumes:
+      - ./ops/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
+    networks:
+      - paletteflux-net
+    restart: unless-stopped
+
+  pushgateway:
+    image: prom/pushgateway:v1.6
+    container_name: paletteflux_pushgateway
+    ports:
+      - "9091:9091"
+    networks:
+      - paletteflux-net
+    restart: unless-stopped
+
+  #───────────────────────────── Grafana ─────────────────────────────────────#
+  grafana:
+    image: grafana/grafana:10.2.0
+    container_name: paletteflux_grafana
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-change_me}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./ops/monitoring/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./ops/monitoring/dashboards:/etc/grafana/provisioning/dashboards:ro
+    ports:
+      - "3000:3000"
+    networks:
+      - paletteflux-net
+    restart: unless-stopped
+
+  #───────────────────────────── API Docs ────────────────────────────────────#
+  docs:
+    image: node:20-alpine
+    container_name: paletteflux_docs
+    working_dir: /app
+    command: ["node", "server.mjs"]
+    volumes:
+      - ./docs:/app:ro
+    environment:
+      PORT: 4000
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "4000:4000"
+    networks:
+      - paletteflux-net
+    restart: unless-stopped

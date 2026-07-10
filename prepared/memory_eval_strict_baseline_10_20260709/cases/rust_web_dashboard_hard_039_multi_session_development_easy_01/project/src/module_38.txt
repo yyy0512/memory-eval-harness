@@ -1,0 +1,422 @@
+```rust
+//! ChromaticCanvas – Secure session management middleware
+//!
+//! This module provides cryptographically‐signed, cookie‐based session handling
+//! for Actix-Web services. A flexible `SessionStore` trait allows swapping the
+//! backing store (Redis, Postgres, Dynamo, …) without touching middleware code.
+//!
+//! Hardened against replay attacks and tampering, every cookie contains an
+//! HMAC-signed JSON payload with a nonce, UUID and expiry timestamp. The
+//! signature is verified on every request in constant-time to avoid timing
+//! leaks. Expired or revoked sessions are rejected before a handler is ever
+//! executed.
+//
+//  ────────────────────────────────────────────────────────────────────────────
+
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+use actix_service::{forward_ready, Transform};
+use actix_web::{
+    cookie::{Cookie, SameSite},
+    dev::{ServiceRequest, ServiceResponse},
+    Error, HttpMessage, HttpResponse,
+};
+use async_trait::async_trait;
+use base64::{engine::general_purpose as b64, Engine as _};
+use dashmap::DashMap;
+use futures::future::{ok, LocalBoxFuture, Ready};
+use hmac::{Hmac, Mac};
+use rand::RngCore;
+use serde::{Deserialize, Serialize};
+use sha2::Sha256;
+use thiserror::Error;
+use uuid::Uuid;
+
+type HmacSha256 = Hmac<Sha256>;
+const DEFAULT_TTL: Duration = Duration::from_secs(60 * 60 * 8); // 8 hours
+const SEP: u8 = b'.';
+
+// ────────────────────────────────────────────────────────────────────────────
+// Public error type
+// ────────────────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Error)]
+pub enum SessionError {
+    #[error("Invalid or missing session cookie")]
+    InvalidCookie,
+    #[error("HMAC verification failed")]
+    BadSignature,
+    #[error("Session expired")]
+    Expired,
+    #[error("Storage error: {0}")]
+    Store(String),
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Low-level token (stored in cookie)
+// ────────────────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+struct Token {
+    /// Unique session identifier stored server-side.
+    id: Uuid,
+    /// Unix epoch seconds when the token becomes invalid.
+    exp: u64,
+    /// Random bytes to guarantee uniqueness even if `id` is reused.
+    nonce: [u8; 8],
+}
+
+impl Token {
+    fn new(ttl: Duration) -> Self {
+        let exp = SystemTime::now()
+            .checked_add(ttl)
+            .expect("timestamp overflow")
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
+        let mut nonce = [0u8; 8];
+        rand::thread_rng().fill_bytes(&mut nonce);
+
+        Self {
+            id: Uuid::new_v4(),
+            exp,
+            nonce,
+        }
+    }
+
+    fn is_expired(&self) -> bool {
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+            >= self.exp
+    }
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Session store abstraction
+// ────────────────────────────────────────────────────────────────────────────
+
+#[async_trait]
+pub trait SessionStore: Send + Sync + Clone + 'static {
+    async fn insert(
+        &self,
+        id: Uuid,
+        data: serde_json::Value,
+        ttl: Duration,
+    ) -> Result<(), SessionError>;
+
+    async fn fetch(&self, id: &Uuid) -> Result<Option<serde_json::Value>, SessionError>;
+
+    async fn remove(&self, id: &Uuid) -> Result<(), SessionError>;
+}
+
+// In-memory fallback. Production deployments SHOULD use Redis or similar.
+#[derive(Clone, Default)]
+pub struct MemoryStore {
+    inner: DashMap<Uuid, (serde_json::Value, u64)>,
+}
+
+#[async_trait]
+impl SessionStore for MemoryStore {
+    async fn insert(
+        &self,
+        id: Uuid,
+        data: serde_json::Value,
+        ttl: Duration,
+    ) -> Result<(), SessionError> {
+        let exp = (SystemTime::now() + ttl)
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        self.inner.insert(id, (data, exp));
+        Ok(())
+    }
+
+    async fn fetch(&self, id: &Uuid) -> Result<Option<serde_json::Value>, SessionError> {
+        if let Some(entry) = self.inner.get(id) {
+            let (data, exp) = entry.value();
+            let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+            if *exp < now {
+                self.inner.remove(id);
+                Ok(None)
+            } else {
+                Ok(Some(data.clone()))
+            }
+        } else {
+            Ok(None)
+        }
+    }
+
+    async fn remove(&self, id: &Uuid) -> Result<(), SessionError> {
+        self.inner.remove(id);
+        Ok(())
+    }
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Session manager
+// ────────────────────────────────────────────────────────────────────────────
+
+#[derive(Clone)]
+pub struct SessionManager<S: SessionStore> {
+    store: S,
+    secret: Vec<u8>,
+    ttl: Duration,
+    cookie_name: String,
+}
+
+impl<S: SessionStore> SessionManager<S> {
+    pub fn builder(store: S, secret: impl AsRef<[u8]>) -> Self {
+        Self {
+            store,
+            secret: secret.as_ref().to_vec(),
+            ttl: DEFAULT_TTL,
+            cookie_name: "cc_session".into(),
+        }
+    }
+
+    pub fn ttl(mut self, ttl: Duration) -> Self {
+        self.ttl = ttl;
+        self
+    }
+
+    pub fn cookie_name(mut self, name: impl Into<String>) -> Self {
+        self.cookie_name = name.into();
+        self
+    }
+
+    /// Generate a new session cookie for the provided payload.
+    pub async fn create(
+        &self,
+        payload: serde_json::Value,
+    ) -> Result<Cookie<'static>, SessionError> {
+        let token = Token::new(self.ttl);
+        self.store
+            .insert(token.id, payload, self.ttl)
+            .await
+            .map_err(|e| e)?;
+
+        Ok(self.encode_cookie(&token)?)
+    }
+
+    /// Remove session both client- and server-side.
+    pub async fn destroy(&self, cookie_val: &str) -> Result<(), SessionError> {
+        let token = self.decode(cookie_val)?;
+        self.store.remove(&token.id).await?;
+        Ok(())
+    }
+
+    /// Returns session data if cookie is present and valid, otherwise `None`.
+    pub async fn validate(
+        &self,
+        cookie_val: &str,
+    ) -> Result<Option<(Token, serde_json::Value)>, SessionError> {
+        let token = self.decode(cookie_val)?;
+
+        if token.is_expired() {
+            return Err(SessionError::Expired);
+        }
+
+        if let Some(data) = self.store.fetch(&token.id).await? {
+            Ok(Some((token, data)))
+        } else {
+            Ok(None)
+        }
+    }
+
+    // ────────────────────────────────────────────────────────────────────────
+    // Internal helpers
+    // ────────────────────────────────────────────────────────────────────────
+
+    fn encode_cookie(&self, token: &Token) -> Result<Cookie<'static>, SessionError> {
+        let body = serde_json::to_vec(token).map_err(|e| SessionError::Store(e.to_string()))?;
+        let sig = self.hmac(&body);
+
+        let mut joined = Vec::with_capacity(body.len() + sig.len() + 1);
+        joined.extend(&body);
+        joined.push(SEP);
+        joined.extend(sig);
+
+        let encoded = b64::URL_SAFE_NO_PAD.encode(joined);
+
+        Ok(Cookie::build(self.cookie_name.clone(), encoded)
+            .path("/")
+            .secure(true)
+            .http_only(true)
+            .same_site(SameSite::Lax)
+            .max_age(time::Duration::seconds(self.ttl.as_secs() as i64))
+            .finish())
+    }
+
+    fn decode(&self, raw: &str) -> Result<Token, SessionError> {
+        let decoded = b64::URL_SAFE_NO_PAD
+            .decode(raw)
+            .map_err(|_| SessionError::InvalidCookie)?;
+
+        let split = decoded
+            .iter()
+            .position(|b| *b == SEP)
+            .ok_or(SessionError::InvalidCookie)?;
+
+        let (body, sig) = decoded.split_at(split);
+        let sig = &sig[1..]; // drop separator
+
+        // Constant-time HMAC verify
+        if !ct_eq(sig, &self.hmac(body)) {
+            return Err(SessionError::BadSignature);
+        }
+
+        serde_json::from_slice(body).map_err(|_| SessionError::InvalidCookie)
+    }
+
+    #[inline(always)]
+    fn hmac(&self, data: &[u8]) -> Vec<u8> {
+        let mut mac =
+            HmacSha256::new_from_slice(&self.secret).expect("HMAC can take key of any size");
+        mac.update(data);
+        mac.finalize().into_bytes().to_vec()
+    }
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Actix-Web middleware glue
+// ────────────────────────────────────────────────────────────────────────────
+
+pub struct SessionMiddleware<S, Store> {
+    svc: S,
+    manager: SessionManager<Store>,
+}
+
+impl<S, Store> SessionMiddleware<S, Store> {
+    pub fn new(manager: SessionManager<Store>) -> impl Transform<S, ServiceRequest>
+    where
+        Store: SessionStore,
+    {
+        struct Factory<Store> {
+            manager: SessionManager<Store>,
+        }
+
+        impl<S, Store> Transform<S, ServiceRequest> for Factory<Store>
+        where
+            S: actix_service::Service<
+                    ServiceRequest,
+                    Response = ServiceResponse,
+                    Error = Error,
+                > + 'static,
+            S::Future: 'static,
+            Store: SessionStore,
+        {
+            type Response = S::Response;
+            type Error = S::Error;
+            type Transform = SessionMiddleware<S, Store>;
+            type InitError = ();
+            type Future = Ready<Result<Self::Transform, Self::InitError>>;
+
+            fn new_transform(&self, svc: S) -> Self::Future {
+                ok(SessionMiddleware {
+                    svc,
+                    manager: self.manager.clone(),
+                })
+            }
+        }
+
+        Factory { manager }
+    }
+}
+
+impl<S, Store> actix_service::Service<ServiceRequest> for SessionMiddleware<S, Store>
+where
+    S: actix_service::Service<ServiceRequest, Error = Error, Response = ServiceResponse> + 'static,
+    S::Future: 'static,
+    Store: SessionStore,
+{
+    type Response = S::Response;
+    type Error = S::Error;
+    type Future = LocalBoxFuture<'static, Result<Self::Response, Self::Error>>;
+
+    forward_ready!(svc);
+
+    fn call(&self, mut req: ServiceRequest) -> Self::Future {
+        let manager = self.manager.clone();
+        let cookie_opt = req.cookie(&manager.cookie_name).map(|c| c.value().to_owned());
+
+        let fut = self.svc.call(req);
+
+        Box::pin(async move {
+            // Attach session to request extensions (read-only)
+            if let Some(raw) = cookie_opt {
+                if let Ok(Some((token, data))) = manager.validate(&raw).await {
+                    let ext = fut
+                        .as_ref()
+                        .extensions()
+                        .clone(); // acquire before await to satisfy borrow checker
+                    ext.insert(token);
+                    ext.insert(data);
+                }
+            }
+
+            fut.await
+        })
+    }
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Constant-time comparison
+// ────────────────────────────────────────────────────────────────────────────
+
+#[inline(always)]
+fn ct_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut acc = 0u8;
+    for (&x, &y) in a.iter().zip(b) {
+        acc |= x ^ y;
+    }
+    acc == 0
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Tests
+// ────────────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[actix_rt::test]
+    async fn happy_path_roundtrip() {
+        let mgr = SessionManager::builder(MemoryStore::default(), b"super-secret");
+
+        let data = json!({ "user_id": 42, "role": "admin" });
+        let cookie = mgr.create(data.clone()).await.unwrap();
+
+        let parsed = mgr
+            .validate(cookie.value())
+            .await
+            .unwrap()
+            .expect("session missing");
+
+        assert_eq!(parsed.1, data);
+
+        mgr.destroy(cookie.value()).await.unwrap();
+        assert!(mgr.validate(cookie.value()).await.unwrap().is_none());
+    }
+
+    #[actix_rt::test]
+    async fn rejects_modified_cookie() {
+        let mgr = SessionManager::builder(MemoryStore::default(), b"key");
+        let c = mgr.create(serde_json::Value::Null).await.unwrap();
+        let mut tampered = c.value().to_owned();
+        tampered.push('X');
+
+        match mgr.validate(&tampered).await {
+            Err(SessionError::InvalidCookie | SessionError::BadSignature) => {}
+            other => panic!("unexpected result: {:?}", other),
+        }
+    }
+}
+```

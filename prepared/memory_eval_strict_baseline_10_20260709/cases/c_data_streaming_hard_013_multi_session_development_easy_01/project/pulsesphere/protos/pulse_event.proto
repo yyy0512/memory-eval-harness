@@ -1,0 +1,208 @@
+syntax = "proto3";
+
+/*
+ * PulseSphere: Real-Time Social Pulse Streaming Platform
+ * ------------------------------------------------------
+ * File: pulsesphere/protos/pulse_event.proto
+ *
+ * This Protocol Buffer definition captures the canonical schema for all
+ * “social pulse” events traversing the PulseSphere event fabric.  The schema
+ * is intentionally opinionated yet extensible—clear typing and enumerations
+ * enable high-performance binary serialization while facilitating schema
+ * evolution and forward/backward compatibility.
+ *
+ * NOTE:
+ *   1. Field numbers are *permanently* reserved once used—never reuse or
+ *      repurpose them.  All “gaps” are deliberate future-proofing.
+ *   2. All timestamps are milliseconds since UNIX epoch.
+ *   3. All IDs are opaque, UTF-8 strings.  Consumers MUST treat them as
+ *      uninterpreted identifiers unless explicitly documented otherwise.
+ *
+ * Code-generation stubs are consumed by both the C ingestion layer
+ * (nanopb) and a polyglot fleet of downstream micro-services.
+ */
+
+package pulsesphere.event.v1;
+
+option java_package         = "com.pulsesphere.protos.event.v1";
+option java_multiple_files  = true;
+option go_package           = "github.com/pulsesphere/protos/event/v1;eventv1";
+option objc_class_prefix    = "PSEvent";
+option csharp_namespace     = "PulseSphere.Event.V1";
+
+/* ----------------------------- Enumerations ------------------------------ */
+
+/*
+ * Enumerates supported source platforms.  Additional platforms MUST be
+ * appended, never inserted or reordered, to preserve wire compatibility.
+ */
+enum Platform {
+    PLATFORM_UNSPECIFIED = 0;
+    PLATFORM_FACEBOOK    = 1;
+    PLATFORM_TWITTER     = 2;
+    PLATFORM_INSTAGRAM   = 3;
+    PLATFORM_REDDIT      = 4;
+    PLATFORM_YOUTUBE     = 5;
+    PLATFORM_LINKEDIN    = 6;
+    PLATFORM_DISCORD     = 7;
+    PLATFORM_INTERNAL    = 8;   // First-party widgets (in-house)
+}
+
+/*
+ * Top-level pulse category.
+ */
+enum EventType {
+    EVENT_TYPE_UNSPECIFIED = 0;
+    EVENT_TYPE_LIKE        = 1;
+    EVENT_TYPE_COMMENT     = 2;
+    EVENT_TYPE_SHARE       = 3;
+    EVENT_TYPE_FOLLOW      = 4;
+    EVENT_TYPE_REACTION    = 5;
+}
+
+/*
+ * Enumerates atomic reaction types (e.g., Facebook/Messenger).
+ */
+enum ReactionType {
+    REACTION_UNSPECIFIED = 0;
+    REACTION_LOVE        = 1;
+    REACTION_HAHA        = 2;
+    REACTION_WOW         = 3;
+    REACTION_SAD         = 4;
+    REACTION_ANGRY       = 5;
+    REACTION_CARE        = 6;
+    REACTION_LIKE        = 7;  // Retains semantic parity with EVENT_TYPE_LIKE
+}
+
+/* ------------------------------- Messages -------------------------------- */
+
+/*
+ * Generic acknowledgement wrapper for single-shot RPC interactions.
+ */
+message Ack {
+    string  message = 1;   // human-readable context
+    uint64  ts_ms   = 2;   // server-side timestamp
+}
+
+/*
+ * Encapsulates latitude/longitude coordinates in WGS-84.
+ */
+message GeoLocation {
+    double  latitude  = 1;
+    double  longitude = 2;
+    string  country   = 3;  // ISO-3166 alpha-2; empty if unknown
+    string  city      = 4;  // Best-effort city extraction
+}
+
+/*
+ * Optional, best-effort enrichment values calculated downstream.
+ */
+message Enrichment {
+    GeoLocation geo           = 1;
+    string      language      = 2;  // BCP-47 language tag (“en”, “es-419”, …)
+    float       toxicity_score= 3;  // 0.0 = benign, 1.0 = maximum toxicity
+    map<string, string> custom= 4;  // Arbitrary KV pairs for pluggable enrichers
+}
+
+/*
+ * Per-event metadata provided at ingestion time.  Most fields are laxly
+ * typed to accommodate heterogeneous platform payloads.
+ */
+message PulseMetadata {
+    map<string, string> attributes = 1;  // Raw, platform-specific attributes
+}
+
+/*
+ * Canonical social pulse event.
+ */
+message PulseEvent {
+    /* Immutable identifiers */
+    string      event_id      = 1;  // Globally unique (UUIDv7 recommended)
+    string      tenant_id     = 2;  // Multi-tenant isolation (slug/formatted)
+
+    /* Source descriptors */
+    Platform    platform      = 3;
+    EventType   event_type    = 4;
+    uint64      platform_ts_ms= 5;  // Original timestamp according to source
+    uint64      ingest_ts_ms  = 6;  // Time PulseSphere first observed event
+
+    /* Actor / entity dimensions */
+    string      user_id       = 7;  // Originating user
+    string      target_id     = 8;  // Post/comment/profile/etc.
+    repeated string mentioned_user_ids = 9;  // Mentions or tags
+
+    /* Event-specific union */
+    oneof event_union {
+        LikePayload     like     = 20;
+        CommentPayload  comment  = 21;
+        SharePayload    share    = 22;
+        FollowPayload   follow   = 23;
+        ReactionPayload reaction = 24;
+    }
+
+    /* Optional enrichment & mutable metadata */
+    PulseMetadata metadata   = 30;
+    Enrichment    enrichment = 31;
+
+    /* Reserved gaps for forward compatibility */
+    reserved 32 to 39;
+}
+
+/* ------------------------- Event-specific Payloads ----------------------- */
+
+message LikePayload {
+    // Empty for now—placeholder for future expansion (e.g., like_type)
+}
+
+message SharePayload {
+    string  share_text = 1;  // Text accompanying the share, if any
+}
+
+message FollowPayload {
+    bool reciprocity = 1;    // True if mutual follow at ingest time
+}
+
+message CommentPayload {
+    string comment_id   = 1;
+    string text         = 2;     // UTF-8, no size limit at schema level
+    repeated string hashtags   = 3;
+    repeated string media_urls = 4; // Attached images/videos (absolute URLs)
+}
+
+message ReactionPayload {
+    ReactionType type = 1;
+}
+
+/* ------------------------------ Batch Wrapper ---------------------------- */
+
+/*
+ * Efficient container for batching multiple events into a single message
+ * (e.g., Kafka record, gRPC stream chunk).  Each batch is logically ordered
+ * (the publisher is responsible for ordering guarantees if required).
+ */
+message PulseEventBatch {
+    repeated PulseEvent events = 1;
+}
+
+/* --------------------------- Service Contracts --------------------------- */
+
+service PulseEventIngestService {
+    /*
+     * Publishes a single PulseEvent directly into the ingest fabric.
+     * Servers SHOULD stream an Ack once the event is durably recorded.
+     */
+    rpc PublishPulseEvent (PulseEvent) returns (Ack);
+
+    /*
+     * High-throughput batching endpoint leveraging client-side streaming.
+     * The server responds with a single Ack once the entire stream is
+     * flushed to the persistent queue.
+     */
+    rpc StreamPulseEvents (stream PulseEvent) returns (Ack);
+
+    /*
+     * Convenience API for in-process producers that already aggregate
+     * events into batches (e.g., Rust or Go scrapers).
+     */
+    rpc PublishPulseBatch (PulseEventBatch) returns (Ack);
+}

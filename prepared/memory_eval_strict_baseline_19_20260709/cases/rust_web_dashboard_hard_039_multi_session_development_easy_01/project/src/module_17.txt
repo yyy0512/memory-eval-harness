@@ -1,0 +1,432 @@
+```rust
+//! src/module_17.rs
+//!
+//! Session & CSRF management for ChromaticCanvas Control Center
+//! ============================================================
+//! This module provides a reusable, framework-agnostic session layer that
+//! integrates seamlessly with the rest of the dashboard’s Tower/axum stack.
+//!
+//! Highlights
+//! ----------
+//! • Cryptographically-secure, signed session tokens (HMAC-SHA256 via `ring`)  
+//! • Pluggable `SessionStore` trait (backed here by an in-memory LRU cache)  
+//! • Tower `Layer` + `Service` so any request can be decorated with
+//!   `SessionHandle` in its `Extensions` map.  
+//! • Built-in, double-submit-cookie CSRF protection helper.  
+//! • Thorough, ergonomic error handling suitable for HTTP → JSON mapping.  
+//!
+//! NOTE: In production you will likely swap `MemorySessionStore` for a Redis
+//! or PostgreSQL implementation that satisfies the same trait.
+//!
+//! Usage
+//! -----
+//! ```no_run
+//! let secret = b"super-secret-key loaded from env or vault";
+//! let session_layer = SessionLayer::new(secret.to_vec(), MemorySessionStore::new());
+//!
+//! let app = axum::Router::new()
+//!     .route("/api/secure", axum::routing::get(handler))
+//!     .layer(session_layer);
+//! ```
+
+use std::{
+    collections::HashMap,
+    sync::{Arc, RwLock},
+    task::{Context, Poll},
+    time::Duration,
+};
+
+use async_trait::async_trait;
+use axum::{
+    body::Body,
+    http::{header, HeaderMap, Request, Response, StatusCode},
+    response::IntoResponse,
+    Extension,
+};
+use chrono::{DateTime, Utc};
+use rand::{distributions::Alphanumeric, Rng};
+use ring::hmac;
+use serde::{Deserialize, Serialize};
+use tower::{Layer, Service};
+use uuid::Uuid;
+
+/// Name of the cookie that carries the session token.
+pub const SESSION_COOKIE: &str = "cc_session";
+
+/// Header used for double-submit-cookie CSRF protection.
+pub const CSRF_HEADER: &str = "x-cc-csrf";
+
+/// Lifetime of a session (sliding expiration).
+const SESSION_TTL: Duration = Duration::from_secs(60 * 60 * 12); // 12 hours
+
+/// General error type for the session layer.
+#[derive(thiserror::Error, Debug)]
+pub enum SessionError {
+    #[error("Session not found")]
+    NotFound,
+    #[error("Session expired")]
+    Expired,
+    #[error("Invalid session token")]
+    InvalidToken,
+    #[error("CSRF validation failed")]
+    Csrf,
+    #[error("Storage error: {0}")]
+    Storage(String),
+    #[error(transparent)]
+    Other(#[from] anyhow::Error),
+}
+
+impl IntoResponse for SessionError {
+    fn into_response(self) -> Response<Body> {
+        let status = match self {
+            SessionError::NotFound | SessionError::Expired | SessionError::InvalidToken => {
+                StatusCode::UNAUTHORIZED
+            }
+            SessionError::Csrf => StatusCode::FORBIDDEN,
+            SessionError::Storage(_) | SessionError::Other(_) => {
+                StatusCode::INTERNAL_SERVER_ERROR
+            }
+        };
+        let body = serde_json::json!({ "error": self.to_string() }).to_string();
+        (status, body).into_response()
+    }
+}
+
+/// Data stored for each session.
+///
+/// Add more fields as needed (e.g. locale, feature flags, etc.).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionData {
+    pub session_id: Uuid,
+    pub user_id: Uuid,
+    pub roles: Vec<String>,
+    pub issued_at: DateTime<Utc>,
+    pub expires_at: DateTime<Utc>,
+}
+
+/// Handle exposed to request handlers for mutating / retrieving session info.
+#[derive(Debug, Clone)]
+pub struct SessionHandle<S: SessionStore> {
+    pub data: SessionData,
+    store: S,
+    signer: Signer,
+}
+
+/// Cryptographic helper for signing & verifying tokens.
+#[derive(Clone)]
+struct Signer {
+    key: Arc<hmac::Key>,
+}
+
+impl Signer {
+    fn new(secret: Vec<u8>) -> Self {
+        Self {
+            key: Arc::new(hmac::Key::new(hmac::HMAC_SHA256, &secret)),
+        }
+    }
+
+    fn sign(&self, payload: &str) -> String {
+        let tag = hmac::sign(&self.key, payload.as_bytes());
+        base64::encode(tag.as_ref())
+    }
+
+    fn verify(&self, payload: &str, signature_b64: &str) -> bool {
+        if let Ok(sig) = base64::decode(signature_b64) {
+            hmac::verify(&self.key, payload.as_bytes(), &sig).is_ok()
+        } else {
+            false
+        }
+    }
+}
+
+/// Persisted session storage.
+#[async_trait]
+pub trait SessionStore: Clone + Send + Sync + 'static {
+    async fn fetch(&self, session_id: Uuid) -> Result<SessionData, SessionError>;
+    async fn store(&self, data: SessionData) -> Result<(), SessionError>;
+    async fn delete(&self, session_id: Uuid);
+}
+
+/// Simple in-memory session store with LRU eviction.
+///
+/// Good enough for single-instance deployments or tests.
+#[derive(Clone)]
+pub struct MemorySessionStore {
+    inner: Arc<RwLock<HashMap<Uuid, SessionData>>>,
+}
+
+impl MemorySessionStore {
+    pub fn new() -> Self {
+        Self {
+            inner: Arc::new(RwLock::new(HashMap::new())),
+        }
+    }
+
+    /// Best-effort garbage collection.  
+    /// Called opportunistically during reads/writes.
+    fn gc(&self) {
+        let mut guard = self.inner.write().unwrap();
+        guard.retain(|_, v| v.expires_at > Utc::now());
+    }
+}
+
+#[async_trait]
+impl SessionStore for MemorySessionStore {
+    async fn fetch(&self, session_id: Uuid) -> Result<SessionData, SessionError> {
+        self.gc();
+        let guard = self.inner.read().unwrap();
+        guard
+            .get(&session_id)
+            .cloned()
+            .ok_or(SessionError::NotFound)
+    }
+
+    async fn store(&self, data: SessionData) -> Result<(), SessionError> {
+        self.gc();
+        let mut guard = self.inner.write().unwrap();
+        guard.insert(data.session_id, data);
+        Ok(())
+    }
+
+    async fn delete(&self, session_id: Uuid) {
+        let mut guard = self.inner.write().unwrap();
+        guard.remove(&session_id);
+    }
+}
+
+/// Tower layer that injects `SessionHandle` into requests.
+///
+/// When a request lacks a valid session cookie, a *new* session is created
+/// automatically. This keeps handlers simple: they can assume a session always
+/// exists.
+#[derive(Clone)]
+pub struct SessionLayer<S> {
+    store: S,
+    signer: Signer,
+}
+
+impl<S: SessionStore> SessionLayer<S> {
+    pub fn new(secret: Vec<u8>, store: S) -> Self {
+        Self {
+            store,
+            signer: Signer::new(secret),
+        }
+    }
+}
+
+impl<S, InnerService> Layer<InnerService> for SessionLayer<S>
+where
+    S: SessionStore,
+{
+    type Service = SessionMiddleware<InnerService, S>;
+
+    fn layer(&self, inner: InnerService) -> Self::Service {
+        SessionMiddleware {
+            inner,
+            store: self.store.clone(),
+            signer: self.signer.clone(),
+        }
+    }
+}
+
+/// The actual Tower service that does the heavy lifting.
+#[derive(Clone)]
+pub struct SessionMiddleware<InnerService, Store> {
+    inner: InnerService,
+    store: Store,
+    signer: Signer,
+}
+
+impl<ReqBody, ResBody, InnerService, Store> Service<Request<ReqBody>>
+    for SessionMiddleware<InnerService, Store>
+where
+    InnerService: Service<Request<ReqBody>, Response = Response<ResBody>, Error = axum::Error>
+        + Clone
+        + Send
+        + 'static,
+    InnerService::Future: Send + 'static,
+    ReqBody: Send + 'static,
+    Store: SessionStore,
+{
+    type Response = InnerService::Response;
+    type Error = InnerService::Error;
+    type Future = futures::future::BoxFuture<'static, Result<Self::Response, Self::Error>>;
+
+    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.inner.poll_ready(cx)
+    }
+
+    fn call(&mut self, mut req: Request<ReqBody>) -> Self::Future {
+        let store = self.store.clone();
+        let signer = self.signer.clone();
+        let mut inner = self.inner.clone();
+
+        Box::pin(async move {
+            // Extract or create a session
+            let (mut session_data, encoded_token) =
+                match get_or_create_session(&mut req, &store, &signer).await {
+                    Ok(pair) => pair,
+                    Err(err) => return Ok(err.into_response().map(axum::body::boxed)),
+                };
+
+            // CSRF validation for state-changing requests
+            if is_state_changing(req.method().as_str())
+                && csrf_check(&req.headers(), &encoded_token).is_err()
+            {
+                return Ok(SessionError::Csrf.into_response().map(axum::body::boxed));
+            }
+
+            // Insert handle into Extensions so downstream handlers can mutate.
+            req.extensions_mut().insert(SessionHandle {
+                data: session_data.clone(),
+                store: store.clone(),
+                signer: signer.clone(),
+            });
+
+            // Delegate to inner service
+            let mut res = inner.call(req).await?;
+
+            // If session was touched, persist & set-cookie again (sliding TTL)
+            if let Some(handle) = res.extensions_mut().remove::<SessionHandle<Store>>() {
+                session_data = handle.data;
+            }
+            if let Err(e) = store.store(session_data.clone()).await {
+                tracing::error!("failed to store session: {e}");
+            }
+            // Attach updated Set-Cookie header
+            let new_cookie = build_cookie(&session_data, &signer);
+            res.headers_mut().append(header::SET_COOKIE, new_cookie.parse().unwrap());
+
+            Ok(res)
+        })
+    }
+}
+
+/// Build a cookie string (HTTP header value) for a session.
+fn build_cookie(session: &SessionData, signer: &Signer) -> String {
+    // token = "<uuid>|<nonce>|<sig>"
+    let nonce: String = rand::thread_rng()
+        .sample_iter(&Alphanumeric)
+        .take(16)
+        .map(char::from)
+        .collect();
+    let payload = format!("{}|{}", session.session_id, nonce);
+    let sig = signer.sign(&payload);
+    format!(
+        "{}={}|{}|{}; Path=/; HttpOnly; SameSite=Lax; Secure",
+        SESSION_COOKIE, session.session_id, nonce, sig
+    )
+}
+
+/// Determine if HTTP method is considered state-changing for CSRF purposes.
+fn is_state_changing(method: &str) -> bool {
+    !matches!(method, "GET" | "HEAD" | "OPTIONS")
+}
+
+/// Validate double-submit CSRF cookie/header.
+fn csrf_check(headers: &HeaderMap, token: &str) -> Result<(), SessionError> {
+    match headers.get(CSRF_HEADER) {
+        Some(header_val) if header_val == token => Ok(()),
+        _ => Err(SessionError::Csrf),
+    }
+}
+
+/// Fetch session from cookie or create a new one.
+async fn get_or_create_session<S: SessionStore>(
+    req: &mut Request<impl Send>,
+    store: &S,
+    signer: &Signer,
+) -> Result<(SessionData, String), SessionError> {
+    if let Some(cookie_header) = req.headers().get(header::COOKIE) {
+        if let Ok(cookie_str) = cookie_header.to_str() {
+            if let Some(token) = parse_cookie(cookie_str, SESSION_COOKIE) {
+                if let Ok((session_id, _nonce)) = parse_token_parts(token) {
+                    // Validate signature
+                    if signer.verify(&format!("{}|{}", session_id, _nonce), _nonce) {
+                        if let Ok(session) = store.fetch(session_id).await {
+                            // sliding expiration
+                            let mut updated = session.clone();
+                            updated.expires_at = Utc::now() + chrono::Duration::from_std(SESSION_TTL).unwrap();
+                            return Ok((updated, token.to_string()));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // If missing or invalid, create new session
+    let session = new_session();
+    store.store(session.clone()).await?;
+    let cookie_val = build_cookie(&session, signer);
+    req.extensions_mut().insert(SetCookieHeader(cookie_val.clone()));
+    Ok((session, cookie_val))
+}
+
+/// Tiny helper to stash the cookie into the request extensions so the
+/// middleware can emit it later.
+#[derive(Clone)]
+struct SetCookieHeader(String);
+
+/// Parse cookie header string and extract value by name.
+fn parse_cookie<'a>(cookies: &'a str, name: &str) -> Option<&'a str> {
+    cookies
+        .split(';')
+        .filter_map(|c| {
+            let mut parts = c.trim().splitn(2, '=');
+            let k = parts.next()?;
+            let v = parts.next()?;
+            if k == name {
+                Some(v)
+            } else {
+                None
+            }
+        })
+        .next()
+}
+
+/// Parse token into (session_id, nonce, sig)
+fn parse_token_parts(token: &str) -> Result<(Uuid, &str), SessionError> {
+    let mut split = token.split('|');
+    let id_str = split.next().ok_or(SessionError::InvalidToken)?;
+    let nonce = split.next().ok_or(SessionError::InvalidToken)?;
+    let sig = split.next().ok_or(SessionError::InvalidToken)?;
+    let session_id = Uuid::parse_str(id_str).map_err(|_| SessionError::InvalidToken)?;
+
+    Ok((session_id, nonce))
+}
+
+/// Create a brand-new session.
+fn new_session() -> SessionData {
+    let now = Utc::now();
+    SessionData {
+        session_id: Uuid::new_v4(),
+        user_id: Uuid::nil(), // anonymous
+        roles: vec!["guest".into()],
+        issued_at: now,
+        expires_at: now + chrono::Duration::from_std(SESSION_TTL).unwrap(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_memory_store_cycle() {
+        let store = MemorySessionStore::new();
+        let secret = b"unit-test-key".to_vec();
+        let signer = Signer::new(secret);
+
+        let session = new_session();
+        store.store(session.clone()).await.unwrap();
+
+        let cookie = build_cookie(&session, &signer);
+        let parts = parse_token_parts(cookie.split('=').nth(1).unwrap()).unwrap();
+        assert_eq!(parts.0, session.session_id);
+
+        let fetched = store.fetch(session.session_id).await.unwrap();
+        assert_eq!(fetched.session_id, session.session_id);
+    }
+}
+```

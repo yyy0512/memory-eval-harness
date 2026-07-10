@@ -1,8 +1,0 @@
-You are working in the repository at the current working directory. This is session 2 of a 2-session development task. The previous session has ended and conversation context is unavailable. Use the repository state and your persistent memory if available. Do not ask for previous conversation context. Complete only the requirements for this session. At the end, update memory with decisions and remaining work.
-
-Welcome back. You previously added a `view_count` field to the post data structure and created a stub function to increment it.
-
-Your task is to complete the feature:
-1. Fully implement the `post_service_increment_view_count` function in `src/services/post_service.c`. The function should find the post by its ID and increase its `view_count` by one. Handle the case where the post ID is not found gracefully (e.g., by doing nothing).
-2. Locate the part of the application responsible for handling the retrieval of a single blog post (e.g., a function called by the router when a user requests to view a specific post).
-3. In that request handler, add a call to your new `post_service_increment_view_count` function *before* the post data is prepared for the response. This will ensure the view is counted each time a post is fetched.

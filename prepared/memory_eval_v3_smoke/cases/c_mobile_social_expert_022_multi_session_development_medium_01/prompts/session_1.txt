@@ -1,7 +1,0 @@
-You are working in the repository at the current working directory. This is session 1 of a multi-session development task. Complete only the requirements for this session. At the end, save any useful project-specific memory for future sessions.
-
-This task is divided into three sessions. You must maintain context between sessions to successfully complete the overall objective.
-
-**Session 1: Bug Investigation & Triage**
-*   **Goal:** Identify the root cause of the offline caching bug in the marketplace.
-*   **Instructions:** Users report that preview images for items in the `Marketplace` are not loading when offline, even if they were viewed previously. Your task is to investigate the cause of this caching issue. Analyze the interaction between `marketplace_service.c`, `data_repository.c`, and `data_local_storage.c`. Pinpoint the exact function and logical error responsible for the bug. You should describe the problem and propose a fix, but do not write the code yet. Your output should be a clear explanation of the bug and the intended change.

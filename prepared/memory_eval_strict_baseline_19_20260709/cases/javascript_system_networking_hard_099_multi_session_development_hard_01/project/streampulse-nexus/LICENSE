@@ -1,0 +1,323 @@
+```javascript
+/**
+ * StreamPulse Nexus — License Management Library
+ *
+ * This file intentionally sits under streampulse-nexus/LICENSE instead of the
+ * conventional "./src" tree because it doubles as both *legal artifact* and
+ * *runtime safeguard*.  The text-based license is bundled at build-time and
+ * verified on every boot, guaranteeing that only properly licensed code can
+ * interact with the StreamPulse backbone.
+ *
+ * NOTE:  DO NOT MODIFY unless you are a member of the Core Platform Team.
+ * Any change to the structure or verification logic will invalidate the
+ * cryptographic signature and prevent the cluster from starting.
+ */
+
+'use strict';
+
+/* -------------------------------------------------------------------------- */
+/*                                   IMPORTS                                  */
+/* -------------------------------------------------------------------------- */
+
+const fs           = require('fs');
+const path         = require('path');
+const crypto       = require('crypto');
+const { EventEmitter } = require('events');
+
+/* -------------------------------------------------------------------------- */
+/*                                 CONSTANTS                                  */
+/* -------------------------------------------------------------------------- */
+
+const DEFAULT_LICENSE_PATH = path.join(
+  __dirname,
+  process.env.STREAMPULSE_LICENSE_FILE || 'streampulse.lic'
+);
+
+const PUBLIC_KEY_PATH = path.join(
+  __dirname,
+  'public.pem' // RSA-2048 public key issued by StreamPulse Licensing Server
+);
+
+const GRACE_PERIOD_DAYS  = 5;       // Number of days allowed past expiry
+const EXPIRY_WARNING_DAYS = 30;     // Threshold to emit "licenseExpiring"
+const CHECK_INTERVAL_MS  = 12 * 60 * 60 * 1000; // Twice a day
+
+/* -------------------------------------------------------------------------- */
+/*                            UTILITY / INTERNALS                             */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Returns the number of whole days between two Epoch timestamps.
+ * @param {number} a - Timestamp A in milliseconds.
+ * @param {number} b - Timestamp B in milliseconds.
+ */
+function diffDays(a, b) {
+  return Math.floor(Math.abs(a - b) / (1000 * 60 * 60 * 24));
+}
+
+/**
+ * Safely parses JSON with fallback value.
+ * @template T
+ * @param {string} json
+ * @param {T} fallback
+ * @returns {T}
+ */
+function safeJSONParse(json, fallback) {
+  try {
+    return JSON.parse(json);
+  } catch (err) {
+    return fallback;
+  }
+}
+
+/* -------------------------------------------------------------------------- */
+/*                               ERROR CLASSES                                */
+/* -------------------------------------------------------------------------- */
+
+class LicenseError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'LicenseError';
+  }
+}
+
+class LicenseExpiredError extends LicenseError {
+  constructor(message, daysPastDue) {
+    super(message);
+    this.name = 'LicenseExpiredError';
+    this.daysPastDue = daysPastDue;
+  }
+}
+
+class LicenseSignatureError extends LicenseError {
+  constructor(message) {
+    super(message);
+    this.name = 'LicenseSignatureError';
+  }
+}
+
+/* -------------------------------------------------------------------------- */
+/*                              LICENSE MANAGER                               */
+/* -------------------------------------------------------------------------- */
+
+class LicenseManager extends EventEmitter {
+  constructor() {
+    super();
+
+    /** @type {Readonly<StreamPulseLicense>} */
+    this._licensePayload = Object.freeze({
+      id: '',
+      issuedTo: '',
+      issuedAt: 0,
+      expiresAt: 0,
+      modules: [],
+      signature: ''
+    });
+
+    this._publicKey = null;
+    this._interval  = null;
+
+    this._bootstrap();
+  }
+
+  /* ---------------------------------------------------------------------- */
+  /*                              PUBLIC API                                */
+  /* ---------------------------------------------------------------------- */
+
+  /**
+   * Checks whether the current license grants access to a specific module.
+   * @param {string} moduleName
+   * @returns {boolean}
+   */
+  hasModule(moduleName) {
+    return this._licensePayload.modules.includes(moduleName) ||
+           this._licensePayload.modules.includes('*');
+  }
+
+  /**
+   * Throws if module access is not permitted.
+   * @param {string} moduleName
+   * @throws {LicenseError}
+   */
+  assertModuleAccess(moduleName) {
+    if (!this.hasModule(moduleName)) {
+      throw new LicenseError(
+        `License '${this._licensePayload.id}' does not permit ` +
+        `usage of module '${moduleName}'.`
+      );
+    }
+  }
+
+  /**
+   * Gracefully shutdown the manager (primarily used in unit tests).
+   */
+  dispose() {
+    if (this._interval) clearInterval(this._interval);
+    this.removeAllListeners();
+  }
+
+  /* ---------------------------------------------------------------------- */
+  /*                              INTERNALS                                 */
+  /* ---------------------------------------------------------------------- */
+
+  _bootstrap() {
+    this._loadPublicKey();
+    this._loadLicenseFromFile(DEFAULT_LICENSE_PATH);
+    this._verifyAndSchedule();
+  }
+
+  _loadPublicKey() {
+    try {
+      this._publicKey = fs.readFileSync(PUBLIC_KEY_PATH, 'utf8');
+    } catch (err) {
+      throw new LicenseError(
+        `Unable to load StreamPulse public key: ${err.message}`
+      );
+    }
+  }
+
+  /**
+   * Reads and caches the license file.
+   * @param {string} licensePath
+   */
+  _loadLicenseFromFile(licensePath) {
+    if (!fs.existsSync(licensePath)) {
+      throw new LicenseError(`License file not found: ${licensePath}`);
+    }
+
+    const fileContent = fs.readFileSync(licensePath, 'utf8');
+    const parsed      = safeJSONParse(fileContent, null);
+
+    if (!parsed || typeof parsed !== 'object') {
+      throw new LicenseError('License file is not valid JSON.');
+    }
+
+    // Basic structural validation
+    const requiredKeys = ['id', 'issuedTo', 'issuedAt', 'expiresAt', 'modules', 'signature'];
+    for (const key of requiredKeys) {
+      if (!(key in parsed)) {
+        throw new LicenseError(`Malformed license: missing '${key}'.`);
+      }
+    }
+
+    this._licensePayload = Object.freeze(parsed);
+  }
+
+  /**
+   * Verify the license once immediately, then schedule periodic checks.
+   */
+  _verifyAndSchedule() {
+    // Initial verification
+    this._verifySignature(this._licensePayload);
+
+    // Expiry check
+    this._checkValidityAndEmit();
+
+    // Schedule
+    this._interval = setInterval(
+      () => this._checkValidityAndEmit(),
+      CHECK_INTERVAL_MS
+    );
+    this._interval.unref(); // Allow Node to exit if this is the only listener
+  }
+
+  /**
+   * Verifies the cryptographic signature against the embedded payload.
+   * @param {StreamPulseLicense} payload
+   */
+  _verifySignature(payload) {
+    const { signature, ...unsignedData } = payload;
+    const verifier = crypto.createVerify('RSA-SHA256');
+    verifier.update(JSON.stringify(unsignedData));
+    verifier.end();
+
+    const signatureIsValid = verifier.verify(
+      this._publicKey,
+      signature,
+      'base64'
+    );
+
+    if (!signatureIsValid) {
+      throw new LicenseSignatureError('License signature is invalid.');
+    }
+  }
+
+  /**
+   * Emits events based on license validity; throws if expired past grace period.
+   */
+  _checkValidityAndEmit() {
+    const now = Date.now();
+    const daysToExpire = diffDays(now, this._licensePayload.expiresAt);
+
+    if (now > this._licensePayload.expiresAt) {
+      const daysPast = diffDays(now, this._licensePayload.expiresAt);
+      if (daysPast > GRACE_PERIOD_DAYS) {
+        throw new LicenseExpiredError(
+          `License expired ${daysPast} days ago. System shutdown.`, daysPast
+        );
+      } else {
+        this.emit('licenseGracePeriod', { daysPast });
+        return;
+      }
+    }
+
+    if (daysToExpire <= EXPIRY_WARNING_DAYS) {
+      this.emit('licenseExpiring', { daysToExpire });
+    }
+  }
+}
+
+/* -------------------------------------------------------------------------- */
+/*                                 TYPEDEFS                                   */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * @typedef {Object} StreamPulseLicense
+ * @property {string} id             - Human-readable license id.
+ * @property {string} issuedTo       - Company or cluster name.
+ * @property {number} issuedAt       - Epoch millis when the license was issued.
+ * @property {number} expiresAt      - Epoch millis when the license expires.
+ * @property {string[]} modules      - List of module names licensed ("*" → all).
+ * @property {string} signature      - Base64-encoded RSA signature of payload.
+ */
+
+/* -------------------------------------------------------------------------- */
+/*                             SINGLETON EXPORT                               */
+/* -------------------------------------------------------------------------- */
+
+const licenseManager = new LicenseManager();
+module.exports = licenseManager;
+
+/* -------------------------------------------------------------------------- */
+/*                               SELF-TEST HOOK                               */
+/* -------------------------------------------------------------------------- */
+
+if (require.main === module) {
+  /* eslint-disable no-console */
+  console.log('Performing self-test…');
+
+  try {
+    licenseManager.assertModuleAccess('system_monitoring');
+    console.log('✔ License valid for "system_monitoring".');
+
+    licenseManager.on('licenseExpiring', ({ daysToExpire }) => {
+      console.warn(
+        `⚠ License will expire in ${daysToExpire} day(s). ` +
+        'Please contact support@streampulse.io.'
+      );
+    });
+
+    licenseManager.on('licenseGracePeriod', ({ daysPast }) => {
+      console.error(
+        `⚠ License expired ${daysPast} day(s) ago. ` +
+        'Running within grace period—functional but not supported.'
+      );
+    });
+
+    console.log('Self-test passed.');
+  } catch (err) {
+    console.error('Self-test failed:', err);
+    process.exit(1);
+  }
+}
+```

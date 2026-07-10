@@ -1,0 +1,553 @@
+/*
+ * =============================================================================
+ * RetinaGuard Vision Suite
+ * ---------------------------------
+ * Module      : data/images/rg_image_repo.c
+ * Description : Provides a small, self-contained image-catalog component that
+ *               (1) ingests images from a directory tree, (2) extracts light
+ *               metadata, (3) performs lightweight quality checks, and
+ *               (4) publishes ingestion events to registered observers.
+ *
+ *               Although the RetinaGuard monolith embeds many sophisticated CV
+ *               stages, this module purposefully keeps dependencies minimal and
+ *               POSIX-portable so it can run on resource-constrained primary
+ *               care hardware without GPU support.
+ *
+ * Build       : gcc -std=c11 -Wall -Wextra -pedantic -O2 \
+ *                 -lpng -ljpeg -pthread \
+ *                 -c data/images/rg_image_repo.c
+ *
+ * Copyright   : (c) 2024, RetinaGuard Medical
+ * License     : Proprietary — Internal use only
+ * =============================================================================
+ */
+
+#define _POSIX_C_SOURCE 200809L /* For getline(3), timespec, etc. */
+
+#include <errno.h>
+#include <dirent.h>
+#include <fcntl.h>
+#include <inttypes.h>
+#include <jpeglib.h>
+#include <limits.h>
+#include <pthread.h>
+#include <png.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <time.h>
+#include <unistd.h>
+
+/* ============================================================================
+ * Public data-types
+ * ============================================================================
+ */
+
+typedef struct
+{
+    char     path[PATH_MAX];    /* Absolute or relative path on disk            */
+    uint16_t width;             /* Pixel width determined from header           */
+    uint16_t height;            /* Pixel height                                 */
+    double   est_brightness;    /* Quick-and-dirty brightness metric            */
+    time_t   capture_ts;        /* Parsed from file name or file mtime          */
+    char     patient_id[64];    /* Parsed from file name when available         */
+    char     laterality[8];     /* "OD", "OS", "OU" or empty                    */
+} RG_Image;
+
+/* Forward declaration of opaque list type; defined later */
+typedef struct RG_ImageList RG_ImageList;
+
+/* Observer callback signature ------------------------------------------------ */
+typedef void (*rg_image_ingest_cb)(const RG_Image *img,
+                                   void           *user_data);
+
+
+/* ============================================================================
+ * API Surface (header-like section)
+ * ============================================================================
+ */
+
+/*
+ * rg_images_open
+ * ----------------
+ * Creates an image list by scanning a directory tree recursively for supported
+ * image extensions (.jpg/.jpeg/.png).  A small amount of metadata is extracted
+ * from the header of each file without performing a full decode.
+ *
+ * Parameters
+ *   image_dir   — Root directory to scan.
+ *
+ * Returns
+ *   Pointer to a newly allocated RG_ImageList on success; NULL on failure.
+ */
+RG_ImageList *rg_images_open(const char *image_dir);
+
+/*
+ * rg_images_free
+ * ----------------
+ * Releases resources associated with an RG_ImageList.
+ */
+void rg_images_free(RG_ImageList *list);
+
+/*
+ * rg_images_count
+ * ----------------
+ * Returns the number of images contained in the list.
+ */
+size_t rg_images_count(const RG_ImageList *list);
+
+/*
+ * rg_images_get
+ * --------------
+ * Provides read-only access to an individual image by index (0 ≤ idx < count).
+ * Returns NULL if idx is out of range.
+ */
+const RG_Image *rg_images_get(const RG_ImageList *list, size_t idx);
+
+
+/*
+ * Observer Registration
+ * ----------------------
+ * Registers/unregisters callbacks that will be invoked for each new image that
+ * successfully passes lightweight quality control during rg_images_open().
+ *
+ * Return value is 0 on success, -1 on error (e.g., capacity reached).
+ */
+int  rg_images_register_observer (rg_image_ingest_cb cb, void *user_data);
+void rg_images_unregister_observer(rg_image_ingest_cb cb, void *user_data);
+
+
+/* ============================================================================
+ * Private implementation details
+ * ============================================================================
+ */
+
+#define RG_MAX_OBSERVERS  8   /* Hard cap keeps footprint and synchronization
+                               * requirements simple.                          */
+#define RG_MIN_DIMENSION  800 /* Reject images < 800 pixels in the smallest
+                               * dimension.                                    */
+#define RG_MIN_BRIGHTNESS 20. /* Arbitrarily chosen brightness threshold.      */
+
+struct RG_ImageList
+{
+    RG_Image *items;
+    size_t    len;
+    size_t    cap;
+};
+
+typedef struct
+{
+    rg_image_ingest_cb cb;
+    void              *user_data;
+} observer_t;
+
+static observer_t g_observers[RG_MAX_OBSERVERS];
+static pthread_mutex_t g_obs_mtx = PTHREAD_MUTEX_INITIALIZER;
+
+/* ---------------------------------------------------------------------------
+ * Utility: Safe malloc with error exit
+ * --------------------------------------------------------------------------- */
+static void *xcalloc(size_t n, size_t sz)
+{
+    void *p = calloc(n, sz);
+    if (!p)
+    {
+        fprintf(stderr, "[rg_image_repo] Out of memory (%zu bytes)\n", n * sz);
+        abort();
+    }
+    return p;
+}
+
+/* ---------------------------------------------------------------------------
+ * Utility: String ends-with case-insensitive
+ * --------------------------------------------------------------------------- */
+static bool str_ends_with_ci(const char *str, const char *suffix)
+{
+    size_t slen = strlen(str);
+    size_t tlen = strlen(suffix);
+    if (tlen > slen)
+        return false;
+    return strncasecmp(str + slen - tlen, suffix, tlen) == 0;
+}
+
+/* ---------------------------------------------------------------------------
+ * Utility: Register/Unregister Observers
+ * --------------------------------------------------------------------------- */
+int rg_images_register_observer(rg_image_ingest_cb cb, void *user_data)
+{
+    if (!cb)
+        return -1;
+
+    pthread_mutex_lock(&g_obs_mtx);
+    for (size_t i = 0; i < RG_MAX_OBSERVERS; ++i)
+    {
+        if (g_observers[i].cb == NULL)
+        {
+            g_observers[i].cb        = cb;
+            g_observers[i].user_data = user_data;
+            pthread_mutex_unlock(&g_obs_mtx);
+            return 0;
+        }
+    }
+    pthread_mutex_unlock(&g_obs_mtx);
+    return -1; /* No capacity */
+}
+
+void rg_images_unregister_observer(rg_image_ingest_cb cb, void *user_data)
+{
+    pthread_mutex_lock(&g_obs_mtx);
+    for (size_t i = 0; i < RG_MAX_OBSERVERS; ++i)
+    {
+        if (g_observers[i].cb == cb && g_observers[i].user_data == user_data)
+        {
+            g_observers[i].cb        = NULL;
+            g_observers[i].user_data = NULL;
+            break;
+        }
+    }
+    pthread_mutex_unlock(&g_obs_mtx);
+}
+
+/* ---------------------------------------------------------------------------
+ * Utility: Invoke observers
+ * --------------------------------------------------------------------------- */
+static void notify_observers(const RG_Image *img)
+{
+    pthread_mutex_lock(&g_obs_mtx);
+    for (size_t i = 0; i < RG_MAX_OBSERVERS; ++i)
+    {
+        if (g_observers[i].cb)
+            g_observers[i].cb(img, g_observers[i].user_data);
+    }
+    pthread_mutex_unlock(&g_obs_mtx);
+}
+
+/* ---------------------------------------------------------------------------
+ * PNG header inspection
+ * --------------------------------------------------------------------------- */
+static bool read_png_header(const char *path, uint16_t *w, uint16_t *h)
+{
+    FILE *fp = fopen(path, "rb");
+    if (!fp)
+        return false;
+
+    png_byte header[8];
+    if (fread(header, 1, 8, fp) != 8 || png_sig_cmp(header, 0, 8))
+    {
+        fclose(fp);
+        return false;
+    }
+
+    png_structp png_ptr = png_create_read_struct(PNG_LIBPNG_VER_STRING,
+                                                 NULL, NULL, NULL);
+    if (!png_ptr)
+    {
+        fclose(fp);
+        return false;
+    }
+    png_infop info_ptr = png_create_info_struct(png_ptr);
+    if (!info_ptr)
+    {
+        png_destroy_read_struct(&png_ptr, NULL, NULL);
+        fclose(fp);
+        return false;
+    }
+    if (setjmp(png_jmpbuf(png_ptr)))
+    {
+        png_destroy_read_struct(&png_ptr, &info_ptr, NULL);
+        fclose(fp);
+        return false;
+    }
+
+    png_init_io(png_ptr, fp);
+    png_set_sig_bytes(png_ptr, 8);
+    png_read_info(png_ptr, info_ptr);
+
+    png_uint_32 width  = png_get_image_width(png_ptr, info_ptr);
+    png_uint_32 height = png_get_image_height(png_ptr, info_ptr);
+
+    *w = (uint16_t)width;
+    *h = (uint16_t)height;
+
+    png_destroy_read_struct(&png_ptr, &info_ptr, NULL);
+    fclose(fp);
+    return true;
+}
+
+/* ---------------------------------------------------------------------------
+ * JPEG header inspection + crude brightness estimate
+ * --------------------------------------------------------------------------- */
+static bool read_jpeg_header(const char *path,
+                             uint16_t    *w,
+                             uint16_t    *h,
+                             double      *brightness_out)
+{
+    struct jpeg_decompress_struct cinfo;
+    struct jpeg_error_mgr         jerr;
+
+    FILE *fp = fopen(path, "rb");
+    if (!fp)
+        return false;
+
+    cinfo.err = jpeg_std_error(&jerr);
+    jpeg_create_decompress(&cinfo);
+    jpeg_stdio_src(&cinfo, fp);
+
+    if (jpeg_read_header(&cinfo, TRUE) != JPEG_HEADER_OK)
+    {
+        jpeg_destroy_decompress(&cinfo);
+        fclose(fp);
+        return false;
+    }
+
+    *w = (uint16_t)cinfo.image_width;
+    *h = (uint16_t)cinfo.image_height;
+
+    /* Perform quick brightness sample by decoding a reduced scan */
+    jpeg_calc_output_dimensions(&cinfo);
+    cinfo.scale_num   = 1;
+    cinfo.scale_denom = 8; /* 1/8 resolution for speed */
+    jpeg_start_decompress(&cinfo);
+
+    JSAMPARRAY buffer = (*cinfo.mem->alloc_sarray)(
+        (j_common_ptr)&cinfo, JPOOL_IMAGE,
+        cinfo.output_width * cinfo.output_components, 1);
+
+    uint64_t lum_sum = 0;
+    size_t   pixels  = 0;
+
+    while (cinfo.output_scanline < cinfo.output_height)
+    {
+        jpeg_read_scanlines(&cinfo, buffer, 1);
+        for (JDIMENSION x = 0; x < cinfo.output_width; ++x)
+        {
+            unsigned char r = buffer[0][x * cinfo.output_components + 0];
+            unsigned char g = buffer[0][x * cinfo.output_components + 1];
+            unsigned char b = buffer[0][x * cinfo.output_components + 2];
+            /* Relative luminance */
+            lum_sum += (uint64_t)(0.2126 * r + 0.7152 * g + 0.0722 * b);
+            ++pixels;
+        }
+    }
+
+    jpeg_finish_decompress(&cinfo);
+    jpeg_destroy_decompress(&cinfo);
+    fclose(fp);
+
+    if (brightness_out && pixels > 0)
+        *brightness_out = (double)lum_sum / pixels;
+
+    return true;
+}
+
+/* ---------------------------------------------------------------------------
+ * File name parsing for metadata
+ *   Convention Example: 123456_20240101T132045_OD.jpg
+ *                        ^pid  ^timestamp          ^laterality
+ * --------------------------------------------------------------------------- */
+static void parse_filename_metadata(const char *fname,
+                                    char       *patient_id,
+                                    time_t     *capture_ts,
+                                    char       *laterality)
+{
+    patient_id[0]  = '\0';
+    laterality[0]  = '\0';
+    *capture_ts    = 0;
+
+    char tmp[PATH_MAX];
+    snprintf(tmp, sizeof(tmp), "%s", fname);
+
+    char *ext = strrchr(tmp, '.');
+    if (ext)
+        *ext = '\0';
+
+    char *tok      = strtok(tmp, "_");
+    size_t idx_tok = 0;
+
+    while (tok)
+    {
+        if (idx_tok == 0)
+        {
+            strncpy(patient_id, tok, 63);
+            patient_id[63] = '\0';
+        }
+        else if (idx_tok == 1)
+        {
+            /* Parse ISO-like timestamp YYYYMMDDThhmmss */
+            struct tm tm = {0};
+            if (strptime(tok, "%Y%m%dT%H%M%S", &tm))
+                *capture_ts = timegm(&tm);
+        }
+        else if (idx_tok == 2)
+        {
+            strncpy(laterality, tok, 7);
+            laterality[7] = '\0';
+        }
+        tok = strtok(NULL, "_");
+        ++idx_tok;
+    }
+}
+
+/* ---------------------------------------------------------------------------
+ * Quality control — dimension & brightness gate
+ * --------------------------------------------------------------------------- */
+static bool image_passes_qc(const RG_Image *img)
+{
+    uint16_t min_dim = img->width < img->height ? img->width : img->height;
+    if (min_dim < RG_MIN_DIMENSION)
+        return false;
+
+    if (img->est_brightness < RG_MIN_BRIGHTNESS)
+        return false;
+
+    return true;
+}
+
+/* ---------------------------------------------------------------------------
+ * ImageList helpers
+ * --------------------------------------------------------------------------- */
+static void imagelist_push(RG_ImageList *list, const RG_Image *img)
+{
+    if (list->len == list->cap)
+    {
+        size_t new_cap = list->cap == 0 ? 64 : list->cap * 2;
+        list->items    = realloc(list->items, new_cap * sizeof(RG_Image));
+        if (!list->items)
+        {
+            fprintf(stderr, "[rg_image_repo] realloc failed\n");
+            abort();
+        }
+        list->cap = new_cap;
+    }
+    list->items[list->len++] = *img;
+}
+
+/* ---------------------------------------------------------------------------
+ * Recursive directory traversal
+ * --------------------------------------------------------------------------- */
+static void traverse_dir(const char  *root,
+                         RG_ImageList *list)
+{
+    DIR *dir = opendir(root);
+    if (!dir)
+    {
+        fprintf(stderr, "[rg_image_repo] Warning: cannot open dir %s: %s\n",
+                root, strerror(errno));
+        return;
+    }
+
+    struct dirent *entry;
+    char           path[PATH_MAX];
+
+    while ((entry = readdir(dir)))
+    {
+        if (strcmp(entry->d_name, ".") == 0 ||
+            strcmp(entry->d_name, "..") == 0)
+            continue;
+
+        snprintf(path, sizeof(path), "%s/%s", root, entry->d_name);
+
+        struct stat st;
+        if (stat(path, &st) != 0)
+            continue;
+
+        if (S_ISDIR(st.st_mode))
+        {
+            traverse_dir(path, list);
+        }
+        else if (S_ISREG(st.st_mode))
+        {
+            if (!(str_ends_with_ci(path, ".jpg") ||
+                  str_ends_with_ci(path, ".jpeg") ||
+                  str_ends_with_ci(path, ".png")))
+                continue;
+
+            RG_Image img   = {0};
+            img.est_brightness = 0.0;
+            strncpy(img.path, path, PATH_MAX - 1);
+            img.path[PATH_MAX - 1] = '\0';
+
+            bool ok = false;
+            if (str_ends_with_ci(path, ".png"))
+            {
+                ok = read_png_header(path, &img.width, &img.height);
+                /* PNG brightness left as 0 → will likely fail QC if used */
+            }
+            else
+            {
+                ok = read_jpeg_header(path,
+                                      &img.width,
+                                      &img.height,
+                                      &img.est_brightness);
+            }
+
+            if (!ok)
+                continue;
+
+            parse_filename_metadata(entry->d_name,
+                                    img.patient_id,
+                                    &img.capture_ts,
+                                    img.laterality);
+
+            if (!image_passes_qc(&img))
+                continue;
+
+            imagelist_push(list, &img);
+            notify_observers(&img);
+        }
+    }
+
+    closedir(dir);
+}
+
+/* ============================================================================
+ * Public implementation
+ * ============================================================================
+ */
+RG_ImageList *rg_images_open(const char *image_dir)
+{
+    if (!image_dir)
+    {
+        errno = EINVAL;
+        return NULL;
+    }
+
+    RG_ImageList *list = xcalloc(1, sizeof(*list));
+    traverse_dir(image_dir, list);
+
+    if (list->len == 0)
+    {
+        fprintf(stderr,
+                "[rg_image_repo] No usable images found in %s\n",
+                image_dir);
+    }
+    return list;
+}
+
+void rg_images_free(RG_ImageList *list)
+{
+    if (!list)
+        return;
+    free(list->items);
+    free(list);
+}
+
+size_t rg_images_count(const RG_ImageList *list)
+{
+    return list ? list->len : 0;
+}
+
+const RG_Image *rg_images_get(const RG_ImageList *list, size_t idx)
+{
+    if (!list || idx >= list->len)
+        return NULL;
+    return &list->items[idx];
+}
+/* =============================================================================
+ * End of file
+ * =============================================================================
+ */

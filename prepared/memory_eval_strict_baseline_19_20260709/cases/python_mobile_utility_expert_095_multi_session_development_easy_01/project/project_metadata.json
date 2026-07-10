@@ -1,0 +1,435 @@
+{
+  "specification": {
+    "unique_id": "python_mobile_utility_expert_095",
+    "name": "PrismPocket",
+    "description": "PrismPocket is an \"augmented utility sketchbook\" that transforms everyday mobile tasks into color-rich, shareable micro-experiences. Instead of the classic notes-and-todos model, each captured item\u2014whether text, photo, voice memo, or geotag\u2014is rendered as a vibrant, swipeable \"prism card\" that users can remix with filters, brush-style annotations, and contextual stickers. Cards sync bidirectionally with a cloud workspace, where a real-time analytics engine surfaces creative trends (e.g., most-used color palettes, hotspot locations, mood score) and suggests artistic prompts.\n\nBuilt entirely in Python but packaged natively for iOS and Android, the app layers Clean Architecture\u2019s concentric rings atop an MVVM presentation shell. Domain entities such as PrismCard, PaletteMetric, and RemixSession remain pure and testable, while platform-specific adapters (CameraAdapter, BiometricAdapter, PushAdapter, etc.) bridge the boundary to native SDKs. An Observer bus streams state mutations from repositories to view-models, allowing live canvas updates and offline queue replay. The result is a utility that feels more like a pocket creative studio than a mundane organizer, distinguishing it sharply from conventional mobile_utility projects.\n\nWhether users are scanning receipts, journaling travel, or capturing spur-of-the-moment doodles, PrismPocket reimagines utilitarian capture as an act of micro-creativity\u2014complete with collaborative remixing, social drops, and data-driven inspiration.",
+    "domain": "mobile_utility",
+    "complexity": "expert",
+    "language": "python",
+    "architecture": "clean_architecture",
+    "theme": "creative",
+    "target_file_count": 94,
+    "target_token_count": 793857,
+    "features": [
+      "analytics",
+      "social_sharing",
+      "local_storage",
+      "responsive_ui",
+      "crash_reporting",
+      "biometric_auth",
+      "in_app_purchases",
+      "push_notifications",
+      "offline_sync",
+      "camera_integration",
+      "location_services"
+    ],
+    "architecture_patterns": [
+      "MVVM",
+      "Adapter_Pattern",
+      "Observer_Pattern",
+      "Singleton",
+      "Factory_Pattern",
+      "Repository_Pattern"
+    ],
+    "dependencies": [
+      "Kivy==2.3.0                # cross-platform responsive UI",
+      "KivyMD==1.1.1              # material design widgets",
+      "Plyer==2.1.0               # camera, location, vibration, notification bridges",
+      "SQLAlchemy==2.0.30         # repository + local_storage (SQLite)",
+      "sentry-sdk==1.40.1         # crash_reporting",
+      "pyjwt[crypto]==2.8.0       # secure session + biometric token handoff",
+      "cryptography==42.0.2       # device-side encryption",
+      "geopy==2.4.1               # location_services & geo-analytics",
+      "Pillow==10.3.0             # camera image processing / filters",
+      "requests==2.32.2           # REST gateway (offline_sync)",
+      "apscheduler==3.10.4        # background sync scheduler",
+      "pyfcm==1.5.4               # push_notifications adapter",
+      "inapp-purchase-py==0.3.2   # in_app_purchases wrapper",
+      "rx==3.2.0                  # Observer_Pattern (reactive streams)",
+      "dependency-injector==4.41.0# Factory & Singleton containers",
+      "pytest==8.2.0              # exhaustive domain + adapter tests"
+    ],
+    "seed": 297660
+  },
+  "generated_timestamp": 1754355480.685833,
+  "phase_1_complete": true,
+  "uniqueness_factors": {
+    "domain": "mobile_utility",
+    "complexity": "expert",
+    "architecture": "clean_architecture",
+    "theme": "creative",
+    "seed": 297660
+  },
+  "files": [
+    {
+      "path": "src/utils.py",
+      "type": "source"
+    },
+    {
+      "path": "src/config.py",
+      "type": "config"
+    },
+    {
+      "path": "src/constants.py",
+      "type": "source"
+    },
+    {
+      "path": "tests/test_main.py",
+      "type": "test"
+    },
+    {
+      "path": "tests/test_utils.py",
+      "type": "test"
+    },
+    {
+      "path": "README.md",
+      "type": "documentation"
+    },
+    {
+      "path": "requirements.txt",
+      "type": "source"
+    },
+    {
+      "path": ".gitignore",
+      "type": "source"
+    },
+    {
+      "path": "Dockerfile",
+      "type": "documentation"
+    },
+    {
+      "path": "docs/api.md",
+      "type": "documentation"
+    },
+    {
+      "path": "src/module_1.py",
+      "type": "source"
+    },
+    {
+      "path": "src/module_2.py",
+      "type": "source"
+    },
+    {
+      "path": "src/module_3.py",
+      "type": "source"
+    },
+    {
+      "path": "src/module_4.py",
+      "type": "source"
+    },
+    {
+      "path": "src/module_5.py",
+      "type": "source"
+    },
+    {
+      "path": "src/module_6.py",
+      "type": "source"
+    },
+    {
+      "path": "src/module_7.py",
+      "type": "source"
+    },
+    {
+      "path": "src/module_8.py",
+      "type": "source"
+    },
+    {
+      "path": "src/module_9.py",
+      "type": "source"
+    },
+    {
+      "path": "src/module_10.py",
+      "type": "source"
+    },
+    {
+      "path": "src/module_11.py",
+      "type": "source"
+    },
+    {
+      "path": "src/module_12.py",
+      "type": "source"
+    },
+    {
+      "path": "src/module_13.py",
+      "type": "source"
+    },
+    {
+      "path": "src/module_14.py",
+      "type": "source"
+    },
+    {
+      "path": "src/module_15.py",
+      "type": "source"
+    },
+    {
+      "path": "src/module_16.py",
+      "type": "source"
+    },
+    {
+      "path": "src/module_17.py",
+      "type": "source"
+    },
+    {
+      "path": "src/module_18.py",
+      "type": "source"
+    },
+    {
+      "path": "src/module_19.py",
+      "type": "source"
+    },
+    {
+      "path": "src/module_20.py",
+      "type": "source"
+    },
+    {
+      "path": "src/module_21.py",
+      "type": "source"
+    },
+    {
+      "path": "src/module_22.py",
+      "type": "source"
+    },
+    {
+      "path": "src/module_23.py",
+      "type": "source"
+    },
+    {
+      "path": "src/module_24.py",
+      "type": "source"
+    },
+    {
+      "path": "src/module_25.py",
+      "type": "source"
+    },
+    {
+      "path": "src/module_26.py",
+      "type": "source"
+    },
+    {
+      "path": "src/module_27.py",
+      "type": "source"
+    },
+    {
+      "path": "src/module_28.py",
+      "type": "source"
+    },
+    {
+      "path": "src/module_29.py",
+      "type": "source"
+    },
+    {
+      "path": "src/module_30.py",
+      "type": "source"
+    },
+    {
+      "path": "src/module_31.py",
+      "type": "source"
+    },
+    {
+      "path": "src/module_32.py",
+      "type": "source"
+    },
+    {
+      "path": "src/module_33.py",
+      "type": "source"
+    },
+    {
+      "path": "src/module_34.py",
+      "type": "source"
+    },
+    {
+      "path": "src/module_35.py",
+      "type": "source"
+    },
+    {
+      "path": "src/module_36.py",
+      "type": "source"
+    },
+    {
+      "path": "src/module_37.py",
+      "type": "source"
+    },
+    {
+      "path": "src/module_38.py",
+      "type": "source"
+    },
+    {
+      "path": "src/module_39.py",
+      "type": "source"
+    },
+    {
+      "path": "src/module_40.py",
+      "type": "source"
+    },
+    {
+      "path": "src/module_41.py",
+      "type": "source"
+    },
+    {
+      "path": "src/module_42.py",
+      "type": "source"
+    },
+    {
+      "path": "src/module_43.py",
+      "type": "source"
+    },
+    {
+      "path": "src/module_44.py",
+      "type": "source"
+    },
+    {
+      "path": "src/module_45.py",
+      "type": "source"
+    },
+    {
+      "path": "src/module_46.py",
+      "type": "source"
+    },
+    {
+      "path": "src/module_47.py",
+      "type": "source"
+    },
+    {
+      "path": "src/module_48.py",
+      "type": "source"
+    },
+    {
+      "path": "src/module_49.py",
+      "type": "source"
+    },
+    {
+      "path": "src/module_50.py",
+      "type": "source"
+    },
+    {
+      "path": "src/module_51.py",
+      "type": "source"
+    },
+    {
+      "path": "src/module_52.py",
+      "type": "source"
+    },
+    {
+      "path": "src/module_53.py",
+      "type": "source"
+    },
+    {
+      "path": "src/module_54.py",
+      "type": "source"
+    },
+    {
+      "path": "src/module_55.py",
+      "type": "source"
+    },
+    {
+      "path": "src/module_56.py",
+      "type": "source"
+    },
+    {
+      "path": "src/module_57.py",
+      "type": "source"
+    },
+    {
+      "path": "src/module_58.py",
+      "type": "source"
+    },
+    {
+      "path": "src/module_59.py",
+      "type": "source"
+    },
+    {
+      "path": "src/module_60.py",
+      "type": "source"
+    },
+    {
+      "path": "src/module_61.py",
+      "type": "source"
+    },
+    {
+      "path": "src/module_62.py",
+      "type": "source"
+    },
+    {
+      "path": "src/module_63.py",
+      "type": "source"
+    },
+    {
+      "path": "src/module_64.py",
+      "type": "source"
+    },
+    {
+      "path": "src/module_65.py",
+      "type": "source"
+    },
+    {
+      "path": "src/module_66.py",
+      "type": "source"
+    },
+    {
+      "path": "src/module_67.py",
+      "type": "source"
+    },
+    {
+      "path": "src/module_68.py",
+      "type": "source"
+    },
+    {
+      "path": "src/module_69.py",
+      "type": "source"
+    },
+    {
+      "path": "src/module_70.py",
+      "type": "source"
+    },
+    {
+      "path": "src/module_71.py",
+      "type": "source"
+    },
+    {
+      "path": "src/module_72.py",
+      "type": "source"
+    },
+    {
+      "path": "src/module_73.py",
+      "type": "source"
+    },
+    {
+      "path": "src/module_74.py",
+      "type": "source"
+    },
+    {
+      "path": "src/module_75.py",
+      "type": "source"
+    },
+    {
+      "path": "src/module_76.py",
+      "type": "source"
+    },
+    {
+      "path": "src/module_77.py",
+      "type": "source"
+    },
+    {
+      "path": "src/module_78.py",
+      "type": "source"
+    },
+    {
+      "path": "src/module_79.py",
+      "type": "source"
+    },
+    {
+      "path": "src/module_80.py",
+      "type": "source"
+    },
+    {
+      "path": "src/module_81.py",
+      "type": "source"
+    }
+  ],
+  "generated_stats": {
+    "files_count": 94,
+    "lines_count": 38304,
+    "generation_time": 773.2964940071106,
+    "timestamp": 1754416226.709306
+  }
+}

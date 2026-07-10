@@ -1,0 +1,169 @@
+```puml
+@startuml EventFlowDiagram
+'//////////////////////////////////////////////////////////////////////////
+' StreamPulse Nexus – Event-Flow Architecture (High-Level Overview)
+' File: docs/architecture/diagrams/event_flow.puml
+'//////////////////////////////////////////////////////////////////////////
+' Author : StreamPulse Platform Engineering
+' Purpose: Visualise the core event-driven data-flow, depicting how media
+'          streams, chat, telemetry, monitoring, and disaster-recovery
+'          commands traverse the system. The diagram highlights the usage
+'          of Observer, Command, Strategy and Chain-of-Responsibility
+'          patterns within the event bus that stitches together all
+'          loosely-coupled runtime modules.
+'//////////////////////////////////////////////////////////////////////////
+
+'----------------------------------
+' GLOBAL STYLES
+'----------------------------------
+skinparam shadowing                   true
+skinparam roundcorner                 12
+skinparam linetype                    ortho
+skinparam rectangle {
+    BackgroundColor<<cloud>>          #CAE5FF
+    BackgroundColor<<compute>>        #FFF1D6
+    BackgroundColor<<db>>             #F9E0E0
+    BackgroundColor<<queue>>          #E6F2E6
+    BackgroundColor<<edge>>           #E4E4E4
+    FontColor                         #2E3A46
+}
+skinparam note {
+    BackgroundColor                   #FFFFCC
+    BorderColor                       #B4B400
+}
+hide stereotype
+
+'----------------------------------
+' LEGEND
+'----------------------------------
+legend left
+|  <&send>  |  Publishing Event  |
+|  <&receive> |  Consuming Event |
+|  <&lock> |  Command / Policy |
+endlegend
+
+'----------------------------------
+' PACKAGES
+'----------------------------------
+package "Edge Tier" {
+    [Audience Member] <<edge>>
+    [Edge Cache Cluster] <<cloud>>
+}
+
+package "Core Media Plane" {
+    [Ingest Node] <<compute>>
+    [Real-Time Transcoder] <<compute>>
+}
+
+package "Control Plane" {
+    [Event Bus] <<queue>>
+    [Load-Balancer Strategy] <<compute>>
+    [Monitoring Dashboard] <<compute>>
+    [Analytics Engine] <<compute>>
+    [Security Scanner] <<compute>>
+}
+
+package "Disaster Recovery" {
+    [Command Router] <<compute>>
+    [Backup Handler] <<compute>>
+    [Transcoder Fail-over] <<compute>>
+    [Cache Warm-up Handler] <<compute>>
+    [Archive Vault] <<db>>
+}
+
+'----------------------------------
+' STATIC RELATIONSHIPS
+'----------------------------------
+[Audience Member] -down-> [Edge Cache Cluster] : HTTP(S)\nWebSocket
+[Edge Cache Cluster] -down-> [Ingest Node] : gRPC\n(SimSub)
+[Ingest Node] -down-> [Real-Time Transcoder] : RTP\n(SRTP)
+[Real-Time Transcoder] --> [Edge Cache Cluster] : HLS\nDASH
+[Ingest Node] --> [Event Bus] : <&send> MediaIngestEvent
+[Edge Cache Cluster] --> [Event Bus] : <&send> ChatEvent\nPlaybackHeartbeat
+[Event Bus] --> [Analytics Engine] : <&receive> ChatEvent
+[Analytics Engine] --> [Event Bus] : <&send> SentimentScoreEvent
+[Event Bus] --> [Monitoring Dashboard] : <&receive> AllTelemetry
+[Event Bus] --> [Security Scanner] : <&receive> MediaIngestEvent
+
+'Load balancing strategy injected via Strategy pattern
+[Load-Balancer Strategy] .[#darkgreen].> [Edge Cache Cluster] : Choose Route\n(Strategy)
+[Load-Balancer Strategy] ..> [Ingest Node]
+
+'Disaster-Recovery chain (Chain-of-Responsibility)
+[Command Router] --> [Backup Handler] : invoke()
+[Backup Handler] --> [Transcoder Fail-over] : next()
+[Transcoder Fail-over] --> [Cache Warm-up Handler] : next()
+[Cache Warm-up Handler] --> [Archive Vault]
+
+'Command pattern: command objects ride the bus
+[Ingest Node] --> [Event Bus] : <&send> FailureEvent
+[Event Bus] --> [Command Router] : <&receive> FailureEvent
+
+'Monitoring feedback loop
+[Monitoring Dashboard] --> [Load-Balancer Strategy] : Telemetry\n<Webhook>
+
+'----------------------------------
+' NOTES
+'----------------------------------
+note right of [Event Bus]
+Event Bus is a broker-less, topic-based
+flight recorder that retains events for
+90 seconds, enabling at-least-once
+delivery while meeting the sub-250 ms
+E2E latency budget.
+end note
+
+note bottom of [Disaster Recovery]
+Chain-of-Responsibility pattern ensures
+that each handler attempts recovery
+actions and passes the command along
+if responsibility is not satisfied.
+end note
+
+'----------------------------------
+' SEQUENCE FLOW – FAILURE SCENARIO
+'----------------------------------
+== Failure Recovery (Command Pattern) ==
+group Failure Detected
+    [Ingest Node] -> [Event Bus] : publish FailureEvent
+    [Event Bus] -> [Command Router] : route FailureEvent
+end
+group Chain-of-Responsibility
+    [Command Router] -> [Backup Handler] : DisasterRecoveryCommand
+    alt Backup OK
+        [Backup Handler] -> [Archive Vault] : pushDiffSnapshot()
+        [Backup Handler] -> [Command Router] : status=SUCCESS
+    else Backup FAIL
+        [Backup Handler] -> [Transcoder Fail-over] : pass()
+        [Transcoder Fail-over] -> [Real-Time Transcoder] : promoteReplica()
+        [Transcoder Fail-over] -> [Cache Warm-up Handler] : pass()
+        [Cache Warm-up Handler] -> [Edge Cache Cluster] : prefetchSegments()
+    end
+end
+group Observer Notification
+    [Command Router] -> [Event Bus] : publish RecoveryStatusEvent
+    [Event Bus] -> [Monitoring Dashboard] : notify()
+end
+
+'----------------------------------
+' SEQUENCE FLOW – LIVE INTERACTION
+'----------------------------------
+== Real-Time Chat & Sentiment ==
+[Audience Member] -> [Edge Cache Cluster] : send ChatMessage
+[Edge Cache Cluster] -> [Event Bus] : publish ChatEvent
+[Event Bus] -> [Analytics Engine] : route ChatEvent
+[Analytics Engine] -> [Event Bus] : publish SentimentScoreEvent
+[Event Bus] -> [Monitoring Dashboard] : push overlay data
+[Monitoring Dashboard] -> [Audience Member] : update UI
+
+'----------------------------------
+' SEQUENCE FLOW – LOAD-BALANCING
+'----------------------------------
+== Adaptive Routing (Strategy Pattern) ==
+[Monitoring Dashboard] -> [Load-Balancer Strategy] : post LoadAlertEvent
+[Load-Balancer Strategy] -> [Edge Cache Cluster] : rebalance()
+note left: Custom strategy picks the\nright cache node based on\nheat-map & venue profile.
+end note
+
+@enduml
+```

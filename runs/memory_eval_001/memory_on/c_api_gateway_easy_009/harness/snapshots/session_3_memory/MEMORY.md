@@ -1,1 +1,0 @@
-- [EduGate rate limiting sessions](edugate_rate_limiting_sessions.md) — Multi-session context for API gateway rate limiting feature.

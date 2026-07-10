@@ -1,0 +1,47 @@
+{
+  "scenario_id": "c_system_monitoring_medium_097_multi_session_development_medium_01",
+  "case_id": "c_system_monitoring_medium_097",
+  "category": "extended_development_projects",
+  "original_task_category": "multi_session_development",
+  "project_source": "cases/c_system_monitoring_medium_097_multi_session_development_medium_01/project",
+  "project_name": "CampusGuard EDU Monitor",
+  "language": "c",
+  "complexity": "medium",
+  "session_count": 3,
+  "turns": [
+    {
+      "session": 1,
+      "file": "turns/session_1.jsonl",
+      "turn_count": 2
+    },
+    {
+      "session": 2,
+      "file": "turns/session_2.jsonl",
+      "turn_count": 1
+    },
+    {
+      "session": 3,
+      "file": "turns/session_3.jsonl",
+      "turn_count": 1
+    }
+  ],
+  "prompts_for_review": [
+    {
+      "session": 1,
+      "file": "prompts/session_1.txt"
+    },
+    {
+      "session": 2,
+      "file": "prompts/session_2.txt"
+    },
+    {
+      "session": 3,
+      "file": "prompts/session_3.txt"
+    }
+  ],
+  "hashes": {
+    "scenario_json_sha256": "07715777717fa54a5128518a4755dea2cfa6b59722e1e38d9146259cd2b777cd",
+    "project_tree_sha256": "980ea746b1a999ed954b37fbe7f278b7b43cbc4e8676cb69e4fb3e28388add62",
+    "prepared_case_sha256": "ffaf2022cc6f32c1bd2e3e6fe3fa3be66f463323a5e2b03e3ad6076b5957f7b1"
+  }
+}

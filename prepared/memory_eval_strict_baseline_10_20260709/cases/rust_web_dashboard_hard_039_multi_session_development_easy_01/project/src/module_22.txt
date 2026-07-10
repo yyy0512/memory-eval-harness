@@ -1,0 +1,446 @@
+```rust
+//! ChromaticCanvas Control Center – Module 22
+//! -----------------------------------------------------
+//! Color Swatch Domain Layer
+//!
+//! This file owns the authoritative implementation for
+//! CRUD-operations on “color swatch” components.  A swatch is
+//! the smallest reusable widget on the dashboard –
+//! a palette of hex colors plus rich metadata.
+//!
+//! Responsibilities
+//! ----------------
+//! 1. Data-access via the Service Layer (asyncpg via sqlx).
+//! 2. Transparent Redis-backed read-through caching.
+//! 3. Validation (hex format, name length, ownership).
+//! 4. Domain-level error typing with `thiserror`.
+//! 5. Tracing / structured logging.
+//!
+//! NOTE: This code purposefully avoids framework-specific
+//! HTTP types.  The module can be consumed by Actix-Web,
+//! Axum, Tide or any other async Rust web framework.
+
+#![allow(clippy::module_name_repetitions)]
+
+use async_trait::async_trait;
+use chrono::{DateTime, Utc};
+use deadpool_redis::{redis::AsyncCommands, Connection as RedisConnection, Pool as RedisPool};
+use once_cell::sync::Lazy;
+use regex::Regex;
+use serde::{Deserialize, Serialize};
+use sqlx::{postgres::PgRow, PgPool, Row};
+use thiserror::Error;
+use tracing::{debug, error, instrument, warn};
+use uuid::Uuid;
+
+// -----------------------------------------------------
+// Domain Types
+// -----------------------------------------------------
+
+/// An immutable Color Swatch.
+#[derive(Debug, Serialize, Deserialize, Clone, Eq, PartialEq)]
+pub struct ColorSwatch {
+    pub id:         Uuid,
+    pub owner_id:   Uuid,
+    pub name:       String,
+    pub colors:     Vec<String>, // Always length >= 1
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+/// Data required to create a new Swatch.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct NewColorSwatch {
+    pub owner_id: Uuid,
+    pub name:     String,
+    pub colors:   Vec<String>,
+}
+
+/// Data required to update an existing swatch.
+/// Every field is optional for PATCH semantics.
+#[derive(Debug, Serialize, Deserialize, Default)]
+pub struct SwatchPatch {
+    pub name:   Option<String>,
+    pub colors: Option<Vec<String>>,
+}
+
+// -----------------------------------------------------
+// Domain Errors
+// -----------------------------------------------------
+
+#[derive(Debug, Error)]
+pub enum SwatchError {
+    #[error("validation error: {0}")]
+    Validation(String),
+
+    #[error("not found")]
+    NotFound,
+
+    #[error("database error: {0}")]
+    Database(#[from] sqlx::Error),
+
+    #[error("cache error: {0}")]
+    Cache(#[from] deadpool_redis::redis::RedisError),
+
+    #[error("unknown error: {0}")]
+    Unknown(String),
+}
+
+// -----------------------------------------------------
+// Validation
+// -----------------------------------------------------
+
+static HEX_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"(?i)^#?([a-f0-9]{6}|[a-f0-9]{3})$").unwrap());
+
+fn validate_hex_color(c: &str) -> Result<(), SwatchError> {
+    if HEX_RE.is_match(c) {
+        Ok(())
+    } else {
+        Err(SwatchError::Validation(format!("invalid hex color: {c}")))
+    }
+}
+
+fn validate_name(name: &str) -> Result<(), SwatchError> {
+    let len = name.chars().count();
+    if (1..=64).contains(&len) {
+        Ok(())
+    } else {
+        Err(SwatchError::Validation(
+            "name must be between 1 and 64 characters".into(),
+        ))
+    }
+}
+
+fn validate_color_vec(colors: &[String]) -> Result<(), SwatchError> {
+    if colors.is_empty() {
+        return Err(SwatchError::Validation("colors cannot be empty".into()));
+    }
+    for c in colors {
+        validate_hex_color(c)?;
+    }
+    Ok(())
+}
+
+fn normalize_color(c: &str) -> String {
+    // Lowercase & ensure leading '#'
+    let mut normalized = c.trim().to_ascii_lowercase();
+    if !normalized.starts_with('#') {
+        normalized.insert(0, '#');
+    }
+    normalized
+}
+
+// -----------------------------------------------------
+// Repository Trait
+// -----------------------------------------------------
+
+#[async_trait]
+pub trait SwatchRepository: Send + Sync + 'static {
+    async fn insert(&self, new: &NewColorSwatch) -> Result<ColorSwatch, SwatchError>;
+    async fn fetch(&self, swatch_id: Uuid) -> Result<ColorSwatch, SwatchError>;
+    async fn update(&self, swatch_id: Uuid, patch: &SwatchPatch) -> Result<ColorSwatch, SwatchError>;
+    async fn delete(&self, swatch_id: Uuid) -> Result<(), SwatchError>;
+}
+
+// -----------------------------------------------------
+// Postgres Implementation
+// -----------------------------------------------------
+
+pub struct PgSwatchRepository {
+    pool: PgPool,
+}
+
+impl PgSwatchRepository {
+    pub fn new(pool: PgPool) -> Self { Self { pool } }
+
+    fn row_to_entity(row: &PgRow) -> ColorSwatch {
+        ColorSwatch {
+            id:         row.get("id"),
+            owner_id:   row.get("owner_id"),
+            name:       row.get("name"),
+            colors:     row.get::<Vec<String>, _>("colors"),
+            created_at: row.get("created_at"),
+            updated_at: row.get("updated_at"),
+        }
+    }
+}
+
+#[async_trait]
+impl SwatchRepository for PgSwatchRepository {
+    #[instrument(skip_all, err)]
+    async fn insert(&self, new: &NewColorSwatch) -> Result<ColorSwatch, SwatchError> {
+        let row = sqlx::query(
+            r#"
+            INSERT INTO swatches (owner_id, name, colors)
+            VALUES ($1, $2, $3)
+            RETURNING *
+            "#,
+        )
+        .bind(new.owner_id)
+        .bind(&new.name)
+        .bind(&new.colors)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(Self::row_to_entity(&row))
+    }
+
+    #[instrument(skip_all, err)]
+    async fn fetch(&self, swatch_id: Uuid) -> Result<ColorSwatch, SwatchError> {
+        let maybe = sqlx::query(
+            r#"
+            SELECT *
+            FROM   swatches
+            WHERE  id = $1
+            "#,
+        )
+        .bind(swatch_id)
+        .fetch_optional(&self.pool)
+        .await?;
+        maybe
+            .map(Self::row_to_entity)
+            .ok_or(SwatchError::NotFound)
+    }
+
+    #[instrument(skip_all, err)]
+    async fn update(&self, swatch_id: Uuid, patch: &SwatchPatch) -> Result<ColorSwatch, SwatchError> {
+        // Use COALESCE on JSON array aggregation
+        let row = sqlx::query(
+            r#"
+            UPDATE swatches
+            SET    name   = COALESCE($2, name),
+                   colors = COALESCE($3, colors),
+                   updated_at = NOW()
+            WHERE  id = $1
+            RETURNING *
+            "#,
+        )
+        .bind(swatch_id)
+        .bind(&patch.name)
+        .bind(&patch.colors)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        row.map(Self::row_to_entity)
+            .ok_or(SwatchError::NotFound)
+    }
+
+    #[instrument(skip_all, err)]
+    async fn delete(&self, swatch_id: Uuid) -> Result<(), SwatchError> {
+        let result = sqlx::query(
+            r#"
+            DELETE FROM swatches
+            WHERE id = $1
+            "#,
+        )
+        .bind(swatch_id)
+        .execute(&self.pool)
+        .await?;
+
+        if result.rows_affected() == 0 {
+            Err(SwatchError::NotFound)
+        } else {
+            Ok(())
+        }
+    }
+}
+
+// -----------------------------------------------------
+// Cache Layer (Redis)
+// -----------------------------------------------------
+
+const REDIS_KEY_PREFIX: &str = "cc:swatch:";
+
+async fn get_cached(
+    redis: &mut RedisConnection,
+    swatch_id: Uuid,
+) -> Result<Option<ColorSwatch>, SwatchError> {
+    let key = format!("{REDIS_KEY_PREFIX}{swatch_id}");
+    let bytes: Option<Vec<u8>> = redis.get(&key).await?;
+    Ok(bytes.map(|b| bincode::deserialize(&b).expect("bincode deserialize")))
+}
+
+async fn cache_put(
+    redis: &mut RedisConnection,
+    swatch: &ColorSwatch,
+) -> Result<(), SwatchError> {
+    let key = format!("{REDIS_KEY_PREFIX}{}", swatch.id);
+    let bytes = bincode::serialize(swatch).expect("bincode serialize");
+    // 30 min TTL
+    redis.set_ex::<_, _, ()>(key, bytes, 1_800).await?;
+    Ok(())
+}
+
+async fn cache_invalidate(
+    redis: &mut RedisConnection,
+    swatch_id: Uuid,
+) -> Result<(), SwatchError> {
+    let key = format!("{REDIS_KEY_PREFIX}{swatch_id}");
+    let _: () = redis.del(&key).await?;
+    Ok(())
+}
+
+// -----------------------------------------------------
+// Service Layer
+// -----------------------------------------------------
+
+pub struct ColorSwatchService<R: SwatchRepository> {
+    repo:  R,
+    cache: Option<RedisPool>,
+}
+
+impl<R: SwatchRepository> ColorSwatchService<R> {
+    pub fn new(repo: R, cache: Option<RedisPool>) -> Self { Self { repo, cache } }
+
+    // -------------------------------------------------
+    // Public API
+    // -------------------------------------------------
+
+    #[instrument(skip_all, err)]
+    pub async fn create(&self, new: NewColorSwatch) -> Result<ColorSwatch, SwatchError> {
+        // --- Validation ---------------------------------------------------
+        validate_name(&new.name)?;
+        validate_color_vec(&new.colors)?;
+
+        let normalized_colors: Vec<String> = new.colors.iter().map(|c| normalize_color(c)).collect();
+        let new = NewColorSwatch { colors: normalized_colors, ..new };
+
+        let swatch = self.repo.insert(&new).await?;
+        // No cache write – let read path populate.
+        Ok(swatch)
+    }
+
+    #[instrument(skip_all, err)]
+    pub async fn fetch(&self, swatch_id: Uuid) -> Result<ColorSwatch, SwatchError> {
+        // --- Fast path ----------------------------------------------------
+        if let Some(pool) = &self.cache {
+            if let Ok(mut conn) = pool.get().await {
+                if let Some(hit) = get_cached(&mut conn, swatch_id).await? {
+                    debug!("cache hit");
+                    return Ok(hit);
+                }
+            }
+        }
+
+        // --- Fallback to DB ----------------------------------------------
+        let swatch = self.repo.fetch(swatch_id).await?;
+
+        // --- Populate cache asynchronously -------------------------------
+        if let Some(pool) = &self.cache {
+            if let Ok(mut conn) = pool.get().await {
+                if let Err(e) = cache_put(&mut conn, &swatch).await {
+                    warn!("cache populate failed: {e}");
+                }
+            }
+        }
+
+        Ok(swatch)
+    }
+
+    #[instrument(skip_all, err)]
+    pub async fn update(&self, swatch_id: Uuid, patch: SwatchPatch) -> Result<ColorSwatch, SwatchError> {
+        if let Some(ref name) = patch.name {
+            validate_name(name)?;
+        }
+        if let Some(ref colors) = patch.colors {
+            validate_color_vec(colors)?;
+        }
+
+        let normalized_patch = SwatchPatch {
+            colors: patch.colors.map(|v| v.into_iter().map(normalize_color).collect()),
+            ..patch
+        };
+
+        let updated = self.repo.update(swatch_id, &normalized_patch).await?;
+
+        // Invalidate cache
+        if let Some(pool) = &self.cache {
+            if let Ok(mut conn) = pool.get().await {
+                if let Err(e) = cache_invalidate(&mut conn, swatch_id).await {
+                    warn!("cache invalidate failed: {e}");
+                }
+            }
+        }
+
+        Ok(updated)
+    }
+
+    #[instrument(skip_all, err)]
+    pub async fn delete(&self, swatch_id: Uuid) -> Result<(), SwatchError> {
+        self.repo.delete(swatch_id).await?;
+
+        // Invalidate cache
+        if let Some(pool) = &self.cache {
+            if let Ok(mut conn) = pool.get().await {
+                if let Err(e) = cache_invalidate(&mut conn, swatch_id).await {
+                    warn!("cache invalidate failed: {e}");
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+// -----------------------------------------------------
+// Tests (requires `cargo test --features "test"`)
+// -----------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sqlx::postgres::PgPoolOptions;
+
+    async fn test_repo() -> PgSwatchRepository {
+        // NOTE: The DATABASE_URL must point to a test-only DB.
+        let pool = PgPoolOptions::new()
+            .max_connections(5)
+            .connect(&std::env::var("DATABASE_URL").unwrap())
+            .await
+            .unwrap();
+        PgSwatchRepository::new(pool)
+    }
+
+    #[tokio::test]
+    async fn validate_hex_color_happy_path() {
+        assert!(validate_hex_color("#ffffff").is_ok());
+        assert!(validate_hex_color("abc").is_ok());
+    }
+
+    #[tokio::test]
+    async fn validate_hex_color_error() {
+        assert!(validate_hex_color("xyz").is_err());
+        assert!(validate_hex_color("#12345").is_err());
+    }
+
+    #[tokio::test]
+    async fn swatch_crud_cycle() {
+        let repo = test_repo().await;
+        let service: ColorSwatchService<_> = ColorSwatchService::new(repo, None);
+
+        // Create
+        let new = NewColorSwatch {
+            owner_id: Uuid::new_v4(),
+            name:     "Sunset".into(),
+            colors:   vec!["#ffcc00".into(), "#ff6699".into()],
+        };
+        let swatch = service.create(new).await.unwrap();
+        assert_eq!(swatch.name, "Sunset");
+
+        // Fetch
+        let fetched = service.fetch(swatch.id).await.unwrap();
+        assert_eq!(fetched.id, swatch.id);
+
+        // Update
+        let patch = SwatchPatch {
+            name: Some("Aurora".into()),
+            colors: None,
+        };
+        let updated = service.update(swatch.id, patch).await.unwrap();
+        assert_eq!(updated.name, "Aurora");
+
+        // Delete
+        service.delete(swatch.id).await.unwrap();
+        let err = service.fetch(swatch.id).await.unwrap_err();
+        matches!(err, SwatchError::NotFound);
+    }
+}
+```

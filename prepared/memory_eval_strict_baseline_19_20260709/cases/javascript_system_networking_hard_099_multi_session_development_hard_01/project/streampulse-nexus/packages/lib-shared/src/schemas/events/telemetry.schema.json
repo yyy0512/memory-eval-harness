@@ -1,0 +1,456 @@
+{
+  "$id": "https://schemas.streampulse.io/nexus/telemetry.schema.json",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+
+  "title": "StreamPulse Nexus – Telemetry Event",
+  "description": "Schema describing telemetry events emitted by all nodes in the StreamPulse Nexus platform. Events are published via the internal event-bus (Kafka, NATS, or RabbitMQ depending on deployment) and consumed by monitoring dashboards, autoscalers, alert systems, ML pipelines, and long-term storage services.",
+
+  "type": "object",
+  "allOf": [
+    { "$ref": "#/definitions/baseEvent" },
+    {
+      "oneOf": [
+        { "$ref": "#/definitions/ingressEvent" },
+        { "$ref": "#/definitions/egressEvent" },
+        { "$ref": "#/definitions/mediaPipelineEvent" },
+        { "$ref": "#/definitions/securityEvent" },
+        { "$ref": "#/definitions/systemHealthEvent" }
+      ]
+    }
+  ],
+
+  "definitions": {
+    "baseEvent": {
+      "type": "object",
+      "required": [
+        "eventId",
+        "eventType",
+        "version",
+        "timestamp",
+        "node",
+        "environment"
+      ],
+      "properties": {
+        "eventId": {
+          "type": "string",
+          "format": "uuid",
+          "description": "A unique identifier for this event instance."
+        },
+        "eventType": {
+          "type": "string",
+          "enum": [
+            "ingress",
+            "egress",
+            "media_pipeline",
+            "security",
+            "system_health"
+          ],
+          "description": "High-level discriminator used to select the correct sub-schema."
+        },
+        "version": {
+          "type": "string",
+          "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(-[a-z0-9]+(\\.[a-z0-9]+)*)?$",
+          "description": "Semantic version of the event schema used by the emitting node."
+        },
+        "timestamp": {
+          "type": "string",
+          "format": "date-time",
+          "description": "ISO-8601 timestamp (with timezone) indicating when the metric snapshot was captured on the node."
+        },
+        "node": {
+          "$ref": "#/definitions/nodeInfo"
+        },
+        "environment": {
+          "type": "string",
+          "enum": ["prod", "staging", "dev", "qa", "ci"],
+          "description": "Deployment environment label assigned by the configuration-management system."
+        },
+        "tags": {
+          "type": "array",
+          "items": { "type": "string" },
+          "maxItems": 25,
+          "description": "Arbitrary key phrases for downstream filtering (e.g., tournament ID, show code, custom experiment labels)."
+        },
+        "correlationId": {
+          "type": "string",
+          "description": "Optional ID linking multiple events belonging to the same logical operation (span or trace)."
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "nodeInfo": {
+      "type": "object",
+      "required": ["nodeId", "region", "role"],
+      "properties": {
+        "nodeId": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9-_]{3,64}$",
+          "description": "Unique identifier of the node (often hostname or container ID)."
+        },
+        "clusterId": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9-_]{3,64}$",
+          "description": "Identifier of the cluster or autoscaling group."
+        },
+        "region": {
+          "type": "string",
+          "pattern": "^[a-z0-9-]{2,30}$",
+          "description": "Geographic or cloud region (e.g., us-east-1, eu-central)."
+        },
+        "role": {
+          "type": "string",
+          "enum": [
+            "edge",
+            "transcoder",
+            "origin",
+            "analytics",
+            "control",
+            "storage",
+            "backup"
+          ],
+          "description": "Functional role of the node."
+        },
+        "ip": {
+          "type": "string",
+          "oneOf": [
+            { "format": "ipv4" },
+            { "format": "ipv6" }
+          ],
+          "description": "Primary interface address."
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "metricCommon": {
+      "type": "object",
+      "required": ["intervalMs"],
+      "properties": {
+        "intervalMs": {
+          "type": "integer",
+          "minimum": 100,
+          "maximum": 60000,
+          "description": "Time window (in ms) that the aggregated metrics cover."
+        },
+        "cpuPct": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100,
+          "description": "Node CPU utilization percentage averaged over interval."
+        },
+        "memPct": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100,
+          "description": "Node memory utilization percentage averaged over interval."
+        },
+        "loadAvg": {
+          "type": "array",
+          "items": { "type": "number" },
+          "minItems": 3,
+          "maxItems": 3,
+          "description": "1-, 5-, and 15-minute load averages."
+        },
+        "diskFreeBytes": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Remaining disk space on the partition hosting media caches."
+        },
+        "network": { "$ref": "#/definitions/networkStats" }
+      },
+      "additionalProperties": false
+    },
+
+    "networkStats": {
+      "type": "object",
+      "properties": {
+        "txBytes": { "type": "integer", "minimum": 0 },
+        "rxBytes": { "type": "integer", "minimum": 0 },
+        "txPackets": { "type": "integer", "minimum": 0 },
+        "rxPackets": { "type": "integer", "minimum": 0 },
+        "txErrors": { "type": "integer", "minimum": 0 },
+        "rxErrors": { "type": "integer", "minimum": 0 },
+        "packetLossPct": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "latencyMs": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Median round-trip latency observed during interval."
+        }
+      },
+      "additionalProperties": false
+    },
+
+    /* ------------------------------------------------------------------
+     * Event Sub-Types
+     * ------------------------------------------------------------------ */
+
+    "ingressEvent": {
+      "type": "object",
+      "required": ["eventType", "ingress"],
+      "properties": {
+        "eventType": { "const": "ingress" },
+        "ingress": {
+          "allOf": [
+            { "$ref": "#/definitions/metricCommon" },
+            {
+              "type": "object",
+              "required": ["streamKey", "bitrateKbps", "activeClients"],
+              "properties": {
+                "streamKey": {
+                  "type": "string",
+                  "pattern": "^[a-zA-Z0-9-_]{6,128}$",
+                  "description": "Opaque identifier assigned to the incoming stream."
+                },
+                "codec": {
+                  "type": "string",
+                  "enum": ["H264", "H265", "VP9", "AV1", "AAC", "OPUS"],
+                  "description": "Primary codec used by the publisher."
+                },
+                "format": {
+                  "type": "string",
+                  "enum": ["RTMP", "SRT", "WebRTC", "RTP"],
+                  "description": "Transport protocol."
+                },
+                "bitrateKbps": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "description": "Average video+audio bitrate during interval."
+                },
+                "keyframeIntervalSec": {
+                  "type": "number",
+                  "minimum": 0.5,
+                  "maximum": 10
+                },
+                "activeClients": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "description": "Number of publisher connections feeding this node."
+                },
+                "droppedFrames": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              },
+              "additionalProperties": false
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "egressEvent": {
+      "type": "object",
+      "required": ["eventType", "egress"],
+      "properties": {
+        "eventType": { "const": "egress" },
+        "egress": {
+          "allOf": [
+            { "$ref": "#/definitions/metricCommon" },
+            {
+              "type": "object",
+              "required": ["protocol", "viewerCount"],
+              "properties": {
+                "protocol": {
+                  "type": "string",
+                  "enum": ["HLS", "DASH", "WebRTC", "LL-HLS"],
+                  "description": "Outbound streaming protocol."
+                },
+                "viewerCount": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "description": "Concurrent viewers served by this node."
+                },
+                "avgBitrateKbps": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "cacheHitPct": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 100
+                },
+                "segmentLatencyMs": {
+                  "type": "number",
+                  "minimum": 0
+                }
+              },
+              "additionalProperties": false
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "mediaPipelineEvent": {
+      "type": "object",
+      "required": ["eventType", "pipeline"],
+      "properties": {
+        "eventType": { "const": "media_pipeline" },
+        "pipeline": {
+          "allOf": [
+            { "$ref": "#/definitions/metricCommon" },
+            {
+              "type": "object",
+              "required": ["jobId", "stage", "latencyMs"],
+              "properties": {
+                "jobId": {
+                  "type": "string",
+                  "format": "uuid",
+                  "description": "Identifier for the transcoding or transformation job."
+                },
+                "stage": {
+                  "type": "string",
+                  "enum": ["decode", "filter", "encode", "package"],
+                  "description": "Pipeline stage associated with this event."
+                },
+                "latencyMs": {
+                  "type": "number",
+                  "minimum": 0,
+                  "description": "Processing latency for this stage averaged over interval."
+                },
+                "outputVariant": {
+                  "type": "string",
+                  "pattern": "^[a-zA-Z0-9-_]{3,64}$",
+                  "description": "Name of the rendition (e.g., 1080p60, audio-only)."
+                },
+                "framesDropped": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "gpuUtilPct": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 100
+                }
+              },
+              "additionalProperties": false
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "securityEvent": {
+      "type": "object",
+      "required": ["eventType", "security"],
+      "properties": {
+        "eventType": { "const": "security" },
+        "security": {
+          "type": "object",
+          "required": ["severity", "category", "message"],
+          "properties": {
+            "severity": {
+              "type": "string",
+              "enum": ["info", "warning", "critical"],
+              "description": "Impact level determined by security engine."
+            },
+            "category": {
+              "type": "string",
+              "enum": [
+                "intrusion_attempt",
+                "dos",
+                "waf_block",
+                "auth_failure",
+                "integrity",
+                "policy_violation"
+              ]
+            },
+            "message": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "sourceIp": {
+              "type": "string",
+              "oneOf": [
+                { "format": "ipv4" },
+                { "format": "ipv6" }
+              ]
+            },
+            "destinationPort": { "type": "integer", "minimum": 1, "maximum": 65535 },
+            "ruleId": {
+              "type": "string",
+              "pattern": "^[a-zA-Z0-9-_]{2,64}$"
+            },
+            "mitigation": {
+              "type": "string",
+              "enum": ["blocked", "throttled", "flagged", "none"]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "systemHealthEvent": {
+      "type": "object",
+      "required": ["eventType", "health"],
+      "properties": {
+        "eventType": { "const": "system_health" },
+        "health": {
+          "allOf": [
+            { "$ref": "#/definitions/metricCommon" },
+            {
+              "type": "object",
+              "required": ["uptimeSec", "status"],
+              "properties": {
+                "uptimeSec": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "description": "Seconds since the process started."
+                },
+                "status": {
+                  "type": "string",
+                  "enum": ["ok", "degraded", "failed"],
+                  "description": "Composite health derived from internal probes."
+                },
+                "serviceChecks": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": ["name", "status", "latencyMs"],
+                    "properties": {
+                      "name": {
+                        "type": "string",
+                        "maxLength": 128
+                      },
+                      "status": {
+                        "type": "string",
+                        "enum": ["ok", "warn", "critical"]
+                      },
+                      "latencyMs": {
+                        "type": "number",
+                        "minimum": 0
+                      },
+                      "error": {
+                        "type": "string",
+                        "maxLength": 1024
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "maxItems": 50
+                },
+                "maintenance": {
+                  "type": "boolean",
+                  "default": false,
+                  "description": "Flag indicating the node is in scheduled maintenance mode."
+                }
+              },
+              "additionalProperties": false
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

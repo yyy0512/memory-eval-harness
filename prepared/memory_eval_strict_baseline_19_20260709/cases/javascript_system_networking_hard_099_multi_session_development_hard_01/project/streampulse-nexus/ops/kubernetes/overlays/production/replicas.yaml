@@ -1,0 +1,266 @@
+```javascript
+/**
+ * streampulse-nexus/ops/kubernetes/overlays/production/replicas.yaml
+ *
+ * IMPORTANT: Although the file extension is .yaml (to allow `kustomize` to
+ *             ingest the final artifact), the file is actually a JavaScript
+ *             source file that _produces_ the replica-patch in YAML form.
+ *
+ * Usage
+ *   $ node replicas.yaml [--out ./path/replicas.yaml]
+ *
+ * The script inspects:
+ *   • Current live-traffic metrics (mocked via ./metrics/current.json)
+ *   • Environment variables (e.g. SHOW_TYPE=concert|battle-royale)
+ *   • A pluggable scaling Strategy implementation
+ *
+ * It emits a Kustomize-compatible patch that sets an appropriate replica
+ * count per Deployment, writing it to the given `--out` path or stdout.
+ *
+ * Design patterns exploited:
+ *   • Strategy Pattern  – Different algorithms select desired replicas.
+ *   • Observer Pattern  – A lightweight EventEmitter notifies listeners
+ *                         when a new patch is generated.
+ *   • Command Pattern   – CLI entrypoint encapsulates the “generate-patch”
+ *                         command, enabling future sub-commands (e.g. dry-run).
+ *
+ * NOTE: In production this script is executed by a GitHub Action that
+ *       commits the newly-generated file, triggering ArgoCD to apply it.
+ */
+
+import fs            from 'node:fs';
+import path          from 'node:path';
+import { EventEmitter } from 'node:events';
+import process       from 'node:process';
+import { fileURLToPath } from 'node:url';
+import yaml from 'js-yaml';                   // npm install js-yaml
+import yargs from 'yargs/yargs';              // npm install yargs
+import { hideBin } from 'yargs/helpers';
+
+/* -------------------------------------------------------------------------- */
+/*                               Type Definitions                             */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * @typedef {Object<string, DeploymentMetrics>} ClusterMetrics
+ * @typedef {{
+ *   rps: number,                 // Requests per second
+ *   errorRate: number,           // 0..1
+ *   p95Latency: number,          // milliseconds
+ *   avgCPU: number,              // percentage 0..1
+ *   avgMemory: number,           // percentage 0..1
+ *   currentReplicas: number
+ * }} DeploymentMetrics
+ */
+
+/* -------------------------------------------------------------------------- */
+/*                              Scaling Strategies                            */
+/* -------------------------------------------------------------------------- */
+
+class ScalingStrategy {
+  /**
+   * @param {ClusterMetrics} metrics
+   * @returns {Record<string, number>} Map of deploymentName -> desired replica count
+   */
+  /* eslint-disable-next-line no-unused-vars */
+  compute(metrics) {
+    throw new Error('compute() must be implemented by subclasses');
+  }
+}
+
+class ConcertStrategy extends ScalingStrategy {
+  compute(metrics) {
+    const result = {};
+    for (const [svc, m] of Object.entries(metrics)) {
+      // Scale more aggressively for latency-sensitive media streams
+      const cpuHeadroom    = 1 - m.avgCPU;
+      const base           = Math.ceil(m.rps / 800); // empirical: 1 pod ~800rps
+      const latencyPenalty = m.p95Latency > 120 ? 1 : 0; // add 1 if latency high
+
+      result[svc] = Math.max(
+        m.currentReplicas,
+        base + latencyPenalty + Math.round(cpuHeadroom * 2),
+        3 // minimum baseline for concerts
+      );
+    }
+    return result;
+  }
+}
+
+class BattleRoyaleStrategy extends ScalingStrategy {
+  compute(metrics) {
+    const result = {};
+    for (const [svc, m] of Object.entries(metrics)) {
+      // Battle-royale events surge unpredictably; bias CPU more
+      const cpuFactor      = Math.ceil(m.avgCPU * 10);
+      const errorPenalty   = m.errorRate > 0.01 ? 2 : 0;
+      const elasticity     = m.rps > 25000 ? 5 : 0;
+
+      result[svc] = Math.max(
+        m.currentReplicas + cpuFactor + errorPenalty + elasticity,
+        5 // higher floor for BR events
+      );
+    }
+    return result;
+  }
+}
+
+/* -------------------------------------------------------------------------- */
+/*                        Strategy Resolver / Factory                         */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Resolve appropriate strategy by SHOW_TYPE env var.
+ * Defaults to ConcertStrategy.
+ *
+ * @returns {ScalingStrategy}
+ */
+function resolveStrategy() {
+  switch (process.env.SHOW_TYPE?.toLowerCase()) {
+    case 'battle-royale':
+      return new BattleRoyaleStrategy();
+    case 'concert':
+    default:
+      return new ConcertStrategy();
+  }
+}
+
+/* -------------------------------------------------------------------------- */
+/*                           Metrics Acquisition Layer                        */
+/* -------------------------------------------------------------------------- */
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+/**
+ * Fetch metrics from the data-plane (mocked as JSON for this example).
+ *
+ * In production this may call Prometheus HTTP APIs, Datadog, or Thanos.
+ *
+ * @returns {Promise<ClusterMetrics>}
+ */
+async function fetchMetrics() {
+  const metricsPath = path.join(__dirname, 'metrics', 'current.json');
+
+  try {
+    const raw = await fs.promises.readFile(metricsPath, 'utf-8');
+    /** @type {ClusterMetrics} */
+    const data = JSON.parse(raw);
+    return data;
+  } catch (err) {
+    console.error(`Failed to read metrics at ${metricsPath}`, err);
+    throw err;
+  }
+}
+
+/* -------------------------------------------------------------------------- */
+/*                         Patch Generation  (Core)                           */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Produce Kustomize patch(s) in YAML.
+ *
+ * @param {Record<string, number>} replicaMap
+ * @returns {string} YAML multi-document output
+ */
+function generateYamlPatch(replicaMap) {
+  const documents = Object.entries(replicaMap).map(([name, replicas]) => ({
+    apiVersion: 'apps/v1',
+    kind: 'Deployment',
+    metadata: { name },
+    spec: { replicas }
+  }));
+
+  // `yaml.dumpAll` produces a multi-document YAML stream, separated by `---`
+  return yaml.dumpAll(documents, { lineWidth: 120 });
+}
+
+/* -------------------------------------------------------------------------- */
+/*                               Observer Hook                                */
+/* -------------------------------------------------------------------------- */
+
+const patchEmitter = new EventEmitter();
+
+/**
+ * Allow external modules (e.g., Slack notifier) to subscribe when a patch
+ * is created. Listener receives (yamlString, replicaMap).
+ */
+export function onPatchGenerated(listener) {
+  patchEmitter.on('patch', listener);
+}
+
+/* -------------------------------------------------------------------------- */
+/*                              CLI Entrypoint                                */
+/* -------------------------------------------------------------------------- */
+
+async function main() {
+  const argv = yargs(hideBin(process.argv))
+    .option('out', {
+      alias: 'o',
+      description: 'Destination path. Defaults to stdout.',
+      type: 'string'
+    })
+    .help()
+    .argv;
+
+  try {
+    const metrics   = await fetchMetrics();
+    const strategy  = resolveStrategy();
+    const patchMap  = strategy.compute(metrics);
+    const yamlPatch = generateYamlPatch(patchMap);
+
+    // Notify observers
+    patchEmitter.emit('patch', yamlPatch, patchMap);
+
+    if (argv.out) {
+      await fs.promises.writeFile(argv.out, yamlPatch, 'utf-8');
+      console.log(`Replica patch written to ${argv.out}`);
+    } else {
+      process.stdout.write(yamlPatch);
+    }
+  } catch (err) {
+    console.error('Failed to generate replica patch', err);
+    process.exitCode = 1;
+  }
+}
+
+/* -------------------------------------------------------------------------- */
+/*                            Auto-execute if CLI                             */
+/* -------------------------------------------------------------------------- */
+
+if (import.meta.url === `file://${process.argv[1]}`) {
+  // eslint-disable-next-line promise/prefer-await-to-then
+  main().catch(() => { /* handled above */ });
+}
+
+/* -------------------------------------------------------------------------- */
+/*               Example metrics/current.json  (for reference only)           */
+/* -------------------------------------------------------------------------- */
+/*
+{
+  "media-router":  {
+    "rps": 18000,
+    "errorRate": 0.002,
+    "p95Latency": 110,
+    "avgCPU": 0.62,
+    "avgMemory": 0.71,
+    "currentReplicas": 4
+  },
+  "chat-service": {
+    "rps": 32000,
+    "errorRate": 0.008,
+    "p95Latency": 85,
+    "avgCPU": 0.48,
+    "avgMemory": 0.53,
+    "currentReplicas": 6
+  },
+  "telemetry-service": {
+    "rps": 4500,
+    "errorRate": 0.001,
+    "p95Latency": 95,
+    "avgCPU": 0.29,
+    "avgMemory": 0.37,
+    "currentReplicas": 2
+  }
+}
+*/
+```

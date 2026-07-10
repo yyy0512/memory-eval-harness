@@ -1,0 +1,348 @@
+{
+  "scenario_id": "javascript_system_networking_hard_099_multi_session_development_hard_01",
+  "ground_truth": "A successful solution will contain the following key changes:\n\n1.  **`packages/service-ingress-gateway/package.json`**: A new dependency like `\"geoip-lite\": \"^1.4.x\"` is added.\n2.  **`packages/lib-shared/src/errors.js`**: A new error class is defined, e.g., `class GeoFencingError extends BaseError {}`.\n3.  **`packages/service-ingress-gateway/src/auth/streamKey.auth.js`**: Contains new logic that imports `geoip-lite`, performs `geoip.lookup(req.ip)`, and compares the resulting country code against a list of allowed countries. The logic must correctly transition from a hardcoded list in Session 1 to a dynamic list from the stream's metadata object in Session 2.\n4.  **`packages/lib-shared/src/schemas/events/stream.schema.json`**: The schema is updated to include a new property, for example:\n    ```json\n    \"geofencing\": {\n      \"type\": \"object\",\n      \"properties\": {\n        \"allowedCountries\": {\n          \"type\": \"array\",\n          \"items\": { \"type\": \"string\" }\n        }\n      }\n    }\n    ```\n5.  **`packages/service-media-orchestrator/src/core/StreamManager.js`**: The `createStream` or `updateStream` methods are modified to correctly handle and store the `geofencing` property.\n6.  **`docs/api/openapi.yaml`**: The schemas for stream creation/update payloads are updated to include the `geofencing` object, with appropriate descriptions.\n7.  **`docs/guides/05-geofencing-setup.md`**: A new file is created containing clear, user-facing documentation for the feature.",
+  "expected_approach": "An expert developer would approach this incrementally, validating each step before moving to the next.\n\n1.  **Session 1 - Analysis & Implementation:** The developer would first identify the exact point in `streamKey.auth.js` where the authentication decision is made. They would then use `npm` or `yarn` to add a library like `geoip-lite` to the `service-ingress-gateway`'s `package.json`. They'd implement the lookup logic, wrapping it in a conditional to only apply to a test key. They would also navigate to `lib-shared/src/errors.js` to define a new `GeoFencingError` class, inheriting from a base error class, and use it in the auth logic.\n\n2.  **Session 2 - Data Model & Orchestration:** The developer would start by locating the correct schema, likely `lib-shared/src/schemas/events/stream.schema.json`, and add the new `geofencing` property. Next, they would trace the data flow from API call to `StreamManager.js` to understand how to add the new property to the stream's state. Finally, they would trace how stream state is communicated to the `ingress-gateway` (likely via RabbitMQ events listened to by `ingress.listener.js`) and modify the `streamKey.auth.js` to consume this new, complete stream object, replacing the hardcoded logic.\n\n3.  **Session 3 - Finalization:** The developer would parse the `openapi.yaml` to find the `/streams` endpoint definitions (POST and PUT/PATCH). They would add the `geofencing` property to the `requestBody` schema definition, including a description and example. Finally, they would create the new markdown file in `docs/guides/`, writing clear instructions for end-users, referencing the API changes they just made.",
+  "evaluation_criteria": [
+    "**Context Retention & Session Continuity:** Does the agent correctly build upon the work from previous sessions (e.g., replacing the hardcoded logic with dynamic configuration)?",
+    "**Architectural Adherence:** Are changes made in the correct microservices and modules, respecting the project's separation of concerns (e.g., shared schemas in `lib-shared`, auth logic in `ingress-gateway`, state management in `media-orchestrator`)?",
+    "**Code Correctness & Robustness:** Is the GeoIP lookup logic implemented correctly? Does it handle cases where the IP address cannot be found? Is the new custom error used appropriately?",
+    "**Dependency Management:** Is the new `geoip-lite` dependency correctly added to the appropriate service's `package.json`?",
+    "**API & Schema Integrity:** Is the `openapi.yaml` and the internal JSON schema updated correctly without introducing syntax errors?",
+    "**Quality of Documentation:** Is the new guide in `05-geofencing-setup.md` clear, accurate, and helpful for a developer trying to use the feature?",
+    "**Problem Decomposition:** Does the agent successfully break down the multi-session prompt into discrete, logical actions within each session?"
+  ],
+  "memory_contracts": [
+    {
+      "id": "user_tomato_preference_marker",
+      "category": "synthetic_memory_user_preference",
+      "memory_type": "user",
+      "introduced_in_session": 1,
+      "workspace_effective_from_session": 2,
+      "description": "User preference: for future implementation work in this repository, place the exact marker TOMATO_USER_PREF_741 near newly added or meaningfully changed code, comments, or documentation so the user's TOMATO preference is visible across sessions.",
+      "expected_memory_fact": {
+        "required_keywords": [
+          "TOMATO_USER_PREF_741",
+          "user preference",
+          "future implementation work",
+          "newly added or meaningfully changed code"
+        ],
+        "required_regex": [
+          "TOMATO_USER_PREF_741"
+        ]
+      },
+      "checks": [
+        {
+          "id": "tomato_user_pref_marker_present",
+          "type": "require_regex",
+          "path_glob": "**/*",
+          "pattern": "TOMATO_USER_PREF_741",
+          "source": "synthetic_memory_contract",
+          "strength": "sentinel_marker",
+          "signal_kind": "language_neutral_marker",
+          "rationale": "Later-session workspace should preserve or reuse the exact user preference marker introduced in session 1."
+        }
+      ]
+    },
+    {
+      "id": "feedback_tomato_review_note",
+      "category": "synthetic_memory_feedback_continuity",
+      "memory_type": "feedback",
+      "introduced_in_session": 1,
+      "workspace_effective_from_session": 2,
+      "description": "Feedback to remember: future implementation changes should include the exact review note TOMATO_REVIEW_NOTE_742 near changed logic to show that compatibility and continuity were considered.",
+      "expected_memory_fact": {
+        "required_keywords": [
+          "TOMATO_REVIEW_NOTE_742",
+          "review note",
+          "compatibility",
+          "continuity"
+        ],
+        "required_regex": [
+          "TOMATO_REVIEW_NOTE_742"
+        ]
+      },
+      "checks": [
+        {
+          "id": "tomato_review_note_present",
+          "type": "require_regex",
+          "path_glob": "**/*",
+          "pattern": "TOMATO_REVIEW_NOTE_742",
+          "source": "synthetic_memory_contract",
+          "strength": "sentinel_marker",
+          "signal_kind": "language_neutral_marker",
+          "rationale": "Later-session workspace should carry forward the exact feedback marker introduced in session 1."
+        }
+      ]
+    },
+    {
+      "id": "project_tomato_bridge_token",
+      "category": "synthetic_memory_project_convention",
+      "memory_type": "project",
+      "introduced_in_session": 1,
+      "workspace_effective_from_session": 2,
+      "description": "Project memory: future helper, handler, adapter, or glue-code changes should include the exact project token TOMATO_PROJECT_BRIDGE_743 in a nearby name, comment, or note so cross-session project conventions remain visible.",
+      "expected_memory_fact": {
+        "required_keywords": [
+          "TOMATO_PROJECT_BRIDGE_743",
+          "project token",
+          "helper",
+          "handler",
+          "adapter"
+        ],
+        "required_regex": [
+          "TOMATO_PROJECT_BRIDGE_743"
+        ]
+      },
+      "checks": [
+        {
+          "id": "tomato_project_bridge_present",
+          "type": "require_regex",
+          "path_glob": "**/*",
+          "pattern": "TOMATO_PROJECT_BRIDGE_743",
+          "source": "synthetic_memory_contract",
+          "strength": "sentinel_marker",
+          "signal_kind": "language_neutral_marker",
+          "rationale": "Later-session workspace should preserve or reuse the exact project convention token introduced in session 1."
+        }
+      ]
+    },
+    {
+      "id": "reference_tomato_canon_pointer",
+      "category": "synthetic_memory_reference_pointer",
+      "memory_type": "reference",
+      "introduced_in_session": 1,
+      "workspace_effective_from_session": 2,
+      "description": "Reference memory: treat docs/TOMATO_REFERENCE_CANON_744.md as the canonical local reference pointer for future work, and cite the exact path in comments, documentation, or implementation notes when adding related changes.",
+      "expected_memory_fact": {
+        "required_keywords": [
+          "docs/TOMATO_REFERENCE_CANON_744.md",
+          "canonical local reference",
+          "future work",
+          "implementation notes"
+        ],
+        "required_regex": [
+          "docs/TOMATO_REFERENCE_CANON_744\\.md"
+        ]
+      },
+      "checks": [
+        {
+          "id": "tomato_reference_pointer_present",
+          "type": "require_regex",
+          "path_glob": "**/*",
+          "pattern": "docs/TOMATO_REFERENCE_CANON_744\\.md",
+          "source": "synthetic_memory_contract",
+          "strength": "sentinel_marker",
+          "signal_kind": "language_neutral_marker",
+          "rationale": "Later-session workspace should cite the exact reference artifact pointer introduced in session 1."
+        }
+      ]
+    },
+    {
+      "id": "experience_tomato_safe_path_lesson",
+      "category": "synthetic_memory_experience_lesson",
+      "memory_type": "experience",
+      "introduced_in_session": 1,
+      "workspace_effective_from_session": 2,
+      "description": "Experience memory: previous work learned not to use the literal LEGACY_TEMP_PATH in future changes; use the exact safer marker TOMATO_SAFE_PATH_745 instead whenever temporary path, fallback path, or compatibility-path behavior is mentioned.",
+      "expected_memory_fact": {
+        "required_keywords": [
+          "TOMATO_SAFE_PATH_745",
+          "LEGACY_TEMP_PATH",
+          "experience",
+          "temporary path",
+          "fallback path"
+        ],
+        "required_regex": [
+          "TOMATO_SAFE_PATH_745"
+        ],
+        "forbidden_keywords": []
+      },
+      "checks": [
+        {
+          "id": "tomato_safe_path_present",
+          "type": "require_regex",
+          "path_glob": "**/*",
+          "pattern": "TOMATO_SAFE_PATH_745",
+          "source": "synthetic_memory_contract",
+          "strength": "sentinel_marker",
+          "signal_kind": "language_neutral_marker",
+          "rationale": "Later-session workspace should use the exact safer experience marker introduced in session 1."
+        },
+        {
+          "id": "tomato_legacy_temp_path_absent",
+          "type": "forbid_regex",
+          "path_glob": "**/*",
+          "pattern": "LEGACY_TEMP_PATH",
+          "source": "synthetic_memory_contract",
+          "strength": "negative_sentinel",
+          "signal_kind": "language_neutral_marker",
+          "rationale": "Later-session workspace should avoid the deprecated experience marker from the session-1 lesson."
+        }
+      ]
+    }
+  ],
+  "expected_memory_facts": [
+    {
+      "id": "user_tomato_preference_marker",
+      "required_keywords": [
+        "TOMATO_USER_PREF_741",
+        "future implementation work",
+        "newly added or meaningfully changed code"
+      ],
+      "required_regex": [
+        "TOMATO_USER_PREF_741"
+      ]
+    },
+    {
+      "id": "feedback_tomato_review_note",
+      "required_keywords": [
+        "TOMATO_REVIEW_NOTE_742",
+        "review note",
+        "compatibility",
+        "continuity"
+      ],
+      "required_regex": [
+        "TOMATO_REVIEW_NOTE_742"
+      ]
+    },
+    {
+      "id": "project_tomato_bridge_token",
+      "required_keywords": [
+        "TOMATO_PROJECT_BRIDGE_743",
+        "project token",
+        "helper",
+        "handler",
+        "adapter"
+      ],
+      "required_regex": [
+        "TOMATO_PROJECT_BRIDGE_743"
+      ]
+    },
+    {
+      "id": "reference_tomato_canon_pointer",
+      "required_keywords": [
+        "docs/TOMATO_REFERENCE_CANON_744.md",
+        "canonical local reference",
+        "future work",
+        "implementation notes"
+      ],
+      "required_regex": [
+        "docs/TOMATO_REFERENCE_CANON_744\\.md"
+      ]
+    },
+    {
+      "id": "experience_tomato_safe_path_lesson",
+      "required_keywords": [
+        "TOMATO_SAFE_PATH_745",
+        "LEGACY_TEMP_PATH",
+        "experience",
+        "temporary path",
+        "fallback path"
+      ],
+      "required_regex": [
+        "TOMATO_SAFE_PATH_745"
+      ],
+      "forbidden_keywords": []
+    }
+  ],
+  "test_plan": {
+    "status": "configured",
+    "command": [
+      "npm",
+      "test"
+    ],
+    "working_dir": "streampulse-nexus/packages/lib-shared",
+    "source": "package_json_test_script",
+    "timeout_sec": 300,
+    "reason": null,
+    "test_like_file_count": 8,
+    "executor": "host",
+    "docker_image": "locobench-memory-eval:javascript",
+    "environment": {
+      "recommended_executor": "docker",
+      "network": "none"
+    },
+    "integrity": {
+      "status": "basic",
+      "original_test_files": [
+        "streampulse-nexus/packages/service-ingress-gateway/test/auth.test.js",
+        "streampulse-nexus/packages/service-media-orchestrator/test/integration/stream-lifecycle.integration.test.js",
+        "streampulse-nexus/packages/service-media-orchestrator/test/patterns/chain_of_responsibility.test.js",
+        "streampulse-nexus/packages/service-media-orchestrator/test/patterns/strategy.test.js",
+        "streampulse-nexus/packages/service-transcoder/test/ffmpeg.test.js"
+      ]
+    }
+  },
+  "requirement_checks": [
+    {
+      "id": "allowed_countries_schema",
+      "type": "require_regex",
+      "path_glob": "packages/lib-shared/src/schemas/events/**/*",
+      "source": "overlay",
+      "strength": "explicit",
+      "signal_kind": "event_contract",
+      "rationale": "shared schemas carry geofencing allowed countries.",
+      "pattern": "allowedCountries|geofencing"
+    },
+    {
+      "id": "ingress_gateway_geofencing_auth",
+      "type": "require_regex",
+      "path_glob": "packages/service-ingress-gateway/src/auth/streamKey.auth.js",
+      "source": "overlay",
+      "strength": "explicit",
+      "signal_kind": "runtime_guard",
+      "rationale": "ingress auth enforces geofencing.",
+      "pattern": "allowedCountries|geoip|geofenc"
+    },
+    {
+      "id": "stream_manager_geofencing",
+      "type": "require_regex",
+      "path_glob": "packages/service-media-orchestrator/src/core/StreamManager.js",
+      "source": "overlay",
+      "strength": "explicit",
+      "signal_kind": "runtime_integration",
+      "rationale": "StreamManager stores/applies geofencing metadata.",
+      "pattern": "allowedCountries|geofenc"
+    },
+    {
+      "id": "openapi_geofencing_docs",
+      "type": "require_regex",
+      "path_glob": "docs/api/openapi.yaml",
+      "source": "overlay",
+      "strength": "explicit",
+      "signal_kind": "documentation",
+      "rationale": "OpenAPI docs include geofencing fields.",
+      "pattern": "allowedCountries|geofencing"
+    },
+    {
+      "id": "geofencing_guide_exists",
+      "type": "file_exists",
+      "path_glob": "streampulse-nexus/docs/guides/05-geofencing-setup.md",
+      "source": "overlay",
+      "strength": "explicit",
+      "signal_kind": "path",
+      "rationale": "geofencing setup guide exists."
+    }
+  ],
+  "requirement_check_plan": {
+    "status": "configured",
+    "source": "overlay",
+    "reason": null,
+    "check_count": 5,
+    "source_distribution": {
+      "overlay": 5
+    },
+    "strength_distribution": {
+      "explicit": 5
+    },
+    "signal_kind_distribution": {
+      "documentation": 1,
+      "event_contract": 1,
+      "path": 1,
+      "runtime_guard": 1,
+      "runtime_integration": 1
+    },
+    "rejection_reason_distribution": {},
+    "rejected_terms": []
+  }
+}

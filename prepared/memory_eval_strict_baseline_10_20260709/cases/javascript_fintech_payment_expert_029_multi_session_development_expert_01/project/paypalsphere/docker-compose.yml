@@ -1,0 +1,310 @@
+```yaml
+# ------------------------------------------------------------------------------------
+# PayPalsphere – Docker Compose Orchestration
+# ------------------------------------------------------------------------------------
+# This stack spins up the full micro-service suite required for local development
+# or CI integration testing. Each service is written in Node.js/TypeScript and
+# communicates over gRPC and NATS (event-bus). Data stores are launched as local
+# containers for ease of onboarding; production deployments are handled via Helm.
+#
+# NOTE: Secrets loaded here are for non-production usage only—real secrets live
+# in HashiCorp Vault and are injected by the GitOps pipeline.
+# ------------------------------------------------------------------------------------
+version: "3.9"
+
+x-node-base: &node-service
+  image: node:20-alpine
+  restart: unless-stopped
+  networks:
+    - backend
+  environment:
+    - NODE_ENV=development
+    - LOG_LEVEL=debug
+    - TZ=UTC
+  volumes:
+    - ./:/usr/src/app
+    - node_modules_cache:/usr/src/app/node_modules
+  healthcheck:
+    test: ["CMD", "node", "--eval", "require('net').connect({ host: 'localhost', port: process.env.PORT || 3000 }).on('connect', () => process.exit(0)).on('error', () => process.exit(1));"]
+    interval: 10s
+    timeout: 5s
+    retries: 5
+    start_period: 15s
+
+services:
+  # ────────────────────────────────────────────────────────────────────────────
+  # Infrastructure Layer
+  # ────────────────────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:15-alpine
+    container_name: ps-postgres
+    restart: unless-stopped
+    networks:
+      - backend
+    environment:
+      POSTGRES_USER: paypalsphere
+      POSTGRES_PASSWORD: paypalsphere
+      POSTGRES_DB: paypalsphere
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      retries: 5
+
+  mongodb:
+    image: mongo:6
+    container_name: ps-mongodb
+    restart: unless-stopped
+    networks:
+      - backend
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: root
+      MONGO_INITDB_ROOT_PASSWORD: example
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.runCommand({ ping: 1 })"]
+      interval: 10s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: ps-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    networks:
+      - backend
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      retries: 5
+
+  nats:
+    image: nats:2.10-alpine
+    container_name: ps-nats
+    restart: unless-stopped
+    networks:
+      - backend
+    command: ["-js", "-sd", "/data/streams", "-DV"]
+    volumes:
+      - nats_data:/data
+    healthcheck:
+      test: ["CMD", "nats", "ping", "localhost:4222"]
+      interval: 10s
+      retries: 5
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # Core Domain Services
+  # ────────────────────────────────────────────────────────────────────────────
+  api-gateway:
+    <<: *node-service
+    container_name: ps-api-gateway
+    build:
+      context: ./services/api-gateway
+      dockerfile: Dockerfile
+    environment:
+      <<: *node-service.environment
+      PORT: 8080
+      SERVICE_NAME: api-gateway
+      JWT_PUBLIC_KEY_FILE: /run/secrets/jwt_pub
+    secrets:
+      - jwt_pub
+    ports:
+      - "8080:8080"
+    depends_on:
+      - nats
+
+  accounts-service:
+    <<: *node-service
+    container_name: ps-accounts
+    build:
+      context: ./services/accounts
+      dockerfile: Dockerfile
+    environment:
+      <<: *node-service.environment
+      PORT: 3001
+      SERVICE_NAME: accounts-service
+      DATABASE_URL: postgres://paypalsphere:paypalsphere@postgres:5432/paypalsphere
+      EVENT_BUS_URL: nats://nats:4222
+    depends_on:
+      - postgres
+      - nats
+
+  kyc-service:
+    <<: *node-service
+    container_name: ps-kyc
+    build:
+      context: ./services/kyc
+      dockerfile: Dockerfile
+    environment:
+      <<: *node-service.environment
+      PORT: 3002
+      SERVICE_NAME: kyc-service
+      DATABASE_URL: postgres://paypalsphere:paypalsphere@postgres:5432/paypalsphere
+      EVENT_BUS_URL: nats://nats:4222
+      AWS_REGION: us-east-1
+    depends_on:
+      - postgres
+      - nats
+
+  risk-service:
+    <<: *node-service
+    container_name: ps-risk
+    build:
+      context: ./services/risk
+      dockerfile: Dockerfile
+    environment:
+      <<: *node-service.environment
+      PORT: 3003
+      SERVICE_NAME: risk-service
+      REDIS_URL: redis://redis:6379
+      EVENT_BUS_URL: nats://nats:4222
+    depends_on:
+      - redis
+      - nats
+
+  transactions-service:
+    <<: *node-service
+    container_name: ps-transactions
+    build:
+      context: ./services/transactions
+      dockerfile: Dockerfile
+    environment:
+      <<: *node-service.environment
+      PORT: 3004
+      SERVICE_NAME: transactions-service
+      DATABASE_URL: postgres://paypalsphere:paypalsphere@postgres:5432/paypalsphere
+      EVENT_BUS_URL: nats://nats:4222
+    depends_on:
+      - postgres
+      - nats
+
+  compliance-service:
+    <<: *node-service
+    container_name: ps-compliance
+    build:
+      context: ./services/compliance
+      dockerfile: Dockerfile
+    environment:
+      <<: *node-service.environment
+      PORT: 3005
+      SERVICE_NAME: compliance-service
+      DATABASE_URL: postgres://paypalsphere:paypalsphere@postgres:5432/paypalsphere
+      EVENT_BUS_URL: nats://nats:4222
+    depends_on:
+      - postgres
+      - nats
+
+  socialgraph-service:
+    <<: *node-service
+    container_name: ps-socialgraph
+    build:
+      context: ./services/socialgraph
+      dockerfile: Dockerfile
+    environment:
+      <<: *node-service.environment
+      PORT: 3006
+      SERVICE_NAME: socialgraph-service
+      MONGO_URL: mongodb://root:example@mongodb:27017
+      EVENT_BUS_URL: nats://nats:4222
+    depends_on:
+      - mongodb
+      - nats
+
+  notification-service:
+    <<: *node-service
+    container_name: ps-notification
+    build:
+      context: ./services/notification
+      dockerfile: Dockerfile
+    environment:
+      <<: *node-service.environment
+      PORT: 3007
+      SERVICE_NAME: notification-service
+      REDIS_URL: redis://redis:6379
+      EVENT_BUS_URL: nats://nats:4222
+    depends_on:
+      - redis
+      - nats
+
+  settlement-service:
+    <<: *node-service
+    container_name: ps-settlement
+    build:
+      context: ./services/settlement
+      dockerfile: Dockerfile
+    environment:
+      <<: *node-service.environment
+      PORT: 3008
+      SERVICE_NAME: settlement-service
+      DATABASE_URL: postgres://paypalsphere:paypalsphere@postgres:5432/paypalsphere
+      EVENT_BUS_URL: nats://nats:4222
+    depends_on:
+      - postgres
+      - nats
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # Observability & Tooling
+  # ────────────────────────────────────────────────────────────────────────────
+  jaeger:
+    image: jaegertracing/all-in-one:1.48
+    container_name: ps-jaeger
+    restart: unless-stopped
+    ports:
+      - "16686:16686"   # UI
+      - "6831:6831/udp" # agent
+    networks:
+      - backend
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+
+  prometheus:
+    image: prom/prometheus:v2.49.1
+    container_name: ps-prometheus
+    restart: unless-stopped
+    networks:
+      - backend
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./infra/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+
+  grafana:
+    image: grafana/grafana:10.2.3
+    container_name: ps-grafana
+    restart: unless-stopped
+    networks:
+      - backend
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    volumes:
+      - grafana_data:/var/lib/grafana
+
+# ────────────────────────────────────────────────────────────────────────────
+# Secrets Management
+# ────────────────────────────────────────────────────────────────────────────
+secrets:
+  jwt_pub:
+    file: ./infra/secrets/jwt_public_key.pem
+
+# ────────────────────────────────────────────────────────────────────────────
+# Volumes & Networks
+# ────────────────────────────────────────────────────────────────────────────
+volumes:
+  postgres_data:
+  mongo_data:
+  redis_data:
+  nats_data:
+  grafana_data:
+  node_modules_cache:
+
+networks:
+  backend:
+    driver: bridge
+```

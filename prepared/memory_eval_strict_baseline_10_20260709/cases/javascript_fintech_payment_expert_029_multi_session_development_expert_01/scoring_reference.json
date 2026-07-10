@@ -1,0 +1,349 @@
+{
+  "scenario_id": "javascript_fintech_payment_expert_029_multi_session_development_expert_01",
+  "ground_truth": "A successful solution will contain the following key modifications:\n\n1.  **New Event Schema:** A new file, e.g., `packages/event-schemas/throttling.proto`, defining the `UserThrottlingStatusChanged` event with fields like `userId`, `status` (e.g., 'ACTIVE', 'INACTIVE'), and `expiresAt`.\n2.  **Risk Service Logic:**\n    - In `services/risk-service/src/domain/risk-scorer.js`: New logic to calculate transaction velocity. This requires state, so the agent must propose and use a cache (e.g., a mock or real Redis client).\n    - In `services/risk-service/src/index.js` or a related file: Logic to publish the new `UserThrottlingStatusChanged` event to the message bus (e.g., Kafka, RabbitMQ).\n3.  **Accounts Service State:**\n    - In `services/accounts-service/src/domain/user.js`: The user schema/model is updated with a `throttling` object or similar fields.\n    - In `services/accounts-service/src/event-consumer.js`: A new handler is added to subscribe to `UserThrottlingStatusChanged` and update the user's record in its database.\n4.  **Transaction Service Enforcement:**\n    - In `services/transactions-service/src/application/commands/create-transaction.handler.js`: A new check is added at the beginning of the handler. This check queries the `accounts-service` for the user's status and throws a `UserThrottledError` if necessary.\n5.  **New Integration Test:** A new test file, e.g., `services/transactions-service/tests/integration/throttling.spec.js`, that orchestrates the multi-step process and asserts the final outcome.",
+  "expected_approach": "An expert developer would first perform a discovery phase by reading architectural documentation (`ARCHITECTURE.md`, `cqrs-and-es.md`, `saga-pattern.md`) and using code search to trace the existing transaction creation flow. They would identify `create-transaction.handler.js` as the command entry point, `transaction.aggregate.js` as the state machine, and `risk-scorer.js` as the logical place for the new business rule.\n\nTheir plan would strongly favor asynchronous, event-based communication to maintain loose coupling between services. They would explicitly reject solutions that involve synchronous, blocking calls from the `transactions-service` to the `risk-service` during a transaction command.\n\nThe proposed flow would be:\n1.  `TransactionCreated` event is emitted as usual.\n2.  `risk-service`'s event consumer (`event-consumer.js`) listens for `TransactionCreated`.\n3.  Upon receiving the event, it updates a velocity tracker for the user (likely in Redis, which the developer should identify as a prerequisite).\n4.  The `risk-scorer.js` logic checks this tracker. If the threshold is breached, the `risk-service` emits a new `UserThrottlingStatusChanged` event.\n5.  `accounts-service`'s event consumer listens for `UserThrottlingStatusChanged` and updates the `User` model/document with a status and expiry timestamp.\n6.  Crucially, the `create-transaction.handler.js` in the `transactions-service` is modified. Its *first* step, before any other logic, becomes checking the user's status by querying the `accounts-service`. This is a necessary synchronous query to prevent a command from even starting.\n7.  Finally, they would write an integration test that uses test harnesses to publish a series of events, poll for the expected state change in the `accounts-service`'s data store, and then verify the command rejection in the `transactions-service`.",
+  "evaluation_criteria": [
+    "**Context Retention & Session Continuity:** Does the agent's work in each session correctly build upon the decisions and code from the previous sessions?",
+    "**Architectural Adherence:** Does the solution correctly use asynchronous events for inter-service communication, avoiding tightly coupled synchronous calls where inappropriate?",
+    "**Problem Decomposition & Planning:** Was the initial plan in Session 1 comprehensive and accurate in identifying the required changes?",
+    "**Code Correctness:** Is the implemented Javascript code logically sound, free of obvious bugs, and does it correctly handle the new state and error conditions?",
+    "**Systemic Understanding:** Did the agent correctly identify the right files to modify within the large, multi-service monorepo?",
+    "**Implicit Requirement Identification:** Did the agent correctly identify the need for a persistent, fast-access cache (like Redis) for velocity tracking, even though it wasn't explicitly stated in the prompt?",
+    "**Test-Driven Mindset:** Was the agent able to construct a complex, end-to-end integration test that validates the asynchronous workflow across multiple services?"
+  ],
+  "memory_contracts": [
+    {
+      "id": "user_tomato_preference_marker",
+      "category": "synthetic_memory_user_preference",
+      "memory_type": "user",
+      "introduced_in_session": 1,
+      "workspace_effective_from_session": 2,
+      "description": "User preference: for future implementation work in this repository, place the exact marker TOMATO_USER_PREF_741 near newly added or meaningfully changed code, comments, or documentation so the user's TOMATO preference is visible across sessions.",
+      "expected_memory_fact": {
+        "required_keywords": [
+          "TOMATO_USER_PREF_741",
+          "user preference",
+          "future implementation work",
+          "newly added or meaningfully changed code"
+        ],
+        "required_regex": [
+          "TOMATO_USER_PREF_741"
+        ]
+      },
+      "checks": [
+        {
+          "id": "tomato_user_pref_marker_present",
+          "type": "require_regex",
+          "path_glob": "**/*",
+          "pattern": "TOMATO_USER_PREF_741",
+          "source": "synthetic_memory_contract",
+          "strength": "sentinel_marker",
+          "signal_kind": "language_neutral_marker",
+          "rationale": "Later-session workspace should preserve or reuse the exact user preference marker introduced in session 1."
+        }
+      ]
+    },
+    {
+      "id": "feedback_tomato_review_note",
+      "category": "synthetic_memory_feedback_continuity",
+      "memory_type": "feedback",
+      "introduced_in_session": 1,
+      "workspace_effective_from_session": 2,
+      "description": "Feedback to remember: future implementation changes should include the exact review note TOMATO_REVIEW_NOTE_742 near changed logic to show that compatibility and continuity were considered.",
+      "expected_memory_fact": {
+        "required_keywords": [
+          "TOMATO_REVIEW_NOTE_742",
+          "review note",
+          "compatibility",
+          "continuity"
+        ],
+        "required_regex": [
+          "TOMATO_REVIEW_NOTE_742"
+        ]
+      },
+      "checks": [
+        {
+          "id": "tomato_review_note_present",
+          "type": "require_regex",
+          "path_glob": "**/*",
+          "pattern": "TOMATO_REVIEW_NOTE_742",
+          "source": "synthetic_memory_contract",
+          "strength": "sentinel_marker",
+          "signal_kind": "language_neutral_marker",
+          "rationale": "Later-session workspace should carry forward the exact feedback marker introduced in session 1."
+        }
+      ]
+    },
+    {
+      "id": "project_tomato_bridge_token",
+      "category": "synthetic_memory_project_convention",
+      "memory_type": "project",
+      "introduced_in_session": 1,
+      "workspace_effective_from_session": 2,
+      "description": "Project memory: future helper, handler, adapter, or glue-code changes should include the exact project token TOMATO_PROJECT_BRIDGE_743 in a nearby name, comment, or note so cross-session project conventions remain visible.",
+      "expected_memory_fact": {
+        "required_keywords": [
+          "TOMATO_PROJECT_BRIDGE_743",
+          "project token",
+          "helper",
+          "handler",
+          "adapter"
+        ],
+        "required_regex": [
+          "TOMATO_PROJECT_BRIDGE_743"
+        ]
+      },
+      "checks": [
+        {
+          "id": "tomato_project_bridge_present",
+          "type": "require_regex",
+          "path_glob": "**/*",
+          "pattern": "TOMATO_PROJECT_BRIDGE_743",
+          "source": "synthetic_memory_contract",
+          "strength": "sentinel_marker",
+          "signal_kind": "language_neutral_marker",
+          "rationale": "Later-session workspace should preserve or reuse the exact project convention token introduced in session 1."
+        }
+      ]
+    },
+    {
+      "id": "reference_tomato_canon_pointer",
+      "category": "synthetic_memory_reference_pointer",
+      "memory_type": "reference",
+      "introduced_in_session": 1,
+      "workspace_effective_from_session": 2,
+      "description": "Reference memory: treat docs/TOMATO_REFERENCE_CANON_744.md as the canonical local reference pointer for future work, and cite the exact path in comments, documentation, or implementation notes when adding related changes.",
+      "expected_memory_fact": {
+        "required_keywords": [
+          "docs/TOMATO_REFERENCE_CANON_744.md",
+          "canonical local reference",
+          "future work",
+          "implementation notes"
+        ],
+        "required_regex": [
+          "docs/TOMATO_REFERENCE_CANON_744\\.md"
+        ]
+      },
+      "checks": [
+        {
+          "id": "tomato_reference_pointer_present",
+          "type": "require_regex",
+          "path_glob": "**/*",
+          "pattern": "docs/TOMATO_REFERENCE_CANON_744\\.md",
+          "source": "synthetic_memory_contract",
+          "strength": "sentinel_marker",
+          "signal_kind": "language_neutral_marker",
+          "rationale": "Later-session workspace should cite the exact reference artifact pointer introduced in session 1."
+        }
+      ]
+    },
+    {
+      "id": "experience_tomato_safe_path_lesson",
+      "category": "synthetic_memory_experience_lesson",
+      "memory_type": "experience",
+      "introduced_in_session": 1,
+      "workspace_effective_from_session": 2,
+      "description": "Experience memory: previous work learned not to use the literal LEGACY_TEMP_PATH in future changes; use the exact safer marker TOMATO_SAFE_PATH_745 instead whenever temporary path, fallback path, or compatibility-path behavior is mentioned.",
+      "expected_memory_fact": {
+        "required_keywords": [
+          "TOMATO_SAFE_PATH_745",
+          "LEGACY_TEMP_PATH",
+          "experience",
+          "temporary path",
+          "fallback path"
+        ],
+        "required_regex": [
+          "TOMATO_SAFE_PATH_745"
+        ],
+        "forbidden_keywords": []
+      },
+      "checks": [
+        {
+          "id": "tomato_safe_path_present",
+          "type": "require_regex",
+          "path_glob": "**/*",
+          "pattern": "TOMATO_SAFE_PATH_745",
+          "source": "synthetic_memory_contract",
+          "strength": "sentinel_marker",
+          "signal_kind": "language_neutral_marker",
+          "rationale": "Later-session workspace should use the exact safer experience marker introduced in session 1."
+        },
+        {
+          "id": "tomato_legacy_temp_path_absent",
+          "type": "forbid_regex",
+          "path_glob": "**/*",
+          "pattern": "LEGACY_TEMP_PATH",
+          "source": "synthetic_memory_contract",
+          "strength": "negative_sentinel",
+          "signal_kind": "language_neutral_marker",
+          "rationale": "Later-session workspace should avoid the deprecated experience marker from the session-1 lesson."
+        }
+      ]
+    }
+  ],
+  "expected_memory_facts": [
+    {
+      "id": "user_tomato_preference_marker",
+      "required_keywords": [
+        "TOMATO_USER_PREF_741",
+        "future implementation work",
+        "newly added or meaningfully changed code"
+      ],
+      "required_regex": [
+        "TOMATO_USER_PREF_741"
+      ]
+    },
+    {
+      "id": "feedback_tomato_review_note",
+      "required_keywords": [
+        "TOMATO_REVIEW_NOTE_742",
+        "review note",
+        "compatibility",
+        "continuity"
+      ],
+      "required_regex": [
+        "TOMATO_REVIEW_NOTE_742"
+      ]
+    },
+    {
+      "id": "project_tomato_bridge_token",
+      "required_keywords": [
+        "TOMATO_PROJECT_BRIDGE_743",
+        "project token",
+        "helper",
+        "handler",
+        "adapter"
+      ],
+      "required_regex": [
+        "TOMATO_PROJECT_BRIDGE_743"
+      ]
+    },
+    {
+      "id": "reference_tomato_canon_pointer",
+      "required_keywords": [
+        "docs/TOMATO_REFERENCE_CANON_744.md",
+        "canonical local reference",
+        "future work",
+        "implementation notes"
+      ],
+      "required_regex": [
+        "docs/TOMATO_REFERENCE_CANON_744\\.md"
+      ]
+    },
+    {
+      "id": "experience_tomato_safe_path_lesson",
+      "required_keywords": [
+        "TOMATO_SAFE_PATH_745",
+        "LEGACY_TEMP_PATH",
+        "experience",
+        "temporary path",
+        "fallback path"
+      ],
+      "required_regex": [
+        "TOMATO_SAFE_PATH_745"
+      ],
+      "forbidden_keywords": []
+    }
+  ],
+  "test_plan": {
+    "status": "configured",
+    "command": [
+      "npm",
+      "test"
+    ],
+    "working_dir": "paypalsphere/infra/api-gateway",
+    "source": "package_json_test_script",
+    "timeout_sec": 300,
+    "reason": null,
+    "test_like_file_count": 10,
+    "executor": "host",
+    "docker_image": "locobench-memory-eval:javascript",
+    "environment": {
+      "recommended_executor": "docker",
+      "network": "none"
+    },
+    "integrity": {
+      "status": "basic",
+      "original_test_files": [
+        "paypalsphere/services/accounts-service/tests/user.spec.js",
+        "paypalsphere/services/kyc-service/tests/verification.spec.js",
+        "paypalsphere/services/risk-service/tests/risk-scorer.spec.js",
+        "paypalsphere/services/settlement-service/tests/sagas/group-settlement.spec.js",
+        "paypalsphere/services/transactions-service/tests/integration/cqrs-flow.spec.js"
+      ]
+    }
+  },
+  "requirement_checks": [
+    {
+      "id": "user_throttling_status_domain",
+      "type": "require_regex",
+      "path_glob": "services/accounts-service/src/domain/user.js",
+      "source": "overlay",
+      "strength": "explicit",
+      "signal_kind": "domain_model",
+      "rationale": "user domain tracks throttling status.",
+      "pattern": "throttlingStatus|active|expiresAt"
+    },
+    {
+      "id": "throttling_event_schema",
+      "type": "require_regex",
+      "path_glob": "packages/event-schemas/**/*",
+      "source": "overlay",
+      "strength": "explicit",
+      "signal_kind": "event_contract",
+      "rationale": "event schemas include throttling status event.",
+      "pattern": "UserThrottlingStatusChanged|throttlingStatus"
+    },
+    {
+      "id": "risk_service_sets_throttling",
+      "type": "require_regex",
+      "path_glob": "services/risk-service/src/domain/risk-scorer.js",
+      "source": "overlay",
+      "strength": "explicit",
+      "signal_kind": "runtime_integration",
+      "rationale": "risk service can set throttling status.",
+      "pattern": "throttlingStatus|UserThrottlingStatusChanged|risk"
+    },
+    {
+      "id": "transaction_handler_blocks_throttled_user",
+      "type": "require_regex",
+      "path_glob": "services/transactions-service/**/create-transaction.handler.js",
+      "source": "overlay",
+      "strength": "explicit",
+      "signal_kind": "business_rule",
+      "rationale": "transaction handler checks throttling status.",
+      "pattern": "throttlingStatus|CreateTransaction|TransactionCreated"
+    },
+    {
+      "id": "cqrs_docs_updated",
+      "type": "require_regex",
+      "path_glob": "docs/patterns/cqrs-and-es.md",
+      "source": "overlay",
+      "strength": "explicit",
+      "signal_kind": "documentation",
+      "rationale": "CQRS/event sourcing docs mention throttling event.",
+      "pattern": "UserThrottlingStatusChanged|throttling"
+    }
+  ],
+  "requirement_check_plan": {
+    "status": "configured",
+    "source": "overlay",
+    "reason": null,
+    "check_count": 5,
+    "source_distribution": {
+      "overlay": 5
+    },
+    "strength_distribution": {
+      "explicit": 5
+    },
+    "signal_kind_distribution": {
+      "business_rule": 1,
+      "documentation": 1,
+      "domain_model": 1,
+      "event_contract": 1,
+      "runtime_integration": 1
+    },
+    "rejection_reason_distribution": {},
+    "rejected_terms": []
+  }
+}

@@ -1,0 +1,304 @@
+```xml
+<!--
+    File: vitalpulse-cloudcare-api/services/vital-ingestion-command/pom.xml
+    Module: Vital Ingestion Command – command-side write microservice for ingesting
+            high-frequency telemetry, medication, and clinician order events.
+
+    This POM assembles a shaded (fat) JAR suitable for AWS Lambda deployment, enforces
+    Java 17 compatibility, and brings in telemetry, validation, rate-limiting, and
+    testing toolchains demanded by production-grade healthcare workloads.
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
+                             https://maven.apache.org/xsd/maven-4.0.0.xsd">
+
+    <modelVersion>4.0.0</modelVersion>
+
+    <!-- Inherit shared properties & dependency management -->
+    <parent>
+        <groupId>com.vitalpulse.cloudcare</groupId>
+        <artifactId>api_rest</artifactId>
+        <version>2.0.0-beta</version>
+        <relativePath>../../../pom.xml</relativePath>
+    </parent>
+
+    <groupId>com.vitalpulse.cloudcare</groupId>
+    <artifactId>vital-ingestion-command</artifactId>
+    <version>2.0.0-beta</version>
+    <name>VitalPulse CloudCare – Vital Ingestion (Command)</name>
+    <description>
+        Command-side write service responsible for ingesting real-time vital signs,
+        medication events, and clinician orders into DynamoDB. Optimized for high
+        throughput, low latency, and HIPAA-grade reliability.
+    </description>
+    <packaging>jar</packaging>
+
+    <!-- ====================================================================== -->
+    <!--                              Properties                                -->
+    <!-- ====================================================================== -->
+    <properties>
+        <java.version>17</java.version>
+        <maven.compiler.release>${java.version}</maven.compiler.release>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+
+        <!-- Dependency Versions -->
+        <aws.sdk.version>1.12.618</aws.sdk.version>
+        <aws.lambda.core.version>1.2.2</aws.lambda.core.version>
+        <hapi.fhir.version>6.10.0</hapi.fhir.version>
+        <resilience4j.version>2.1.0</resilience4j.version>
+        <bucket4j.version>8.2.0</bucket4j.version>
+        <log4j.version>2.22.1</log4j.version>
+        <micrometer.version>1.12.3</micrometer.version>
+        <lombok.version>1.18.30</lombok.version>
+        <junit.jupiter.version>5.10.2</junit.jupiter.version>
+        <mockito.version>5.11.0</mockito.version>
+    </properties>
+
+    <!-- ====================================================================== -->
+    <!--                             Dependencies                               -->
+    <!-- ====================================================================== -->
+    <dependencies>
+
+        <!-- --- AWS Lambda Runtime ------------------------------------------------ -->
+        <dependency>
+            <groupId>com.amazonaws</groupId>
+            <artifactId>aws-lambda-java-core</artifactId>
+            <version>${aws.lambda.core.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.amazonaws</groupId>
+            <artifactId>aws-lambda-java-events</artifactId>
+            <version>${aws.lambda.core.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.amazonaws</groupId>
+            <artifactId>aws-lambda-java-log4j2</artifactId>
+            <version>1.5.1</version>
+        </dependency>
+
+        <!-- --- AWS SDK – DynamoDB (thin client) ---------------------------------- -->
+        <dependency>
+            <groupId>com.amazonaws</groupId>
+            <artifactId>aws-java-sdk-dynamodb</artifactId>
+            <version>${aws.sdk.version}</version>
+        </dependency>
+
+        <!-- --- HAPI FHIR for resource validation --------------------------------- -->
+        <dependency>
+            <groupId>ca.uhn.hapi.fhir</groupId>
+            <artifactId>hapi-fhir-structures-r4</artifactId>
+            <version>${hapi.fhir.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>ca.uhn.hapi.fhir</groupId>
+            <artifactId>hapi-fhir-validation</artifactId>
+            <version>${hapi.fhir.version}</version>
+        </dependency>
+
+        <!-- --- Resilience4j for circuit-breaking / retries ----------------------- -->
+        <dependency>
+            <groupId>io.github.resilience4j</groupId>
+            <artifactId>resilience4j-all</artifactId>
+            <version>${resilience4j.version}</version>
+        </dependency>
+
+        <!-- --- Bucket4j for in-process rate-limiting ----------------------------- -->
+        <dependency>
+            <groupId>com.github.vladimir-bukhtoyarov</groupId>
+            <artifactId>bucket4j-core</artifactId>
+            <version>${bucket4j.version}</version>
+        </dependency>
+
+        <!-- --- Micrometer (CloudWatch registry provided by parent BOM) ----------- -->
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-core</artifactId>
+            <version>${micrometer.version}</version>
+        </dependency>
+
+        <!-- --- Logging ----------------------------------------------------------- -->
+        <dependency>
+            <groupId>org.apache.logging.log4j</groupId>
+            <artifactId>log4j-api</artifactId>
+            <version>${log4j.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.logging.log4j</groupId>
+            <artifactId>log4j-core</artifactId>
+            <version>${log4j.version}</version>
+            <scope>runtime</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.logging.log4j</groupId>
+            <artifactId>log4j-slf4j2-impl</artifactId>
+            <version>${log4j.version}</version>
+        </dependency>
+
+        <!-- --- Lombok (compile-only) -------------------------------------------- -->
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+            <version>${lombok.version}</version>
+            <scope>provided</scope>
+        </dependency>
+
+        <!-- --- Testing ----------------------------------------------------------- -->
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <version>${junit.jupiter.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.mockito</groupId>
+            <artifactId>mockito-core</artifactId>
+            <version>${mockito.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.mockito</groupId>
+            <artifactId>mockito-junit-jupiter</artifactId>
+            <version>${mockito.version}</version>
+            <scope>test</scope>
+        </dependency>
+
+    </dependencies>
+
+    <!-- ====================================================================== -->
+    <!--                                 Build                                 -->
+    <!-- ====================================================================== -->
+    <build>
+        <finalName>${project.artifactId}</finalName>
+
+        <plugins>
+
+            <!-- Compiler Plugin enforcing Java version -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>3.11.0</version>
+                <configuration>
+                    <release>${maven.compiler.release}</release>
+                    <parameters>true</parameters>
+                </configuration>
+            </plugin>
+
+            <!-- Shade Plugin to assemble a self-contained Lambda JAR -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-shade-plugin</artifactId>
+                <version>3.5.0</version>
+                <executions>
+                    <execution>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>shade</goal>
+                        </goals>
+                        <configuration>
+                            <createDependencyReducedPom>true</createDependencyReducedPom>
+                            <shadedArtifactAttached>true</shadedArtifactAttached>
+                            <transformers>
+                                <!-- Relocate service-loader files -->
+                                <transformer implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/>
+                                <!-- Merge Log4j plugin caches -->
+                                <transformer implementation="org.apache.maven.plugins.shade.resource.Log4j2PluginsCacheFileTransformer"/>
+                                <!-- Keep META-INF/MANIFEST.MF main-class -->
+                                <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
+                                    <mainClass>com.vitalpulse.cloudcare.ingestion.command.StreamIngestionLambdaHandler</mainClass>
+                                </transformer>
+                            </transformers>
+                            <filters>
+                                <!-- Exclude signature files -->
+                                <filter>
+                                    <artifact>*:*</artifact>
+                                    <excludes>
+                                        <exclude>META-INF/*.SF</exclude>
+                                        <exclude>META-INF/*.DSA</exclude>
+                                        <exclude>META-INF/*.RSA</exclude>
+                                    </excludes>
+                                </filter>
+                            </filters>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <!-- Surefire Plugin for JUnit 5 -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>3.2.5</version>
+                <configuration>
+                    <useModulePath>false</useModulePath>
+                    <includes>
+                        <include>**/*Test.java</include>
+                    </includes>
+                </configuration>
+            </plugin>
+
+            <!-- JaCoCo code coverage -->
+            <plugin>
+                <groupId>org.jacoco</groupId>
+                <artifactId>jacoco-maven-plugin</artifactId>
+                <version>0.8.11</version>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>prepare-agent</goal>
+                        </goals>
+                    </execution>
+                    <execution>
+                        <id>report</id>
+                        <phase>test</phase>
+                        <goals>
+                            <goal>report</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <!-- Versions Plugin (invoked manually) to manage deps -->
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>versions-maven-plugin</artifactId>
+                <version>2.16.2</version>
+            </plugin>
+
+        </plugins>
+    </build>
+
+    <!-- ====================================================================== -->
+    <!--                               Profiles                                 -->
+    <!-- ====================================================================== -->
+    <profiles>
+        <!-- Local profile: quick build without shading for IDE execution -->
+        <profile>
+            <id>local</id>
+            <activation>
+                <property>
+                    <name>env</name>
+                    <value>local</value>
+                </property>
+            </activation>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-shade-plugin</artifactId>
+                        <executions>
+                            <execution>
+                                <goals>
+                                    <!-- Disable shading for local -->
+                                    <goal>help</goal>
+                                </goals>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
+
+</project>
+```

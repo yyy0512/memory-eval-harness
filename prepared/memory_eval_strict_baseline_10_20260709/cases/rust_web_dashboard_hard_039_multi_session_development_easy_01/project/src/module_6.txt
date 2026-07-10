@@ -1,0 +1,605 @@
+```rust
+//! ChromaticCanvas Control Center – Session & Authentication Module
+//!
+//! This file implements production–grade session handling and authentication
+//! middleware for the *ChromaticCanvas* dashboard.  It contains:
+//!   1. A typed error enum (`AuthError`) with transparent conversions.
+//!   2. A `SessionStore` trait that can be backed by any storage engine.
+//!   3. A SQLx/Postgres implementation (`PgSessionStore`).
+//!   4. Cryptographically-sound helpers (password hashing, HMAC signing).
+//!   5. Actix-Web middleware & extractors for effortlessly protecting routes.
+//!
+//! The design embraces async/await, strong typing, fine-grained error
+//! propagation, and zero-cost abstractions—idiomatic Rust at its best.
+
+#![allow(clippy::needless_pass_by_value)]
+
+use actix_web::{
+    cookie::{time::Duration as CookieDuration, Cookie, SameSite},
+    dev::{forward_ready, Service, ServiceRequest, ServiceResponse, Transform},
+    error::{ErrorForbidden, ErrorInternalServerError, ErrorUnauthorized},
+    http::header::SET_COOKIE,
+    web, Error, FromRequest, HttpMessage, HttpRequest, HttpResponse,
+};
+use async_trait::async_trait;
+use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+use chrono::{DateTime, Duration, Utc};
+use futures_util::future::{ok, LocalBoxFuture, Ready};
+use hmac::{Hmac, Mac};
+use rand::{distributions::Alphanumeric, thread_rng, Rng};
+use serde::{Deserialize, Serialize};
+use sha2::Sha256;
+use sqlx::{postgres::PgPoolOptions, PgPool};
+use std::{
+    pin::Pin,
+    sync::Arc,
+    task::{Context, Poll},
+};
+use uuid::Uuid;
+
+/// Max cookie age (30 days). `None` means session cookies (expire on close).
+const MAX_COOKIE_AGE: CookieDuration = CookieDuration::new(60 * 60 * 24 * 30, 0);
+
+type HmacSha256 = Hmac<Sha256>;
+
+/// High-level error type for the authentication domain.
+#[derive(thiserror::Error, Debug)]
+pub enum AuthError {
+    #[error("unauthorized")]
+    Unauthorized,
+    #[error("forbidden")]
+    Forbidden,
+    #[error("internal server error")]
+    Internal(#[from] anyhow::Error),
+}
+
+impl actix_web::ResponseError for AuthError {
+    fn error_response(&self) -> HttpResponse {
+        match self {
+            AuthError::Unauthorized => HttpResponse::Unauthorized().finish(),
+            AuthError::Forbidden => HttpResponse::Forbidden().finish(),
+            AuthError::Internal(_) => HttpResponse::InternalServerError().finish(),
+        }
+    }
+}
+
+/// Session representation used internally.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Session {
+    pub id: Uuid,
+    pub user_id: Uuid,
+    pub created_at: DateTime<Utc>,
+    pub expires_at: DateTime<Utc>,
+}
+
+/// Public authentication result returned by the API.
+#[derive(Debug, Serialize)]
+pub struct AuthPayload {
+    pub user_id: Uuid,
+    pub session_id: Uuid,
+    pub expires_at: DateTime<Utc>,
+}
+
+/// Trait allowing different backing stores (in-memory, Redis, SQL, …).
+#[async_trait]
+pub trait SessionStore: Send + Sync + 'static {
+    async fn create(
+        &self,
+        user_id: Uuid,
+        ttl: Duration,
+    ) -> Result<Session, AuthError>;
+
+    async fn get(&self, session_id: Uuid) -> Result<Option<Session>, AuthError>;
+
+    async fn renew(
+        &self,
+        session_id: Uuid,
+        ttl: Duration,
+    ) -> Result<Session, AuthError>;
+
+    async fn invalidate(&self, session_id: Uuid) -> Result<(), AuthError>;
+}
+
+/// PostgreSQL implementation powered by SQLx.
+#[derive(Clone)]
+pub struct PgSessionStore {
+    pool: PgPool,
+}
+
+impl PgSessionStore {
+    pub async fn new(database_url: &str, max_connections: u32) -> anyhow::Result<Self> {
+        Ok(Self {
+            pool: PgPoolOptions::new()
+                .max_connections(max_connections)
+                .connect(database_url)
+                .await?,
+        })
+    }
+}
+
+#[async_trait]
+impl SessionStore for PgSessionStore {
+    async fn create(
+        &self,
+        user_id: Uuid,
+        ttl: Duration,
+    ) -> Result<Session, AuthError> {
+        let session = Session {
+            id: Uuid::new_v4(),
+            user_id,
+            created_at: Utc::now(),
+            expires_at: Utc::now() + ttl,
+        };
+
+        sqlx::query!(
+            r#"
+            INSERT INTO sessions (id, user_id, created_at, expires_at)
+            VALUES ($1, $2, $3, $4)
+            "#,
+            session.id,
+            session.user_id,
+            session.created_at,
+            session.expires_at,
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|e| AuthError::Internal(anyhow::anyhow!(e)))?;
+
+        Ok(session)
+    }
+
+    async fn get(&self, session_id: Uuid) -> Result<Option<Session>, AuthError> {
+        let rec = sqlx::query!(
+            r#"
+            SELECT id, user_id, created_at, expires_at
+            FROM sessions
+            WHERE id = $1
+            "#,
+            session_id
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| AuthError::Internal(anyhow::anyhow!(e)))?;
+
+        if let Some(r) = rec {
+            Ok(Some(Session {
+                id: r.id,
+                user_id: r.user_id,
+                created_at: r.created_at,
+                expires_at: r.expires_at,
+            }))
+        } else {
+            Ok(None)
+        }
+    }
+
+    async fn renew(
+        &self,
+        session_id: Uuid,
+        ttl: Duration,
+    ) -> Result<Session, AuthError> {
+        let new_exp = Utc::now() + ttl;
+        let rec = sqlx::query!(
+            r#"
+            UPDATE sessions
+            SET expires_at = $2
+            WHERE id = $1
+            RETURNING id, user_id, created_at, expires_at
+            "#,
+            session_id,
+            new_exp
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| AuthError::Internal(anyhow::anyhow!(e)))?;
+
+        rec.map(|r| Session {
+            id: r.id,
+            user_id: r.user_id,
+            created_at: r.created_at,
+            expires_at: r.expires_at,
+        })
+        .ok_or(AuthError::Unauthorized)
+    }
+
+    async fn invalidate(&self, session_id: Uuid) -> Result<(), AuthError> {
+        sqlx::query!(
+            "DELETE FROM sessions WHERE id = $1",
+            session_id
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|e| AuthError::Internal(anyhow::anyhow!(e)))?;
+
+        Ok(())
+    }
+}
+
+/// Securely hash a raw password using Argon2.
+pub async fn hash_password(raw: &str) -> Result<String, AuthError> {
+    use argon2::{
+        password_hash::{PasswordHasher, SaltString},
+        Argon2,
+    };
+
+    let salt = SaltString::generate(&mut thread_rng());
+    let hash = Argon2::default()
+        .hash_password(raw.as_bytes(), &salt)
+        .map_err(|e| AuthError::Internal(anyhow::anyhow!(e)))?
+        .to_string();
+
+    Ok(hash)
+}
+
+/// Verify a raw password against a stored hash.
+pub async fn verify_password(hash: &str, raw: &str) -> Result<bool, AuthError> {
+    use argon2::{
+        password_hash::{PasswordHash, PasswordVerifier},
+        Argon2,
+    };
+
+    let parsed_hash = PasswordHash::new(hash)
+        .map_err(|e| AuthError::Internal(anyhow::anyhow!(e)))?;
+    Ok(Argon2::default()
+        .verify_password(raw.as_bytes(), &parsed_hash)
+        .is_ok())
+}
+
+/// Helper for generating unpredictable, URL-safe CSRF tokens.
+pub fn generate_csrf_token() -> String {
+    let token: String = thread_rng()
+        .sample_iter(&Alphanumeric)
+        .take(32)
+        .map(char::from)
+        .collect();
+    URL_SAFE_NO_PAD.encode(token)
+}
+
+/// A signed cookie wrapper ensuring integrity using HMAC.
+pub struct CookieSigner {
+    key: Arc<HmacSha256>,
+}
+
+impl CookieSigner {
+    pub fn new(secret: &[u8]) -> Self {
+        Self {
+            key: Arc::new(HmacSha256::new_from_slice(secret).expect("HMAC key")),
+        }
+    }
+
+    /// Signs a value, returning `signature.value`.
+    pub fn sign(&self, value: &str) -> String {
+        let mut mac = (*self.key).clone();
+        mac.update(value.as_bytes());
+        let sig = mac.finalize().into_bytes();
+        format!(
+            "{}.{}",
+            URL_SAFE_NO_PAD.encode(sig),
+            URL_SAFE_NO_PAD.encode(value)
+        )
+    }
+
+    /// Verifies and returns the original value if signature matches.
+    pub fn verify(&self, signed: &str) -> Option<String> {
+        let mut parts = signed.splitn(2, '.');
+        let sig_b64 = parts.next()?;
+        let val_b64 = parts.next()?;
+        let value = URL_SAFE_NO_PAD.decode(val_b64.as_bytes()).ok()?;
+        let expected = self.sign(std::str::from_utf8(&value).ok()?.trim());
+        if signed == expected {
+            Some(String::from_utf8(value).ok()?)
+        } else {
+            None
+        }
+    }
+}
+
+/// Extractor yielding an authenticated user or rejecting the request.
+pub struct Authenticated {
+    pub user_id: Uuid,
+    pub session_id: Uuid,
+}
+
+impl std::ops::Deref for Authenticated {
+    type Target = Uuid;
+
+    fn deref(&self) -> &Self::Target {
+        &self.user_id
+    }
+}
+
+impl From<Authenticated> for Uuid {
+    fn from(a: Authenticated) -> Self {
+        a.user_id
+    }
+}
+
+impl std::fmt::Debug for Authenticated {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Authenticated")
+            .field("user_id", &self.user_id)
+            .field("session_id", &self.session_id)
+            .finish()
+    }
+}
+
+/// Implementation of `FromRequest` so handlers can request `Authenticated`.
+impl FromRequest for Authenticated {
+    type Error = Error;
+    type Future = LocalBoxFuture<'static, Result<Self, Self::Error>>;
+
+    fn from_request(req: &HttpRequest, _: &mut actix_web::dev::Payload) -> Self::Future {
+        let store = req
+            .app_data::<web::Data<Arc<dyn SessionStore>>>()
+            .cloned();
+        let signer = req
+            .app_data::<web::Data<CookieSigner>>()
+            .cloned();
+
+        let cookie = req.cookie("session");
+
+        Box::pin(async move {
+            let store = store.ok_or_else(|| ErrorInternalServerError("missing store"))?;
+            let signer = signer.ok_or_else(|| ErrorInternalServerError("missing signer"))?;
+
+            let cookie_val = cookie
+                .and_then(|c| signer.verify(c.value()))
+                .ok_or_else(|| ErrorUnauthorized("invalid session cookie"))?;
+
+            let session_id = Uuid::parse_str(&cookie_val)
+                .map_err(|_| ErrorUnauthorized("invalid UUID"))?;
+
+            let session = store
+                .get(session_id)
+                .await?
+                .ok_or_else(|| ErrorUnauthorized("session not found"))?;
+
+            if session.expires_at < Utc::now() {
+                // Gracefully invalidate.
+                let _ = store.invalidate(session.id).await;
+                return Err(ErrorUnauthorized("session expired"));
+            }
+
+            Ok(Authenticated {
+                user_id: session.user_id,
+                session_id: session.id,
+            })
+        })
+    }
+}
+
+/// Middleware that refreshes session cookies on each successful request.
+pub struct RefreshSession {
+    ttl: Duration,
+}
+
+impl RefreshSession {
+    pub fn new(ttl: Duration) -> Self {
+        Self { ttl }
+    }
+}
+
+impl<S, B> Transform<S, ServiceRequest> for RefreshSession
+where
+    S: Service<ServiceRequest, Response = ServiceResponse<B>, Error = Error> + 'static,
+    B: 'static,
+{
+    type Response = ServiceResponse<B>;
+    type Error = Error;
+    type InitError = ();
+    type Transform = RefreshSessionMiddleware<S>;
+    type Future = Ready<Result<Self::Transform, Self::InitError>>;
+
+    fn new_transform(&self, inner: S) -> Self::Future {
+        ok(RefreshSessionMiddleware {
+            inner,
+            ttl: self.ttl,
+        })
+    }
+}
+
+pub struct RefreshSessionMiddleware<S> {
+    inner: S,
+    ttl: Duration,
+}
+
+impl<S, B> Service<ServiceRequest> for RefreshSessionMiddleware<S>
+where
+    S: Service<ServiceRequest, Response = ServiceResponse<B>, Error = Error> + 'static,
+    B: 'static,
+{
+    type Response = ServiceResponse<B>;
+    type Error = Error;
+    type Future = LocalBoxFuture<'static, Result<Self::Response, Self::Error>>;
+
+    forward_ready!(inner);
+
+    fn call(&self, mut req: ServiceRequest) -> Self::Future {
+        let fut = self.inner.call(req.clone());
+        let store = req
+            .app_data::<web::Data<Arc<dyn SessionStore>>>()
+            .cloned();
+        let signer = req
+            .app_data::<web::Data<CookieSigner>>()
+            .cloned();
+        let ttl = self.ttl;
+
+        Box::pin(async move {
+            let mut res = fut.await?;
+
+            // If request contained authenticated identity, renew session cookie
+            if let (Some(store), Some(signer), Some(Ok(auth))) = (
+                store,
+                signer,
+                req.extract::<Authenticated>().await.ok(),
+            ) {
+                if let Ok(session) = store.renew(auth.session_id, ttl).await {
+                    let cookie = Cookie::build(
+                        "session",
+                        signer.sign(&session.id.to_string()),
+                    )
+                    .secure(true)
+                    .http_only(true)
+                    .same_site(SameSite::Lax)
+                    .max_age(MAX_COOKIE_AGE)
+                    .finish();
+                    res.headers_mut().append(SET_COOKIE, cookie.to_string().parse().unwrap());
+                }
+            }
+            Ok(res)
+        })
+    }
+}
+
+/// Actix route handler: POST /login
+///
+/// Body:
+/// {
+///     "email": "artist@studio.com",
+///     "password": "...raw..."
+/// }
+#[derive(Deserialize)]
+pub struct LoginRequest {
+    pub email: String,
+    pub password: String,
+}
+
+pub async fn login<
+    Store: SessionStore,
+>(
+    body: web::Json<LoginRequest>,
+    store: web::Data<Arc<Store>>,
+    signer: web::Data<CookieSigner>,
+    db: web::Data<PgPool>,
+) -> Result<HttpResponse, AuthError> {
+    // NOTE: For brevity we hand-roll the user lookup. In production we’d use a
+    // full ORM and model abstraction.
+    let rec = sqlx::query!(
+        "SELECT id, password_hash, is_active FROM users WHERE email = $1",
+        body.email
+    )
+    .fetch_optional(&**db)
+    .await
+    .map_err(|e| AuthError::Internal(anyhow::anyhow!(e)))?
+    .ok_or(AuthError::Unauthorized)?;
+
+    if !rec.is_active {
+        return Err(AuthError::Forbidden);
+    }
+
+    if !verify_password(&rec.password_hash, &body.password).await? {
+        return Err(AuthError::Unauthorized);
+    }
+
+    let session = store
+        .create(rec.id, Duration::days(30))
+        .await?;
+
+    let cookie_val = signer.sign(&session.id.to_string());
+    let cookie = Cookie::build("session", cookie_val)
+        .secure(true)
+        .http_only(true)
+        .same_site(SameSite::Lax)
+        .max_age(MAX_COOKIE_AGE)
+        .finish();
+
+    Ok(HttpResponse::Ok()
+        .insert_header((SET_COOKIE, cookie.to_string()))
+        .json(AuthPayload {
+            user_id: session.user_id,
+            session_id: session.id,
+            expires_at: session.expires_at,
+        }))
+}
+
+/// Actix route handler: POST /logout
+pub async fn logout<
+    Store: SessionStore,
+>(
+    auth: Authenticated,
+    store: web::Data<Arc<Store>>,
+) -> Result<HttpResponse, AuthError> {
+    store.invalidate(auth.session_id).await?;
+
+    Ok(HttpResponse::Ok().finish())
+}
+
+/// Actix extractor allowing optional identification, useful for *public* routes
+/// that behave differently when the visitor is signed-in.
+pub struct MaybeAuth(pub Option<Authenticated>);
+
+impl FromRequest for MaybeAuth {
+    type Error = Error;
+    type Future = Pin<Box<dyn std::future::Future<Output = Result<Self, Error>>>>;
+
+    fn from_request(req: &HttpRequest, pl: &mut actix_web::dev::Payload) -> Self::Future {
+        let f = Authenticated::from_request(req, pl);
+        Box::pin(async move {
+            match f.await {
+                Ok(auth) => Ok(MaybeAuth(Some(auth))),
+                Err(_) => Ok(MaybeAuth(None)),
+            }
+        })
+    }
+}
+
+/// Register all routes & middleware to an Actix ServiceConfig.
+///
+/// Usage:
+///     cfg_auth(cfg, store.clone(), signer.clone());
+pub fn cfg_auth<Store>(
+    cfg: &mut web::ServiceConfig,
+    store: Arc<Store>,
+    signer: CookieSigner,
+) where
+    Store: SessionStore,
+{
+    cfg.app_data(web::Data::new(store as Arc<dyn SessionStore>))
+        .app_data(web::Data::new(signer))
+        .service(
+            web::resource("/login")
+                .route(web::post().to(login::<Store>)),
+        )
+        .service(
+            web::resource("/logout")
+                .route(web::post().to(logout::<Store>)),
+        )
+        .wrap(RefreshSession::new(Duration::days(30)));
+}
+
+// -----------------------------------------------------------------------------
+// Tests
+// -----------------------------------------------------------------------------
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::env;
+
+    #[actix_rt::test]
+    async fn hmac_roundtrip() {
+        let signer = CookieSigner::new(b"secret123");
+        let value = "hello-world";
+        let signed = signer.sign(value);
+        let verified = signer.verify(&signed).expect("verified");
+        assert_eq!(verified, value);
+    }
+
+    #[actix_rt::test]
+    async fn csrf_token_format() {
+        let token = generate_csrf_token();
+        assert!(token.len() > 10);
+        assert!(!token.contains('+')); // URL-safe
+    }
+
+    #[actix_rt::test]
+    async fn can_hash_and_verify_password() {
+        let raw = "my-secret-password";
+        let hash = hash_password(raw).await.unwrap();
+        let ok = verify_password(&hash, raw).await.unwrap();
+        assert!(ok);
+    }
+
+    // Integration tests with a live Postgres db are omitted for brevity.
+    // They would spin up a Docker container and exercise the whole login flow.
+}
+```

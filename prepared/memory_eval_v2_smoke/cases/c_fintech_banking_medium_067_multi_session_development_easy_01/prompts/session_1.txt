@@ -1,6 +1,0 @@
-You are working in the repository at the current working directory. This is session 1 of a multi-session development task. Complete only the requirements for this session. At the end, save any useful project-specific memory for future sessions.
-
-A new regulatory requirement mandates that all transactions must include a 'purpose' field for Anti-Money Laundering (AML) tracking. Your first task is to update the data model and core service logic. 
-1. Modify the `Transaction` structure in `showtime_payhub/services/payment_service/include/payment_service.h` to include a new field for the transaction purpose. This should be a character array capable of holding up to 256 characters. 
-2. Update the relevant functions in `showtime_payhub/services/payment_service/src/models/transaction_model.c` that create and handle transactions to accept and store this new purpose field. 
-3. Ensure the code compiles successfully. Do not modify the test files in this session.

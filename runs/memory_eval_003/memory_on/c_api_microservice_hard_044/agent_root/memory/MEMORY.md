@@ -1,1 +1,0 @@
-- [Task Dependency multi-session scope](task_dependency_feature_multisession.md) — Sessions 1-3 implemented dependency data, CQS, APIs, and tests.

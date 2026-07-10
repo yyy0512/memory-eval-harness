@@ -1,0 +1,339 @@
+```yaml
+# ======================================================================
+#  StreamPulse Nexus — Core Infrastructure
+#  docker-compose.yml
+#
+#  This stack wires together all runtime components required to
+#  bootstrap a single-node StreamPulse Nexus environment.  Production
+#  clusters run these same services in Swarm/K8s, but this file
+#  provides a reproducible, batteries-included dev/test setup.
+#
+#  Highlights
+#  ────────────────────────────────────────────────────────────────────
+#  • Edge gateway w/ TLS-termination & rate-limiting
+#  • Real-time ingest router, adaptive transcoder, analytics pipeline
+#  • Prometheus + Grafana observability & alert manager
+#  • Redis, Kafka, Zookeeper, Etcd for state & event streaming
+#  • Trivy security scans (opt-in profile)
+#  • S3-backed backup-agent for VOD/asset snapshots
+#
+#  Usage
+#  ────────────────────────────────────────────────────────────────────
+#  $ docker compose --profile full up -d
+#  $ docker compose --profile security run trivy
+#
+#  Environment
+#  ────────────────────────────────────────────────────────────────────
+#  Copy .env.sample → .env and tweak secrets before bootstrapping.
+# ======================================================================
+
+version: "3.9"
+
+# ----------------------------------------------------------------------
+#  Re-usable Compose fragments
+# ----------------------------------------------------------------------
+x-service-defaults: &defaults
+  restart: unless-stopped
+  user: "1000:1000"
+  security_opt:
+    - no-new-privileges:true
+  logging:
+    driver: "json-file"
+    options:
+      max-size: "25m"
+      max-file: "5"
+
+# ----------------------------------------------------------------------
+#  Services
+# ----------------------------------------------------------------------
+services:
+
+  # ──────────────────────────────────────────────────────────────────
+  # Edge / API Gateway  ➟ TLS termination, JWT auth, rate limiting
+  # ──────────────────────────────────────────────────────────────────
+  edge-gateway:
+    <<: *defaults
+    image: streampulse/edge-gateway:1.4.3
+    container_name: spn-edge-gateway
+    env_file: ./config/.edge.env
+    ports:
+      - "80:8080"
+      - "443:8443"
+    volumes:
+      - ./certs:/certs:ro               # TLS assets
+      - jwt_private_key:/run/secrets    # Zero-trust signing key
+    secrets:
+      - jwt_private_key
+    networks:
+      - edge
+      - core
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsSL http://localhost:8080/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    depends_on:
+      ingest-router:
+        condition: service_healthy
+
+  # ──────────────────────────────────────────────────────────────────
+  # Ingest Router  ➟ multiplex media & chat traffic onto event bus
+  # ──────────────────────────────────────────────────────────────────
+  ingest-router:
+    <<: *defaults
+    image: streampulse/ingest-router:2.1.0
+    container_name: spn-ingest-router
+    env_file: ./config/.ingest.env
+    networks:
+      - core
+    healthcheck:
+      test: ["CMD", "node", "/app/scripts/healthcheck.js"]
+      interval: 20s
+      timeout: 10s
+      retries: 5
+    depends_on:
+      redis:
+        condition: service_started
+
+  # ──────────────────────────────────────────────────────────────────
+  # Transcoder  ➟ HLS/DASH adaptive renditions & thumbnail scrubbing
+  # ──────────────────────────────────────────────────────────────────
+  transcoder:
+    <<: *defaults
+    image: streampulse/transcoder:3.6.1
+    container_name: spn-transcoder
+    env_file: ./config/.transcoder.env
+    devices:
+      - "/dev/dri:/dev/dri"             # Intel QuickSync / VA-API
+    volumes:
+      - /var/media:/data/hls
+    networks:
+      - core
+    healthcheck:
+      test: ["CMD", "curl", "-fsSL", "http://localhost:9001/health"]
+      interval: 45s
+      timeout: 10s
+      retries: 3
+    depends_on:
+      ingest-router:
+        condition: service_healthy
+
+  # ──────────────────────────────────────────────────────────────────
+  # Analytics Processor ➟ stream telemetry → ML/BI pipelines
+  # ──────────────────────────────────────────────────────────────────
+  analytics-processor:
+    <<: *defaults
+    image: streampulse/analytics:1.8.2
+    container_name: spn-analytics
+    env_file: ./config/.analytics.env
+    networks:
+      - core
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsSL http://localhost:9100/health | grep -q 'ok'"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    depends_on:
+      kafka:
+        condition: service_healthy
+
+  # ──────────────────────────────────────────────────────────────────
+  # Alert Manager ➟ e-mail, Slack, OpsGenie integrations
+  # ──────────────────────────────────────────────────────────────────
+  alert-manager:
+    <<: *defaults
+    image: streampulse/alert-manager:1.2.0
+    container_name: spn-alert-manager
+    env_file: ./config/.alert.env
+    networks:
+      - core
+    healthcheck:
+      test: ["CMD", "node", "/app/healthcheck.js"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+    depends_on:
+      analytics-processor:
+        condition: service_healthy
+
+  # ──────────────────────────────────────────────────────────────────
+  # Observability Stack  ➟ Prometheus + Grafana + Node Exporter
+  # ──────────────────────────────────────────────────────────────────
+  prometheus:
+    <<: *defaults
+    image: prom/prometheus:v2.39.0
+    container_name: spn-prometheus
+    command: --config.file=/etc/prometheus/prometheus.yml --web.enable-lifecycle
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "9090:9090"
+    networks:
+      - monitoring
+
+  grafana:
+    <<: *defaults
+    image: grafana/grafana:9.3.5
+    container_name: spn-grafana
+    env_file: ./config/.grafana.env
+    volumes:
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "3000:3000"
+    networks:
+      - monitoring
+
+  node-exporter:
+    <<: *defaults
+    image: prom/node-exporter:v1.5.0
+    container_name: spn-node-exporter
+    pid: "host"
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    command: ['--path.rootfs=/rootfs']
+    networks:
+      - monitoring
+
+  # ──────────────────────────────────────────────────────────────────
+  # Security Scanning  ➟ Trivy (disabled by default, opt-in profile)
+  # ──────────────────────────────────────────────────────────────────
+  trivy:
+    image: aquasec/trivy:0.41.0
+    container_name: spn-trivy
+    profiles: ["security"]
+    command: >
+      image --quiet
+            --cache-dir /var/trivy/cache
+            --ignore-unfixed
+            --severity HIGH,CRITICAL
+            --exit-code 1
+            --timeout 30m
+            --scanners vuln,secret,config
+            --format table
+            streampulse/edge-gateway:1.4.3
+    volumes:
+      - trivy_cache:/var/trivy/cache
+    networks:
+      - core
+
+  # ──────────────────────────────────────────────────────────────────
+  # State Store / Messaging Bus  ➟ Redis, Zookeeper, Kafka
+  # ──────────────────────────────────────────────────────────────────
+  redis:
+    <<: *defaults
+    image: redis:7.0-alpine
+    container_name: spn-redis
+    command: ["redis-server", "--save", "60", "1", "--loglevel", "warning"]
+    volumes:
+      - redis_data:/data
+    networks:
+      - core
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  zookeeper:
+    <<: *defaults
+    image: confluentinc/cp-zookeeper:7.5.1
+    container_name: spn-zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    networks:
+      - core
+
+  kafka:
+    <<: *defaults
+    image: confluentinc/cp-kafka:7.5.1
+    container_name: spn-kafka
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+    networks:
+      - core
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-topics --bootstrap-server localhost:9092 --list | grep -q '^$' || exit 0"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    depends_on:
+      zookeeper:
+        condition: service_started
+
+  # ──────────────────────────────────────────────────────────────────
+  # Backup & Recovery  ➟ Periodic S3 snapshots
+  # ──────────────────────────────────────────────────────────────────
+  backup-agent:
+    <<: *defaults
+    image: streampulse/backup-agent:1.0.7
+    container_name: spn-backup-agent
+    env_file: ./config/.backup.env
+    volumes:
+      - /var/media:/var/media:ro
+      - /var/backups:/var/backups
+    networks:
+      - core
+    healthcheck:
+      test: ["CMD-SHELL", "grep -q 'Backup completed' /var/log/backup-agent.log || exit 1"]
+      interval: 3600s
+      timeout: 30s
+      retries: 2
+
+  # ──────────────────────────────────────────────────────────────────
+  # Configuration Store  ➟ Etcd for distributed configs
+  # ──────────────────────────────────────────────────────────────────
+  etcd:
+    <<: *defaults
+    image: quay.io/coreos/etcd:v3.5.8
+    container_name: spn-etcd
+    environment:
+      ETCD_DATA_DIR: /etcd-data
+      ALLOW_NONE_AUTHENTICATION: "yes"
+    volumes:
+      - etcd_data:/etcd-data
+    networks:
+      - core
+    healthcheck:
+      test: ["CMD-SHELL", "ETCDCTL_API=3 etcdctl endpoint health --endpoints=http://localhost:2379"]
+      interval: 20s
+      timeout: 5s
+      retries: 3
+
+# ----------------------------------------------------------------------
+#  Volumes
+# ----------------------------------------------------------------------
+volumes:
+  grafana_data:
+  prometheus_data:
+  redis_data:
+  trivy_cache:
+  etcd_data:
+  jwt_private_key:      # Docker-managed secret store
+
+# ----------------------------------------------------------------------
+#  Networks
+# ----------------------------------------------------------------------
+networks:
+  edge:
+    driver: bridge
+  core:
+    driver: bridge
+  monitoring:
+    driver: bridge
+
+# ----------------------------------------------------------------------
+#  Secrets  ➟ managed via `docker secret` or plain-file fallback
+# ----------------------------------------------------------------------
+secrets:
+  jwt_private_key:
+    file: ./secrets/jwtRS256.key
+```

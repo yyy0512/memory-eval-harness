@@ -1,0 +1,264 @@
+```java
+package com.edupulse.websocial.pulse;
+
+import com.edupulse.websocial.common.exceptions.DomainValidationException;
+import com.edupulse.websocial.common.exceptions.EntityNotFoundException;
+import com.edupulse.websocial.notification.EmailNotificationService;
+import com.edupulse.websocial.storage.FileStorageService;
+import com.edupulse.websocial.user.AuthenticatedUser;
+import com.edupulse.websocial.user.CurrentUserProvider;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
+import org.apache.commons.lang3.StringUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.ApplicationEvent;
+import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.context.event.EventListener;
+import org.springframework.dao.DataAccessException;
+import org.springframework.stereotype.Component;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.multipart.MultipartFile;
+
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.UUID;
+
+/**
+ * Service layer responsible for creating Pulses and emitting
+ * domain events consumed by other bounded contexts (notifications,
+ * analytics, adaptive-recommendation engine, etc.).
+ *
+ * The service performs:
+ *  - Input validation
+ *  - Attachment storage
+ *  - Persistence using the repository abstraction
+ *  - Emitting {@link PulseCreatedEvent} to Spring's application context
+ *
+ *  NOTE: Any listener interested in {@link PulseCreatedEvent} can subscribe
+ *  via {@link org.springframework.context.event.EventListener}.
+ */
+@Service
+public class PulseService {
+
+    private static final Logger LOG = LoggerFactory.getLogger(PulseService.class);
+
+    private final PulseRepository pulseRepository;
+    private final FileStorageService fileStorageService;
+    private final ApplicationEventPublisher eventPublisher;
+    private final CurrentUserProvider currentUserProvider;
+
+    @Autowired
+    public PulseService(PulseRepository pulseRepository,
+                        FileStorageService fileStorageService,
+                        ApplicationEventPublisher eventPublisher,
+                        CurrentUserProvider currentUserProvider) {
+        this.pulseRepository = pulseRepository;
+        this.fileStorageService = fileStorageService;
+        this.eventPublisher = eventPublisher;
+        this.currentUserProvider = currentUserProvider;
+    }
+
+    /**
+     * Creates a new Pulse, handles attachment uploads, persists the entity,
+     * and publishes a {@link PulseCreatedEvent}.
+     *
+     * @param request DTO holding a pulse's content and optional attachments.
+     * @return A DTO that represents the newly created pulse.
+     */
+    @Transactional
+    public PulseDto createPulse(CreatePulseRequest request) {
+        validate(request);
+
+        AuthenticatedUser currentUser = currentUserProvider.getAuthenticatedUser()
+                .orElseThrow(() -> new EntityNotFoundException("Current user not found in security context"));
+
+        List<String> attachmentUrls = new ArrayList<>();
+        for (MultipartFile file : request.getAttachments()) {
+            try {
+                String url = fileStorageService.store(file, currentUser.id());
+                attachmentUrls.add(url);
+            } catch (Exception ex) {
+                LOG.error("Failed to store attachment '{}': {}", file.getOriginalFilename(), ex.getMessage());
+                throw new DomainValidationException("Unable to upload attachments", ex);
+            }
+        }
+
+        PulseEntity entity = new PulseEntity(
+                UUID.randomUUID(),
+                currentUser.id(),
+                request.getContent().trim(),
+                attachmentUrls,
+                Instant.now()
+        );
+
+        try {
+            pulseRepository.save(entity);
+        } catch (DataAccessException dae) {
+            LOG.error("Error persisting pulse: {}", dae.getMessage());
+            throw new DomainValidationException("Unable to create pulse at this time", dae);
+        }
+
+        PulseDto result = PulseDto.from(entity, currentUser.username());
+
+        // Publish domain event for downstream consumers
+        eventPublisher.publishEvent(new PulseCreatedEvent(this, result));
+
+        LOG.info("Pulse '{}' created by user {}", entity.id(), currentUser.username());
+        return result;
+    }
+
+    private void validate(CreatePulseRequest request) {
+        if (request == null) {
+            throw new DomainValidationException("Request body is missing");
+        }
+        if (StringUtils.isBlank(request.getContent())) {
+            throw new DomainValidationException("Pulse content must not be empty");
+        }
+        if (request.getContent().length() > 1000) {
+            throw new DomainValidationException("Pulse content exceeds maximum length");
+        }
+        if (request.getAttachments().size() > 5) {
+            throw new DomainValidationException("You may upload at most 5 attachments");
+        }
+    }
+
+    // ========================================================================
+    // DTOs & Request
+    // ========================================================================
+
+    public record PulseDto(
+            UUID id,
+            String authorUsername,
+            String content,
+            List<String> attachments,
+            Instant createdAt
+    ) {
+        public static PulseDto from(PulseEntity entity, String authorUsername) {
+            return new PulseDto(
+                    entity.id(),
+                    authorUsername,
+                    entity.content(),
+                    entity.attachmentUrls(),
+                    entity.createdAt()
+            );
+        }
+    }
+
+    public static class CreatePulseRequest {
+
+        @NotBlank
+        @Size(max = 1000)
+        private String content;
+
+        private List<MultipartFile> attachments = List.of();
+
+        public CreatePulseRequest() {
+        }
+
+        public CreatePulseRequest(String content, List<MultipartFile> attachments) {
+            this.content = content;
+            if (attachments != null) {
+                this.attachments = attachments;
+            }
+        }
+
+        public String getContent() {
+            return content;
+        }
+
+        public List<MultipartFile> getAttachments() {
+            return attachments;
+        }
+
+        public void setContent(String content) {
+            this.content = content;
+        }
+
+        public void setAttachments(List<MultipartFile> attachments) {
+            this.attachments = attachments;
+        }
+    }
+
+    // ========================================================================
+    // Domain Event
+    // ========================================================================
+
+    /**
+     * Event published after a pulse has been successfully created.
+     */
+    public static class PulseCreatedEvent extends ApplicationEvent {
+        private final PulseDto pulse;
+
+        public PulseCreatedEvent(Object source, PulseDto pulse) {
+            super(source);
+            this.pulse = pulse;
+        }
+
+        public PulseDto getPulse() {
+            return pulse;
+        }
+    }
+
+    // ========================================================================
+    // Listener (could be in separate file; included here for brevity)
+    // ========================================================================
+
+    /**
+     * Example listener that sends email notifications to followers
+     * when a new pulse is created.
+     */
+    @Component
+    public static class PulseCreatedNotificationListener {
+
+        private static final Logger LOG = LoggerFactory.getLogger(PulseCreatedNotificationListener.class);
+
+        private final EmailNotificationService emailNotificationService;
+
+        @Autowired
+        public PulseCreatedNotificationListener(EmailNotificationService emailNotificationService) {
+            this.emailNotificationService = emailNotificationService;
+        }
+
+        @EventListener
+        public void handle(PulseCreatedEvent event) {
+            PulseDto pulse = event.getPulse();
+            try {
+                emailNotificationService.notifyFollowersOfNewPulse(pulse.id(), pulse.authorUsername(), pulse.content());
+                LOG.debug("Sent pulse notification for pulse {}", pulse.id());
+            } catch (Exception ex) {
+                LOG.error("Could not send follower notifications for pulse {}: {}", pulse.id(), ex.getMessage());
+                // Notice: we log the error but do not rethrow to avoid failing the transaction
+            }
+        }
+    }
+
+    // ========================================================================
+    // Internal domain entity & repository declarations
+    // (Would normally reside in their own files; included here
+    //  to keep this example self-contained)
+    // ========================================================================
+
+    /**
+     * Immutable domain entity representing a Pulse.
+     */
+    public record PulseEntity(
+            UUID id,
+            UUID authorId,
+            String content,
+            List<String> attachmentUrls,
+            Instant createdAt
+    ) {
+    }
+
+    /**
+     * Repository abstraction hiding the data source (JPA, MongoDB, etc.).
+     */
+    public interface PulseRepository {
+        void save(PulseEntity entity) throws DataAccessException;
+    }
+}
+```

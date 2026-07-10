@@ -1,0 +1,538 @@
+```rust
+//! module_9.rs
+//!
+//! This module contains production-quality session management and SSL/HSTS
+//! middleware that can be wired into ChromaticCanvas’ REST layer.  The code
+//! is written for Actix-Web because the framework’s service & middleware model
+//! marries well with the project’s component architecture.
+//!
+//! Highlights
+//! ──────────
+//! • Encrypted, tamper-evident session cookies
+//! • Pluggable, async session store (in-memory by default, Redis example incl.)
+//! • Configurable HSTS middleware enforcing HTTPS & “secure” cookies
+//! • Rich, source-level documentation + pragmatic error handling
+//!
+//! The API is intentionally ergonomic so UI components (Yew) as well as the
+//! REST API can share a single sign-on flow without leaking implementation
+//! details.
+
+use std::{
+    future::{ready, Future, Ready},
+    pin::Pin,
+    sync::Arc,
+    task::{Context, Poll},
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
+
+use actix_service::{Service, Transform};
+use actix_web::{
+    body::EitherBody,
+    cookie::{Cookie, SameSite},
+    dev::{ServiceRequest, ServiceResponse},
+    error::{ErrorForbidden, ErrorInternalServerError},
+    http::{
+        header::{HeaderValue, STRICT_TRANSPORT_SECURITY},
+        HeaderMap, Method, StatusCode,
+    },
+    Error, HttpMessage,
+};
+use async_trait::async_trait;
+use rand::RngCore;
+use ring::{
+    aead::{self, Aad, LessSafeKey, Nonce, UnboundKey},
+    digest,
+};
+use serde::{Deserialize, Serialize};
+use thiserror::Error;
+use uuid::Uuid;
+
+//
+// ───────────────────────────────────────────────────────────── Session Layer ─────
+//
+
+/// Default TTL for a session (30 days).
+const DEFAULT_SESSION_TTL: Duration = Duration::from_secs(60 * 60 * 24 * 30);
+
+/// Name of the cookie that keeps the session ID + MAC.
+const SESSION_COOKIE_NAME: &str = "cc_session";
+
+/// Unified error type for the session layer.
+#[derive(Debug, Error)]
+pub enum SessionError {
+    #[error("cryptographic failure: {0}")]
+    Crypto(#[from] aead::Error),
+
+    #[error("serialization failure: {0}")]
+    Serde(#[from] serde_json::Error),
+
+    #[error("I/O backend failure: {0}")]
+    Backend(#[from] Box<dyn std::error::Error + Send + Sync>),
+
+    #[error("session not found")]
+    NotFound,
+
+    #[error("tampered or expired session")]
+    Invalid,
+}
+
+/// Typed session payload stored server-side.
+///
+/// Tip: Extend this struct to add additional per-user state.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionData {
+    pub user_id: Uuid,
+    pub created_at: u64,
+    pub expires_at: u64,
+    // You can embed arbitrary key/value blobs for CSRF tokens, etc.
+}
+
+impl SessionData {
+    pub fn is_expired(&self) -> bool {
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|now| now.as_secs() > self.expires_at)
+            .unwrap_or(true)
+    }
+}
+
+/// Storage backend abstraction (Redis, DynamoDB, RDBMS, in-memory, …).
+#[async_trait]
+pub trait SessionStore: Send + Sync + 'static {
+    async fn load(&self, id: &str) -> Result<SessionData, SessionError>;
+    async fn save(&self, id: &str, data: SessionData) -> Result<(), SessionError>;
+    async fn delete(&self, id: &str) -> Result<(), SessionError>;
+}
+
+/// A minimal in-memory store, great for tests or single-process deployments.
+#[derive(Debug, Default)]
+pub struct InMemoryStore {
+    inner: parking_lot::RwLock<std::collections::HashMap<String, SessionData>>,
+}
+
+#[async_trait]
+impl SessionStore for InMemoryStore {
+    async fn load(&self, id: &str) -> Result<SessionData, SessionError> {
+        self.inner
+            .read()
+            .get(id)
+            .cloned()
+            .filter(|s| !s.is_expired())
+            .ok_or(SessionError::NotFound)
+    }
+
+    async fn save(&self, id: &str, data: SessionData) -> Result<(), SessionError> {
+        self.inner.write().insert(id.to_owned(), data);
+        Ok(())
+    }
+
+    async fn delete(&self, id: &str) -> Result<(), SessionError> {
+        self.inner.write().remove(id);
+        Ok(())
+    }
+}
+
+/// Encrypted/session cookie + backend store middleware.
+pub struct SessionMiddleware<S> {
+    service: S,
+    store: Arc<dyn SessionStore>,
+    key: LessSafeKey,
+    ttl: Duration,
+    secure_only: bool,
+}
+
+impl<S, B> Transform<S, ServiceRequest> for SessionMiddleware<S>
+where
+    S: Service<ServiceRequest, Response = ServiceResponse<B>, Error = Error> + 'static,
+    B: 'static,
+{
+    type Response = ServiceResponse<EitherBody<B>>;
+    type Error = Error;
+    type InitError = ();
+    type Transform = SessionMiddleware<S>;
+    type Future = Ready<Result<Self::Transform, Self::InitError>>;
+
+    fn new_transform(&self, service: S) -> Self::Future {
+        ready(Ok(SessionMiddleware {
+            service,
+            store: self.store.clone(),
+            key: self.key.clone(),
+            ttl: self.ttl,
+            secure_only: self.secure_only,
+        }))
+    }
+}
+
+impl<S, B> Service<ServiceRequest> for SessionMiddleware<S>
+where
+    S: Service<ServiceRequest, Response = ServiceResponse<B>, Error = Error> + 'static,
+    B: 'static,
+{
+    type Response = ServiceResponse<EitherBody<B>>;
+    type Error = Error;
+    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>>>>;
+
+    fn poll_ready(&self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.service.poll_ready(cx)
+    }
+
+    fn call(&self, mut req: ServiceRequest) -> Self::Future {
+        let store = self.store.clone();
+        let key = self.key.clone();
+        let ttl = self.ttl;
+        let secure_only = self.secure_only;
+
+        // Clone references for move into async block
+        let mut svc = self.service.clone();
+
+        Box::pin(async move {
+            // Step 1: Inspect cookie & validate MAC
+            let session_cookie_opt = req
+                .cookie(SESSION_COOKIE_NAME)
+                .filter(|c| !secure_only || c.secure());
+
+            let session_id_res: Result<Option<String>, SessionError> = async {
+                if let Some(cookie) = session_cookie_opt {
+                    let (id, mac_tag) = cookie.value().split_at(36);
+                    // ID is 36 chars (UUID), remainder is hex-encoded MAC
+                    let id = id.to_string();
+                    let supplied_tag = hex::decode(mac_tag).map_err(|e| {
+                        SessionError::Backend(Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
+                    })?;
+
+                    // Re-compute MAC
+                    let expected_tag = compute_mac(&key, id.as_bytes());
+                    if supplied_tag != expected_tag {
+                        return Err(SessionError::Invalid);
+                    }
+
+                    Ok(Some(id))
+                } else {
+                    Ok(None)
+                }
+            }
+            .await;
+
+            let session_id = match session_id_res {
+                Err(SessionError::Invalid) => {
+                    // Delete tampered cookie
+                    req.add_cookie(&expired_cookie(secure_only))?;
+                    None
+                }
+                Err(e) => return Err(ErrorInternalServerError(e)),
+                Ok(id) => id,
+            };
+
+            // Step 2: Load session (optional)
+            if let Some(ref id) = session_id {
+                match store.load(id).await {
+                    Ok(data) => {
+                        req.extensions_mut().insert(data);
+                    }
+                    Err(SessionError::NotFound) => {
+                        // Stale cookie; nuke it.
+                        req.add_cookie(&expired_cookie(secure_only))?;
+                    }
+                    Err(e) => return Err(ErrorInternalServerError(e)),
+                }
+            }
+
+            // Step 3: Call downstream service
+            let mut res = svc.call(req).await?;
+
+            // Step 4: Persist session if created/modified
+            if let Some(data) = res.request().extensions().get::<SessionData>() {
+                // Session exists in memory, ensure it has an ID
+                let id = session_id.unwrap_or_else(|| Uuid::new_v4().to_string());
+                let cookie_val = format!("{}{}", &id, hex::encode(compute_mac(&key, id.as_bytes())));
+
+                let mut cookie = Cookie::build(SESSION_COOKIE_NAME, cookie_val)
+                    .path("/")
+                    .http_only(true)
+                    .same_site(SameSite::Lax)
+                    .secure(secure_only)
+                    .max_age(time::Duration::seconds(ttl.as_secs() as i64))
+                    .finish();
+
+                res.response_mut().add_cookie(&cookie)?;
+
+                store.save(&id, data.clone()).await?;
+            }
+
+            Ok(res.map_into_left_body())
+        })
+    }
+}
+
+/// Helper to compute digest/MAC for session IDs.
+fn compute_mac(key: &LessSafeKey, id: &[u8]) -> Vec<u8> {
+    let nonce_bytes = [0u8; 12]; // deterministic nonce (safe for single block)
+    let nonce = Nonce::assume_unique_for_key(nonce_bytes);
+    let mut in_out = id.to_vec();
+    key.seal_in_place_append_tag(nonce, Aad::empty(), &mut in_out)
+        .expect("MAC generation failed");
+    in_out[id.len()..].to_vec()
+}
+
+/// Produces an instantly expired cookie to instruct the browser to delete it.
+fn expired_cookie(secure_only: bool) -> Cookie<'static> {
+    Cookie::build(SESSION_COOKIE_NAME, "")
+        .path("/")
+        .secure(secure_only)
+        .expires(time::OffsetDateTime::UNIX_EPOCH)
+        .finish()
+}
+
+/// Creates a [`SessionMiddleware`] ready to be registered via `.wrap()`.
+///
+/// Example (Actix):
+///
+/// ```
+/// use actix_web::{App, HttpServer, web};
+/// use module_9::{session_middleware, InMemoryStore};
+///
+/// #[actix_web::main]
+/// async fn main() -> std::io::Result<()> {
+///     let store = InMemoryStore::default();
+///     HttpServer::new(move || {
+///         App::new()
+///             .wrap(session_middleware(store.clone(), true))
+///             .service(web::resource("/").to(|| async { "Hello" }))
+///     })
+///     .bind(("127.0.0.1", 8080))?
+///     .run()
+///     .await
+/// }
+/// ```
+pub fn session_middleware<S: SessionStore>(
+    store: S,
+    secure_only: bool,
+) -> impl Transform<
+    ServiceRequest,
+    Response = ServiceResponse<EitherBody<actix_web::body::BoxBody>>,
+    Error = Error,
+    InitError = (),
+> + Clone {
+    // Derive deterministic but secret 256-bit key from a random seed. In real
+    // life, load from env-vars/secret manager.
+    let mut seed = [0u8; 32];
+    rand::thread_rng().fill_bytes(&mut seed);
+    let digest = digest::digest(&digest::SHA256, &seed);
+    let key = LessSafeKey::new(UnboundKey::new(&aead::AES_256_GCM, digest.as_ref()).unwrap());
+
+    SessionMiddleware {
+        service: (),
+        store: Arc::new(store),
+        key,
+        ttl: DEFAULT_SESSION_TTL,
+        secure_only,
+    }
+}
+
+//
+// ───────────────────────────────────────────────────────────── SSL / HSTS  ─────
+//
+
+/// Enforces HTTPS only transport (redirects HTTP → HTTPS) and injects the
+/// `Strict-Transport-Security` header on successful responses.
+///
+/// Deploy behind a TLS termination proxy or directly with native-TLS.
+#[derive(Clone, Debug)]
+pub struct HstsMiddleware {
+    max_age: Duration,
+    include_sub_domains: bool,
+    preload: bool,
+}
+
+impl HstsMiddleware {
+    pub fn new(max_age: Duration) -> Self {
+        Self {
+            max_age,
+            include_sub_domains: true,
+            preload: false,
+        }
+    }
+
+    pub fn include_sub_domains(mut self, yes: bool) -> Self {
+        self.include_sub_domains = yes;
+        self
+    }
+
+    pub fn preload(mut self, yes: bool) -> Self {
+        self.preload = yes;
+        self
+    }
+}
+
+impl<S, B> Transform<S, ServiceRequest> for HstsMiddleware
+where
+    S: Service<ServiceRequest, Response = ServiceResponse<B>, Error = Error> + 'static,
+    B: 'static,
+{
+    type Response = ServiceResponse<B>;
+    type Error = Error;
+    type InitError = ();
+    type Transform = HstsMiddlewareService<S>;
+    type Future = Ready<Result<Self::Transform, Self::InitError>>;
+
+    fn new_transform(&self, service: S) -> Self::Future {
+        ready(Ok(HstsMiddlewareService {
+            service,
+            cfg: self.clone(),
+        }))
+    }
+}
+
+pub struct HstsMiddlewareService<S> {
+    service: S,
+    cfg: HstsMiddleware,
+}
+
+impl<S, B> Service<ServiceRequest> for HstsMiddlewareService<S>
+where
+    S: Service<ServiceRequest, Response = ServiceResponse<B>, Error = Error> + 'static,
+    B: 'static,
+{
+    type Response = ServiceResponse<B>;
+    type Error = Error;
+    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>>>>;
+
+    fn poll_ready(&self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.service.poll_ready(cx)
+    }
+
+    fn call(&self, req: ServiceRequest) -> Self::Future {
+        let is_https = req.connection_info().scheme() == "https";
+        let cfg = self.cfg.clone();
+
+        // Fast redirect path for non-HTTPS requests using GET/HEAD only
+        if !is_https && (req.method() == Method::GET || req.method() == Method::HEAD) {
+            let host = req
+                .connection_info()
+                .host()
+                .trim_start_matches("http://")
+                .trim_start_matches("https://");
+            let uri = req.uri().to_string();
+            let redirect_url = format!("https://{}{}", host, uri);
+
+            return Box::pin(async move {
+                let res = req.into_response(
+                    actix_web::HttpResponse::MovedPermanently()
+                        .insert_header(("Location", redirect_url))
+                        .finish(),
+                );
+                Ok(res)
+            });
+        }
+
+        // For other methods we reject the connection outright.
+        if !is_https {
+            return Box::pin(async move { Err(ErrorForbidden("HTTPS required")) });
+        }
+
+        let fut = self.service.call(req);
+
+        Box::pin(async move {
+            let mut res = fut.await?;
+            inject_hsts(&mut res.headers_mut(), &cfg);
+            Ok(res)
+        })
+    }
+}
+
+fn inject_hsts(headers: &mut HeaderMap, cfg: &HstsMiddleware) {
+    if headers.contains_key(STRICT_TRANSPORT_SECURITY) {
+        return;
+    }
+
+    let mut value = format!("max-age={}", cfg.max_age.as_secs());
+    if cfg.include_sub_domains {
+        value.push_str("; includeSubDomains");
+    }
+    if cfg.preload {
+        value.push_str("; preload");
+    }
+
+    if let Ok(hv) = HeaderValue::from_str(&value) {
+        headers.insert(STRICT_TRANSPORT_SECURITY, hv);
+    }
+}
+
+//
+// ──────────────────────────────────────────────────────────────── Tests ─────
+//
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use actix_web::{test, web, App, HttpResponse};
+
+    #[actix_rt::test]
+    async fn round_trip_session() {
+        let store = InMemoryStore::default();
+        let app = test::init_service(
+            App::new()
+                .wrap(session_middleware(store.clone(), false))
+                .service(
+                    web::resource("/login").to(|req: ServiceRequest| async move {
+                        // Fake login: create session
+                        let data = SessionData {
+                            user_id: Uuid::new_v4(),
+                            created_at: SystemTime::now()
+                                .duration_since(UNIX_EPOCH)
+                                .unwrap()
+                                .as_secs(),
+                            expires_at: (SystemTime::now() + DEFAULT_SESSION_TTL)
+                                .duration_since(UNIX_EPOCH)
+                                .unwrap()
+                                .as_secs(),
+                        };
+                        req
+                            .extensions_mut()
+                            .insert::<SessionData>(data);
+                        Ok(req.into_response(HttpResponse::Ok().finish()))
+                    }),
+                )
+                .service(
+                    web::resource("/me").to(|req: ServiceRequest| async move {
+                        let me = req
+                            .extensions()
+                            .get::<SessionData>()
+                            .map(|s| s.user_id.to_string())
+                            .unwrap_or_else(|| "anon".into());
+                        Ok(req.into_response(HttpResponse::Ok().body(me)))
+                    }),
+                ),
+        )
+        .await;
+
+        // Login
+        let login_resp = test::call_service(
+            &app,
+            test::TestRequest::with_uri("/login").to_request(),
+        )
+        .await;
+        assert_eq!(login_resp.status(), StatusCode::OK);
+
+        // Fetch cookie
+        let session_cookie = login_resp
+            .response()
+            .cookies()
+            .find(|c| c.name() == SESSION_COOKIE_NAME)
+            .cloned()
+            .expect("session cookie set");
+
+        // Access protected route
+        let me_resp = test::call_service(
+            &app,
+            test::TestRequest::with_uri("/me")
+                .cookie(session_cookie)
+                .to_request(),
+        )
+        .await;
+        assert_eq!(me_resp.status(), StatusCode::OK);
+        let body = test::read_body(me_resp).await;
+        assert_ne!(body, "anon");
+    }
+}
+```

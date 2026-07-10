@@ -1,0 +1,34 @@
+{
+  "c": {
+    "tag": "locobench-memory-eval:c-20260709",
+    "id": "sha256:1d0fb4e673b587311b6a08c00645a8e504830f92ca5026c5667bfefd412bce56"
+  },
+  "cpp": {
+    "tag": "locobench-memory-eval:cpp-20260709",
+    "id": "sha256:ad9b99942ea25ddfcc8f07ae97ea0fde7bac2a0990344cd256e7350a51f83534"
+  },
+  "python": {
+    "tag": "locobench-memory-eval:python-20260709",
+    "id": "sha256:0c295be5a48ef60b761bf228d0ca0a21f5971e7c0c4223b5d1c5b03b52e7319a"
+  },
+  "javascript": {
+    "tag": "locobench-memory-eval:javascript-20260709",
+    "id": "sha256:e76f01a777cd23fb697d268be3c2820db337ad8eed0500afad9d102913a91560"
+  },
+  "typescript": {
+    "tag": "locobench-memory-eval:javascript-20260709",
+    "id": "sha256:e76f01a777cd23fb697d268be3c2820db337ad8eed0500afad9d102913a91560"
+  },
+  "java": {
+    "tag": "locobench-memory-eval:java-20260709",
+    "id": "sha256:dedea9752af36abb8fe6c6975068fad59b580cfc5433a07fbe6d157789ec2c4d"
+  },
+  "rust": {
+    "tag": "locobench-memory-eval:rust-20260709",
+    "id": "sha256:974a9c96b167333c7bae3ffd440eac6139733bb5667a663b73c2a723f94fc612"
+  },
+  "php": {
+    "tag": "locobench-memory-eval:php-20260709",
+    "id": "sha256:249f3c25e7296a41cd841c1cd00bb6b2fff47817a51643ea7d81af8671398c35"
+  }
+}

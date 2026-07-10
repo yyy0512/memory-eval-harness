@@ -1,0 +1,263 @@
+```javascript
+/**
+ * StreamPulse Nexus – Network-Policy Generator
+ *
+ * File: streampulse-nexus/ops/security/network-policies.yaml  (yes, “.yaml” by convention,
+ *       but implemented in JavaScript so that CI can render a fresh YAML artifact
+ *       at build-time.)
+ *
+ * Description:
+ *   Programmatically generates Kubernetes NetworkPolicy manifests that implement
+ *   the StreamPulse Nexus zero-trust networking model.  Policies are expressed
+ *   as JavaScript objects and rendered to YAML via `js-yaml`.  This allows us to:
+ *     • Re-use constants & helper functions
+ *     • Validate policies before emission
+ *     • Dynamically toggle features (e.g. egress-scanning) from CI
+ *
+ * Usage:
+ *   $ node ops/security/network-policies.yaml > dist/network-policies.yaml
+ *
+ * Dependencies:
+ *   - js-yaml         (runtime YAML encoder)
+ *   - @streampulse/ci (optional; build-time feature toggles)
+ */
+
+'use strict';
+
+import fs    from 'node:fs';
+import path  from 'node:path';
+import yaml  from 'js-yaml';
+
+// ───────────────────────────────────────────────────────────────────────────────
+// Constants
+// ───────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Namespace that StreamPulse Nexus components live in.
+ * This is purposely configurable for multi-tenant clusters.
+ */
+const NAMESPACE = process.env.NEXUS_NAMESPACE || 'streampulse';
+
+/**
+ * Label selectors shared across multiple policies.
+ */
+const LABELS = {
+  app:              'streampulse',
+  roleIngress:      'ingress-gw',
+  roleEdgeCache:    'edge-cache',
+  roleTranscoder:   'transcoder',
+  roleAnalytics:    'analytics',
+  roleBackup:       'backup',
+  roleChaos:        'chaos-engine', // internal penetration testing
+};
+
+// Default output directory when generating from CI
+const OUTPUT_FILE = process.env.OUTPUT_FILE ??
+  path.resolve(process.cwd(), 'dist/network-policies.yaml');
+
+// ───────────────────────────────────────────────────────────────────────────────
+// Helper Utilities
+// ───────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Validates a NetworkPolicy object for common anti-patterns.
+ * Throws an Error if an issue is detected.
+ *
+ * @param {object} policy – A raw NetworkPolicy manifest
+ */
+function validatePolicy(policy) {
+  if (!policy?.metadata?.name) {
+    throw new Error('NetworkPolicy is missing metadata.name');
+  }
+  if (!policy?.spec?.podSelector) {
+    throw new Error(`NetworkPolicy "${policy.metadata.name}" is missing spec.podSelector`);
+  }
+}
+
+/**
+ * Wraps a NetworkPolicy spec with required apiVersion & kind.
+ *
+ * @param {object} partial – The NetworkPolicy spec without apiVersion/kind
+ * @returns {object} – Fully qualified NetworkPolicy manifest
+ */
+function makeNetworkPolicy(partial) {
+  const policy = {
+    apiVersion: 'networking.k8s.io/v1',
+    kind:       'NetworkPolicy',
+    metadata:   {
+      namespace: NAMESPACE,
+      ...partial.metadata,
+    },
+    spec: partial.spec,
+  };
+
+  validatePolicy(policy);
+  return policy;
+}
+
+/**
+ * Converts an array of objects to multi-document YAML,
+ * separated by `---`.
+ *
+ * @param {object[]} manifests
+ * @returns {string}
+ */
+function renderYaml(manifests) {
+  return manifests.map(m => yaml.dump(m, { noRefs: true })).join('---\n');
+}
+
+// ───────────────────────────────────────────────────────────────────────────────
+// Policy Builders
+// ───────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Creates a “default-deny” baseline policy that blocks all ingress + egress
+ * unless explicitly allowed.  This is attached to every pod.
+ */
+function buildDefaultDeny() {
+  return makeNetworkPolicy({
+    metadata: { name: 'nexus-default-deny' },
+    spec: {
+      podSelector: {}, // selects ALL pods
+      policyTypes: ['Ingress', 'Egress'],
+    },
+  });
+}
+
+/**
+ * Allows ingress from the cluster’s Ingress-Gateway to
+ * service pods (e.g. media routers, chat, etc.).
+ */
+function buildAllowIngressFromGateway() {
+  return makeNetworkPolicy({
+    metadata: { name: 'allow-ingress-from-gateway' },
+    spec: {
+      podSelector: { matchLabels: { app: LABELS.app } },
+      ingress: [{
+        from: [{
+          namespaceSelector: {
+            matchLabels: { 'istio-injection': 'enabled' }, // gateway namespace
+          },
+          podSelector: {
+            matchLabels: { role: LABELS.roleIngress },
+          },
+        }],
+        ports: [
+          { protocol: 'TCP', port: 80   },
+          { protocol: 'TCP', port: 443  },
+          { protocol: 'UDP', port: 1935 }, // RTMP
+        ],
+      }],
+    },
+  });
+}
+
+/**
+ * Allows internal micro-services to egress metrics to the analytics stack.
+ */
+function buildMetricsEgress() {
+  return makeNetworkPolicy({
+    metadata: { name: 'allow-egress-to-analytics' },
+    spec: {
+      podSelector: { matchLabels: { app: LABELS.app } },
+      egress: [{
+        to: [{
+          podSelector: { matchLabels: { role: LABELS.roleAnalytics } },
+        }],
+        ports: [
+          { protocol: 'TCP', port: 9090 }, // Prometheus
+          { protocol: 'TCP', port: 4317 }, // OTLP
+        ],
+      }],
+      policyTypes: ['Egress'],
+    },
+  });
+}
+
+/**
+ * Permits data-pipe egress to backup nodes, but only on encrypted ports.
+ */
+function buildBackupEgress() {
+  return makeNetworkPolicy({
+    metadata: { name: 'allow-encrypted-backup-egress' },
+    spec: {
+      podSelector: { matchLabels: { role: LABELS.roleBackup } },
+      egress: [{
+        to: [{
+          // Backup nodes often run outside core namespace
+          namespaceSelector: { matchLabels: { tier: 'infra' } },
+          podSelector:       { matchLabels: { role: 'object-store' } },
+        }],
+        ports: [
+          { protocol: 'TCP', port: 443  }, // HTTPS-S3
+          { protocol: 'TCP', port: 8443 }, // gRPC-TLS
+        ],
+      }],
+      policyTypes: ['Egress'],
+    },
+  });
+}
+
+/**
+ * Strictly confines the Chaos-Engineering pods so they
+ * can only speak to honeypot services.
+ */
+function buildChaosIsolation() {
+  return makeNetworkPolicy({
+    metadata: { name: 'chaos-engine-isolation' },
+    spec: {
+      podSelector: { matchLabels: { role: LABELS.roleChaos } },
+      ingress: [],
+      egress: [{
+        to: [{
+          namespaceSelector: { matchLabels: { env: 'testing' } },
+          podSelector:       { matchLabels: { role: 'honeypot' } },
+        }],
+      }],
+      policyTypes: ['Ingress', 'Egress'],
+    },
+  });
+}
+
+// ───────────────────────────────────────────────────────────────────────────────
+// Main
+// ───────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Compose and write all policies to disk/stdout.
+ */
+function main() {
+  try {
+    const manifests = [
+      buildDefaultDeny(),
+      buildAllowIngressFromGateway(),
+      buildMetricsEgress(),
+      buildBackupEgress(),
+      buildChaosIsolation(),
+    ];
+
+    const output = renderYaml(manifests);
+
+    if (require.main === module) {
+      // CLI mode
+      if (process.argv.includes('--stdout')) {
+        // Write to STDOUT for piping
+        process.stdout.write(output);
+      } else {
+        // Ensure target directory exists
+        fs.mkdirSync(path.dirname(OUTPUT_FILE), { recursive: true });
+        fs.writeFileSync(OUTPUT_FILE, output, 'utf8');
+        console.log(`✅  NetworkPolicy bundle written to ${OUTPUT_FILE}`);
+      }
+    } else {
+      // Library mode – return as string
+      return output;
+    }
+  } catch (err) {
+    console.error('❌ Failed to generate network policies:', err);
+    process.exit(1);
+  }
+}
+
+main();
+```

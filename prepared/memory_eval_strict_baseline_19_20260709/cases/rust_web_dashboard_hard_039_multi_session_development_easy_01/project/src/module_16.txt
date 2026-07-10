@@ -1,0 +1,549 @@
+```rust
+//! ChromaticCanvas Control Center – Session Management & Security Module
+//!
+//! This module provides a production-grade session middleware for Actix-Web
+//! applications.  It supplies:
+//!   • Cryptographically–signed session identifiers stored inside secure,
+//!     HTTP-only cookies
+//!   • Pluggable `SessionStore` abstraction with an in-memory implementation
+//!     suitable for development/testing
+//!   • Ergonomic extractor (`Session`) that can be used in any handler
+//!   • Strict error handling with a custom `SessionError`
+//!
+//! In production you can swap out `MemorySessionStore` for a Redis or SQL
+//! implementation without touching the middleware itself.
+//!
+//! Compile with (in Cargo.toml):
+//! ```toml
+//! actix-web = { version = "4", features = ["cookies"] }
+//! async-trait = "0.1"
+//! chrono = "0.4"
+//! dashmap = "5"
+//! hmac = "0.12"
+//! rand = "0.8"
+//! serde = { version = "1", features = ["derive"] }
+//! sha2 = "0.10"
+//! thiserror = "1"
+//! uuid = { version = "1", features = ["v4"] }
+//! ```
+//!
+//! # Example
+//!
+//! ```no_run
+//! use actix_web::{App, HttpServer, get, web, Responder};
+//! use chromatic_canvas::session::{Session, SessionLayer, MemorySessionStore};
+//!
+//! #[get("/dashboard")]
+//! async fn dashboard(session: Session) -> impl Responder {
+//!     format!("Hello, {}", session.user_id().unwrap_or("guest"))
+//! }
+//!
+//! #[actix_web::main]
+//! async fn main() -> std::io::Result<()> {
+//!     let store = MemorySessionStore::new();
+//!     HttpServer::new(move || {
+//!         App::new()
+//!             .wrap(SessionLayer::new(store.clone()))
+//!             .service(dashboard)
+//!     })
+//!     .bind(("127.0.0.1", 8080))?
+//!     .run()
+//!     .await
+//! }
+//! ```
+// -------------------------------------------------------------------------------------------------
+
+use std::{
+    pin::Pin,
+    sync::Arc,
+    task::{Context, Poll},
+    time::{Duration, SystemTime},
+};
+
+use actix_web::{
+    body::EitherBody,
+    cookie::{Cookie, CookieJar, Key},
+    dev::{forward_ready, Service, ServiceRequest, ServiceResponse, Transform},
+    error::InternalError,
+    http::{header::SET_COOKIE, StatusCode},
+    web::Data,
+    Error, FromRequest, HttpMessage,
+};
+use async_trait::async_trait;
+use chrono::{DateTime, Utc};
+use dashmap::DashMap;
+use futures_util::future::{ready, LocalBoxFuture, Ready};
+use hmac::{Hmac, Mac};
+use rand::{distributions::Alphanumeric, Rng};
+use serde::{Deserialize, Serialize};
+use sha2::Sha256;
+use thiserror::Error;
+use uuid::Uuid;
+
+// Type alias for HMAC-SHA256
+type HmacSha256 = Hmac<Sha256>;
+
+const COOKIE_NAME: &str = "cc_session";
+const DEFAULT_SESSION_TTL: Duration = Duration::from_secs(60 * 60 * 8); // 8 hours
+
+// -------------------------------------------------------------------------------------------------
+// Errors
+// -------------------------------------------------------------------------------------------------
+
+/// Session-specific error codes
+#[derive(Debug, Error)]
+pub enum SessionError {
+    #[error("Session not found")]
+    NotFound,
+
+    #[error("Session has expired")]
+    Expired,
+
+    #[error("Invalid session signature")]
+    InvalidSignature,
+
+    #[error("Store backend failure: {0}")]
+    Backend(String),
+}
+
+impl actix_web::ResponseError for SessionError {
+    fn status_code(&self) -> StatusCode {
+        match self {
+            SessionError::NotFound | SessionError::Expired => StatusCode::UNAUTHORIZED,
+            SessionError::InvalidSignature => StatusCode::FORBIDDEN,
+            SessionError::Backend(_) => StatusCode::INTERNAL_SERVER_ERROR,
+        }
+    }
+}
+
+// -------------------------------------------------------------------------------------------------
+// Session Data Model
+// -------------------------------------------------------------------------------------------------
+
+/// The data we persist in the store.  
+/// Extend with your own fields (e.g., CSRF token, impersonation flags).
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct SessionData {
+    pub session_id: String,
+    pub user_id: Option<String>,
+    pub expires_at: DateTime<Utc>,
+}
+
+impl SessionData {
+    pub fn is_expired(&self) -> bool {
+        self.expires_at < Utc::now()
+    }
+}
+
+// -------------------------------------------------------------------------------------------------
+// Session Store Abstraction
+// -------------------------------------------------------------------------------------------------
+
+#[async_trait]
+pub trait SessionStore: Send + Sync + Clone + 'static {
+    async fn load_session(&self, id: &str) -> Result<SessionData, SessionError>;
+    async fn save_session(&self, data: SessionData) -> Result<(), SessionError>;
+    async fn delete_session(&self, id: &str) -> Result<(), SessionError>;
+}
+
+/// Simple, thread-safe in-memory session store. Not suitable for multi-process environments.
+#[derive(Clone)]
+pub struct MemorySessionStore {
+    inner: Arc<DashMap<String, SessionData>>,
+}
+
+impl MemorySessionStore {
+    pub fn new() -> Self {
+        Self {
+            inner: Arc::new(DashMap::new()),
+        }
+    }
+}
+
+#[async_trait]
+impl SessionStore for MemorySessionStore {
+    async fn load_session(&self, id: &str) -> Result<SessionData, SessionError> {
+        let entry = self
+            .inner
+            .get(id)
+            .ok_or(SessionError::NotFound)?
+            .clone();
+
+        if entry.is_expired() {
+            // Clean up and inform caller
+            self.inner.remove(id);
+            return Err(SessionError::Expired);
+        }
+        Ok(entry)
+    }
+
+    async fn save_session(&self, data: SessionData) -> Result<(), SessionError> {
+        self.inner.insert(data.session_id.clone(), data);
+        Ok(())
+    }
+
+    async fn delete_session(&self, id: &str) -> Result<(), SessionError> {
+        self.inner.remove(id);
+        Ok(())
+    }
+}
+
+// -------------------------------------------------------------------------------------------------
+// Session Layer (Actix-Web Middleware)
+// -------------------------------------------------------------------------------------------------
+
+/// Actix middleware responsible for extracting/creating Session objects
+pub struct SessionLayer<S> {
+    store: S,
+    key: Key,
+}
+
+impl<S: SessionStore> SessionLayer<S> {
+    pub fn new(store: S) -> Self {
+        let encryption_key = Key::generate(); // 256-bit random key
+        Self { store, key: encryption_key }
+    }
+}
+
+impl<S, St> Transform<St, ServiceRequest> for SessionLayer<S>
+where
+    S: SessionStore,
+    St: Service<ServiceRequest, Response = ServiceResponse<EitherBody<actix_web::body::BoxBody>>, Error = Error>
+        + 'static,
+{
+    type Response = ServiceResponse<EitherBody<actix_web::body::BoxBody>>;
+    type Error = Error;
+    type InitError = ();
+    type Transform = SessionLayerService<S, St>;
+    type Future = Ready<Result<Self::Transform, Self::InitError>>;
+
+    fn new_transform(&self, service: St) -> Self::Future {
+        ready(Ok(SessionLayerService {
+            store: self.store.clone(),
+            key: self.key.clone(),
+            service,
+        }))
+    }
+}
+
+pub struct SessionLayerService<S, St> {
+    store: S,
+    key: Key,
+    service: St,
+}
+
+impl<S, St> Service<ServiceRequest> for SessionLayerService<S, St>
+where
+    S: SessionStore,
+    St: Service<ServiceRequest, Response = ServiceResponse<EitherBody<actix_web::body::BoxBody>>, Error = Error>
+        + 'static,
+{
+    type Response = ServiceResponse<EitherBody<actix_web::body::BoxBody>>;
+    type Error = Error;
+    type Future = LocalBoxFuture<'static, Result<Self::Response, Self::Error>>;
+
+    forward_ready!(service);
+
+    fn call(&self, mut req: ServiceRequest) -> Self::Future {
+        let store = self.store.clone();
+        let signing_key = self.key.clone();
+
+        // Attempt to extract session from cookie
+        let cookie = req
+            .cookie(COOKIE_NAME)
+            .map(|c| c.value().to_string());
+
+        let fut = async move {
+            let jar = CookieJar::new();
+
+            let session_result = match cookie {
+                Some(cookie_value) => verify_and_load(&store, &signing_key, &cookie_value).await,
+                None => Err(SessionError::NotFound),
+            };
+
+            let session = match session_result {
+                Ok(data) => Session { data, store: store.clone(), dirty: false },
+                Err(SessionError::NotFound) | Err(SessionError::Expired) => {
+                    // Create guest session (not persisted)
+                    Session {
+                        data: SessionData {
+                            session_id: String::new(),
+                            user_id: None,
+                            expires_at: Utc::now(),
+                        },
+                        store: store.clone(),
+                        dirty: false,
+                    }
+                }
+                Err(e) => {
+                    return Err(InternalError::from_response(
+                        e,
+                        actix_web::HttpResponse::from_error(e).map_into_right_body(),
+                    )
+                    .into())
+                }
+            };
+
+            // Attach session to request extensions
+            req.extensions_mut().insert(session);
+
+            Ok(())
+        };
+
+        let srv = self.service.call(req);
+
+        Box::pin(async move {
+            // Load session into extensions
+            fut.await?;
+
+            let mut res = srv.await?;
+
+            // Retrieve session from extensions (mutably)
+            if let Some(mut session) = res
+                .request()
+                .extensions()
+                .get::<Session>()
+                .cloned()
+            {
+                // Persist changes if session marked dirty
+                if session.dirty {
+                    // Delete session (logout)
+                    if session.data.user_id.is_none() {
+                        if !session.data.session_id.is_empty() {
+                            session.store.delete_session(&session.data.session_id).await.ok();
+                        }
+                        // Clear cookie
+                        let mut cookie = Cookie::build(COOKIE_NAME, "")
+                            .path("/")
+                            .max_age(Duration::ZERO)
+                            .http_only(true)
+                            .secure(true)
+                            .finish();
+                        res.headers_mut().append(SET_COOKIE, cookie.to_string().parse().unwrap());
+                    } else {
+                        // Upsert
+                        if session.data.session_id.is_empty() {
+                            session.data.session_id = Uuid::new_v4().to_string();
+                        }
+                        session.store.save_session(session.data.clone()).await?;
+                        // Issue cookie
+                        let signed = sign_session_id(&signing_key, &session.data.session_id);
+                        let mut cookie = Cookie::build(COOKIE_NAME, signed)
+                            .path("/")
+                            .max_age(DEFAULT_SESSION_TTL)
+                            .http_only(true)
+                            .secure(true)
+                            .finish();
+                        res.headers_mut().append(SET_COOKIE, cookie.to_string().parse().unwrap());
+                    }
+                }
+            }
+
+            Ok(res)
+        })
+    }
+}
+
+// -------------------------------------------------------------------------------------------------
+// Session Extractor
+// -------------------------------------------------------------------------------------------------
+
+/// Per-request handler for interacting with a user's session.
+///
+/// Cloning `Session` is cheap – it just clones an `Arc`.
+#[derive(Clone)]
+pub struct Session<S: SessionStore = MemorySessionStore> {
+    data: SessionData,
+    store: S,
+    dirty: bool, // Has the session been modified in this request?
+}
+
+impl<S: SessionStore> Session<S> {
+    /// Returns the unique session identifier, if the session is persisted.
+    pub fn id(&self) -> Option<&str> {
+        if self.data.session_id.is_empty() {
+            None
+        } else {
+            Some(&self.data.session_id)
+        }
+    }
+
+    /// Returns the associated user identifier, if any.
+    pub fn user_id(&self) -> Option<&str> {
+        self.data.user_id.as_deref()
+    }
+
+    /// Attaches a user to the session (i.e., login).
+    pub fn login(&mut self, user_id: impl Into<String>) {
+        self.data.user_id = Some(user_id.into());
+        self.data.expires_at = Utc::now() + chrono::Duration::from_std(DEFAULT_SESSION_TTL).unwrap();
+        self.dirty = true;
+    }
+
+    /// Removes user from session (i.e., logout).  
+    /// This will also delete the session cookie.
+    pub fn logout(&mut self) {
+        self.data.user_id = None;
+        self.dirty = true;
+    }
+
+    /// Refreshes the expiration timer.
+    pub fn touch(&mut self) {
+        self.data.expires_at = Utc::now() + chrono::Duration::from_std(DEFAULT_SESSION_TTL).unwrap();
+        self.dirty = true;
+    }
+
+    /// Custom data getter: extend session storage by adding a `serde_json::Value`
+    /// or a key/value map as needed.
+    pub fn expires_at(&self) -> DateTime<Utc> {
+        self.data.expires_at
+    }
+}
+
+impl<S> std::fmt::Debug for Session<S>
+where
+    S: SessionStore,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Session")
+            .field("id", &self.id())
+            .field("user_id", &self.user_id())
+            .field("expires_at", &self.expires_at())
+            .finish()
+    }
+}
+
+impl<S: SessionStore> FromRequest for Session<S> {
+    type Error = Error;
+    type Future = Ready<Result<Self, Self::Error>>;
+
+    fn from_request(req: &actix_web::HttpRequest, _: &mut actix_web::dev::Payload) -> Self::Future {
+        let session = req
+            .extensions()
+            .get::<Session<S>>()
+            .cloned()
+            .expect("SessionLayer is not mounted");
+        ready(Ok(session))
+    }
+}
+
+// -------------------------------------------------------------------------------------------------
+// Helper functions
+// -------------------------------------------------------------------------------------------------
+
+/// Generates a random unsigned (unsigned string) session identifier
+fn generate_session_id() -> String {
+    rand::thread_rng()
+        .sample_iter(&Alphanumeric)
+        .take(32)
+        .map(char::from)
+        .collect()
+}
+
+/// Sign the session ID with HMAC to prevent tampering
+fn sign_session_id(key: &Key, session_id: &str) -> String {
+    let mut mac = HmacSha256::new_from_slice(key.master()).unwrap();
+    mac.update(session_id.as_bytes());
+    let signature = mac.finalize().into_bytes();
+    base64::encode_config([session_id.as_bytes(), &signature].concat(), base64::URL_SAFE_NO_PAD)
+}
+
+/// Verify cookie, check signature, then load from store
+async fn verify_and_load<S: SessionStore>(
+    store: &S,
+    key: &Key,
+    cookie_val: &str,
+) -> Result<SessionData, SessionError> {
+    let decoded = base64::decode_config(cookie_val, base64::URL_SAFE_NO_PAD)
+        .map_err(|_| SessionError::InvalidSignature)?;
+
+    if decoded.len() <= 32 {
+        return Err(SessionError::InvalidSignature);
+    }
+
+    let (id_bytes, sig_bytes) = decoded.split_at(decoded.len() - 32);
+    let session_id = std::str::from_utf8(id_bytes).map_err(|_| SessionError::InvalidSignature)?;
+
+    let mut mac = HmacSha256::new_from_slice(key.master()).unwrap();
+    mac.update(session_id.as_bytes());
+
+    mac.verify_slice(sig_bytes)
+        .map_err(|_| SessionError::InvalidSignature)?;
+
+    store.load_session(session_id).await
+}
+
+// -------------------------------------------------------------------------------------------------
+// Tests
+// -------------------------------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use actix_web::{test, web, App, HttpResponse};
+
+    #[actix_rt::test]
+    async fn roundtrip_login_logout() {
+        async fn login(mut session: Session) -> HttpResponse {
+            session.login("artist_123");
+            HttpResponse::Ok().finish()
+        }
+
+        async fn whoami(session: Session) -> HttpResponse {
+            match session.user_id() {
+                Some(uid) => HttpResponse::Ok().body(uid.to_string()),
+                None => HttpResponse::Unauthorized().finish(),
+            }
+        }
+
+        async fn logout(mut session: Session) -> HttpResponse {
+            session.logout();
+            HttpResponse::Ok().finish()
+        }
+
+        let store = MemorySessionStore::new();
+        let app = test::init_service(
+            App::new()
+                .wrap(SessionLayer::new(store))
+                .service(web::resource("/login").to(login))
+                .service(web::resource("/whoami").to(whoami))
+                .service(web::resource("/logout").to(logout)),
+        )
+        .await;
+
+        // anonymous access should fail
+        let req = test::TestRequest::get().uri("/whoami").to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+
+        // login
+        let req = test::TestRequest::post().uri("/login").to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        let cookie = resp
+            .response()
+            .cookies()
+            .find(|c| c.name() == COOKIE_NAME)
+            .cloned()
+            .expect("no set-cookie header");
+
+        // whoami
+        let req = test::TestRequest::get()
+            .uri("/whoami")
+            .cookie(cookie.clone())
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = test::read_body(resp).await;
+        assert_eq!(body, "artist_123");
+
+        // logout
+        let req = test::TestRequest::post()
+            .uri("/logout")
+            .cookie(cookie)
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), StatusCode::OK);
+    }
+}
+```

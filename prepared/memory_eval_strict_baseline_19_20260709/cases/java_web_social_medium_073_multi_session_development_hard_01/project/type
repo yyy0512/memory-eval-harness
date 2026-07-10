@@ -1,0 +1,260 @@
+package com.edupulse.shared.events;
+
+import java.io.Closeable;
+import java.time.Instant;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.EnumMap;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArraySet;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.function.Consumer;
+import java.util.logging.Level;
+import java.util.logging.Logger;
+
+/**
+ * A lightweight, in-memory event bus used by EduPulse services to decouple
+ * producers from consumers. The bus supports asynchronous fan-out, runtime
+ * subscription management, graceful shutdown, and robust error handling. <p>
+ *
+ * While the production system leverages a message broker (e.g. RabbitMQ or
+ * Kafka) for cross-service communication, this EventBus is ideal for
+ * (a) domain events that are handled within the same JVM,
+ * (b) integration tests, or
+ * (c) local development scenarios where spinning up infrastructure is onerous.
+ *
+ * Example usage:
+ * <pre>
+ *      EventBus bus = new EventBus();
+ *      bus.subscribe(DomainEventType.PULSE_POSTED, event -> { … });
+ *      bus.publish(DomainEvent.pulsePosted(pulseId, authorId));
+ * </pre>
+ */
+public final class EventBus implements Closeable {
+
+    private static final Logger LOGGER = Logger.getLogger(EventBus.class.getName());
+
+    /**
+     * Map of event type -> subscribers (thread-safe for dynamic mutations).
+     */
+    private final Map<DomainEventType, Set<Consumer<DomainEvent>>> subscribers =
+            new EnumMap<>(DomainEventType.class);
+
+    /**
+     * Dedicated pool for async delivery. Cached thread pool yields a flexible,
+     * auto-scaling queue that terminates idle threads after 60 seconds.
+     */
+    private final ExecutorService dispatcher = Executors.newCachedThreadPool(r -> {
+        Thread t = new Thread(r, "edupulse-event-dispatcher");
+        t.setDaemon(true);
+        return t;
+    });
+
+    public EventBus() {
+        // Pre-populate subscriber map with empty, thread-safe sets.
+        for (DomainEventType type : DomainEventType.values()) {
+            subscribers.put(type, new CopyOnWriteArraySet<>());
+        }
+    }
+
+    /**
+     * Publish an event to all registered subscribers. Delivery is asynchronous;
+     * handlers are executed in the dispatcher thread pool.
+     *
+     * @param event the domain event to publish
+     */
+    public void publish(DomainEvent event) {
+        Objects.requireNonNull(event, "event must not be null");
+        Collection<Consumer<DomainEvent>> consumers =
+                subscribers.getOrDefault(event.type(), Collections.emptySet());
+
+        if (consumers.isEmpty()) {
+            LOGGER.log(Level.FINE,
+                    () -> "No subscribers for event type " + event.type());
+            return;
+        }
+
+        for (Consumer<DomainEvent> consumer : consumers) {
+            dispatcher.submit(() -> {
+                try {
+                    consumer.accept(event);
+                } catch (Exception ex) {
+                    LOGGER.log(Level.SEVERE,
+                            "Unhandled exception in event handler for "
+                                    + event.type(), ex);
+                }
+            });
+        }
+    }
+
+    /**
+     * Subscribe to a particular event type.
+     *
+     * @param type     event type of interest
+     * @param consumer consumer that handles the event
+     * @return a {@link Subscription} for later un-subscription
+     */
+    public Subscription subscribe(DomainEventType type,
+                                  Consumer<DomainEvent> consumer) {
+        Objects.requireNonNull(type, "type must not be null");
+        Objects.requireNonNull(consumer, "consumer must not be null");
+
+        subscribers.get(type).add(consumer);
+        LOGGER.log(Level.FINE, () ->
+                "Subscriber added for " + type + "; total = "
+                        + subscribers.get(type).size());
+
+        return () -> unsubscribe(type, consumer);
+    }
+
+    /**
+     * Unsubscribe a consumer from a given event type.
+     */
+    private void unsubscribe(DomainEventType type,
+                             Consumer<DomainEvent> consumer) {
+        subscribers.get(type).remove(consumer);
+        LOGGER.log(Level.FINE, () ->
+                "Subscriber removed for " + type + "; total = "
+                        + subscribers.get(type).size());
+    }
+
+    /**
+     * Gracefully shuts down the dispatcher. Awaiting tasks are given a chance
+     * to finish, but long-running jobs should handle {@link InterruptedException}.
+     */
+    @Override
+    public void close() {
+        dispatcher.shutdown();
+        LOGGER.info("EventBus dispatcher shutdown initiated.");
+    }
+
+    // -----------------------------------------------------------------------
+    // Helper abstractions
+    // -----------------------------------------------------------------------
+
+    /**
+     * Lightweight handle representing an active subscription.
+     */
+    @FunctionalInterface
+    public interface Subscription {
+        /**
+         * Cancel the subscription. Idempotent.
+         */
+        void cancel();
+    }
+
+    /**
+     * Immutable value object representing a domain event. Concrete factory
+     * methods ensure type-safe construction of frequently used events.
+     */
+    public record DomainEvent(
+            DomainEventType type,
+            Instant occurredAt,
+            Map<String, Object> payload
+    ) {
+
+        public DomainEvent {
+            Objects.requireNonNull(type, "type must not be null");
+            Objects.requireNonNull(occurredAt, "occurredAt must not be null");
+            payload = payload == null
+                    ? Map.of()
+                    : Map.copyOf(payload); // defensive
+        }
+
+        /* ----- Factory helpers for common EduPulse events ---------------- */
+
+        public static DomainEvent pulsePosted(String pulseId, String authorId) {
+            return new DomainEvent(
+                    DomainEventType.PULSE_POSTED,
+                    Instant.now(),
+                    Map.of("pulseId", pulseId, "authorId", authorId)
+            );
+        }
+
+        public static DomainEvent answerSubmitted(String questionId,
+                                                  String respondentId) {
+            return new DomainEvent(
+                    DomainEventType.ANSWER_SUBMITTED,
+                    Instant.now(),
+                    Map.of("questionId", questionId, "respondentId", respondentId)
+            );
+        }
+
+        public static DomainEvent assignmentUploaded(String assignmentId,
+                                                     String studentId,
+                                                     String fileName) {
+            return new DomainEvent(
+                    DomainEventType.ASSIGNMENT_UPLOADED,
+                    Instant.now(),
+                    Map.of(
+                            "assignmentId", assignmentId,
+                            "studentId", studentId,
+                            "fileName", fileName
+                    )
+            );
+        }
+
+        public static DomainEvent paymentInitiated(String paymentId,
+                                                   String userId,
+                                                   double amount) {
+            return new DomainEvent(
+                    DomainEventType.PAYMENT_INITIATED,
+                    Instant.now(),
+                    Map.of(
+                            "paymentId", paymentId,
+                            "userId", userId,
+                            "amount", amount
+                    )
+            );
+        }
+    }
+
+    /**
+     * Enumeration of high-level domain events emitted by the EduPulse platform.
+     * Each constant is mapped to a default topic name for broker propagation.
+     */
+    public enum DomainEventType {
+
+        PULSE_POSTED("pulse.posted"),
+        ANSWER_SUBMITTED("answer.submitted"),
+        ASSIGNMENT_UPLOADED("assignment.uploaded"),
+        REACTION_ADDED("reaction.added"),
+        PAYMENT_INITIATED("payment.initiated"),
+        BADGE_AWARDED("badge.awarded");
+
+        private static final Map<String, DomainEventType> BY_ROUTING_KEY =
+                new ConcurrentHashMap<>();
+
+        static {
+            for (DomainEventType type : values()) {
+                BY_ROUTING_KEY.put(type.routingKey, type);
+            }
+        }
+
+        private final String routingKey;
+
+        DomainEventType(String routingKey) {
+            this.routingKey = routingKey;
+        }
+
+        /**
+         * The default routing key (topic name) used when relaying this event
+         * to an external broker.
+         */
+        public String routingKey() {
+            return routingKey;
+        }
+
+        /**
+         * Resolve an event type by its routing key. Returns {@code null} if no
+         * match is found.
+         */
+        public static DomainEventType fromRoutingKey(String routingKey) {
+            return BY_ROUTING_KEY.get(routingKey);
+        }
+    }
+}

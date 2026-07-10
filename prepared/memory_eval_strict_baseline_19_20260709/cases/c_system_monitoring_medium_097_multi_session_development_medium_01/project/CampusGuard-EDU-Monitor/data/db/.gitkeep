@@ -1,0 +1,357 @@
+/**
+ * campusguard_db.c
+ *
+ * SQLite database abstraction layer for CampusGuard-EDU-Monitor
+ * ---------------------------------------------------------------------------
+ * This module encapsulates all low-level interactions with the on-disk SQLite
+ * database that backs the monitoring suite.  It is intentionally decoupled
+ * from higher-level application logic so that:
+ *
+ *   1. Unit tests can replace this layer with an in-memory mock.
+ *   2. Future migrations to PostgreSQL / MySQL only require re-implementing
+ *      this file behind the same public interface.
+ *
+ * The API is thread-safe and employs an adaptive busy-handler to mitigate the
+ * “database is locked” errors commonly seen in highly concurrent workloads.
+ *
+ * Build:
+ *   gcc -Wall -Wextra -pedantic -std=c11 -pthread \
+ *       `pkg-config --cflags --libs sqlite3` \
+ *       -c campusguard_db.c
+ *
+ * Author: CampusGuard Core Team
+ * License: MIT
+ */
+
+#define _POSIX_C_SOURCE 200809L /* getline, clock_gettime */
+#include <sqlite3.h>
+
+#include <errno.h>
+#include <pthread.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
+#include <unistd.h>
+
+#include "campusguard_db.h"     /* Public header (not provided here) */
+#include "cg_log.h"             /* Centralized logging facility       */
+
+/* ---------------------------------------------------------------------------
+ * Private constants & macros
+ * --------------------------------------------------------------------------- */
+
+#define CG_DB_BUSY_MAX_RETRY      6          /* Exponential back-off retries  */
+#define CG_DB_BUSY_BASE_DELAY_MS  25         /* Base delay for busy handler   */
+
+/* ---------------------------------------------------------------------------
+ * Private helper prototypes
+ * --------------------------------------------------------------------------- */
+
+static int  cg_db_busy_handler(void *ctx, int retry_count);
+static int  cg_db_run_ddl(cg_db_t *db);             /* Executes schema DDL  */
+static void cg_db_log_sql_err(const char *ctx,
+                              int rc,
+                              sqlite3 *db);
+
+/* ---------------------------------------------------------------------------
+ * Public API implementation
+ * --------------------------------------------------------------------------- */
+
+/**
+ * cg_db_open
+ * ----------
+ * Opens (or creates) a database file, applies schema migrations, and primes
+ * prepared statements used by the hot-paths of the application.
+ *
+ * Parameters
+ *   db_out     – Pointer to an uninitialized handle that will be populated.
+ *   path       – File path to SQLite database (e.g., “/var/lib/cg/metrics.db”)
+ *
+ * Returns
+ *   CG_DB_OK on success; otherwise a CG_DB_ERR_* code.
+ */
+int
+cg_db_open(cg_db_t *db_out, const char *path)
+{
+    if (!db_out || !path) {
+        return CG_DB_ERR_ARG;
+    }
+
+    memset(db_out, 0, sizeof(*db_out));
+
+    /* Open with full mutex so we can safely share the handle between threads. */
+    int rc = sqlite3_open_v2(path,
+                             &db_out->handle,
+                             SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE |
+                                 SQLITE_OPEN_FULLMUTEX,
+                             NULL);
+    if (rc != SQLITE_OK) {
+        cg_db_log_sql_err("sqlite3_open_v2", rc, db_out->handle);
+        sqlite3_close(db_out->handle);
+        return CG_DB_ERR_OPEN;
+    }
+
+    /* Register custom busy handler (instead of default 5-second block). */
+    sqlite3_busy_handler(db_out->handle, cg_db_busy_handler, NULL);
+
+    /* Enforce WAL to improve concurrency (especially readers). */
+    rc = sqlite3_exec(db_out->handle, "PRAGMA journal_mode = WAL;", NULL, NULL,
+                      NULL);
+    if (rc != SQLITE_OK) {
+        cg_db_log_sql_err("PRAGMA journal_mode", rc, db_out->handle);
+        sqlite3_close(db_out->handle);
+        return CG_DB_ERR_OPEN;
+    }
+
+    /* Apply (idempotent) schema if this is a fresh database. */
+    if ((rc = cg_db_run_ddl(db_out)) != CG_DB_OK) {
+        sqlite3_close(db_out->handle);
+        return rc;
+    }
+
+    /* Initialize mutex to guard prepared statement cache. */
+    if (pthread_mutex_init(&db_out->mtx, NULL) != 0) {
+        sqlite3_close(db_out->handle);
+        return CG_DB_ERR_SYS;
+    }
+
+    return CG_DB_OK;
+}
+
+/**
+ * cg_db_close
+ * -----------
+ * Finalizes prepared statements, destroys the mutex, and closes the SQLite
+ * handle.  This should be called exactly once during application shutdown.
+ */
+int
+cg_db_close(cg_db_t *db)
+{
+    if (!db || !db->handle) {
+        return CG_DB_ERR_ARG;
+    }
+
+    /* Finalize all cached prepared statements (if any). */
+    for (size_t i = 0; i < CG_DB_STMT_MAX; ++i) {
+        if (db->stmts[i]) {
+            sqlite3_finalize(db->stmts[i]);
+            db->stmts[i] = NULL;
+        }
+    }
+
+    /* Close handle and destroy mutex. */
+    sqlite3_close(db->handle);
+    pthread_mutex_destroy(&db->mtx);
+
+    memset(db, 0, sizeof(*db));
+    return CG_DB_OK;
+}
+
+/**
+ * cg_db_insert_metric
+ * -------------------
+ * Inserts (timestamp, hostname, metric, value) into the metrics table.  Uses a
+ * cached prepared statement for performance.  Thread-safe.
+ */
+int
+cg_db_insert_metric(cg_db_t           *db,
+                    const cg_metric_t *metric)
+{
+    if (!db || !metric) {
+        return CG_DB_ERR_ARG;
+    }
+
+    /* Lazily prepare the statement on first invocation. */
+    pthread_mutex_lock(&db->mtx);
+
+    sqlite3_stmt **stmt_slot = &db->stmts[CG_DB_STMT_INSERT_METRIC];
+
+    if (*stmt_slot == NULL) {
+        static const char *SQL =
+            "INSERT INTO metrics(ts, hostname, metric, value)"
+            "VALUES(?, ?, ?, ?);";
+        int rc = sqlite3_prepare_v2(db->handle, SQL, -1, stmt_slot, NULL);
+        if (rc != SQLITE_OK) {
+            cg_db_log_sql_err("prepare insert metric", rc, db->handle);
+            pthread_mutex_unlock(&db->mtx);
+            return CG_DB_ERR_SQL;
+        }
+    }
+
+    sqlite3_stmt *stmt = *stmt_slot;
+    /* Bind parameters.  Indices are 1-based. */
+    sqlite3_bind_int64(stmt, 1, (sqlite3_int64)metric->ts);
+    sqlite3_bind_text(stmt, 2, metric->hostname, -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 3, metric->name, -1, SQLITE_STATIC);
+    sqlite3_bind_double(stmt, 4, metric->value);
+
+    int rc = sqlite3_step(stmt);
+
+    if (rc != SQLITE_DONE) {
+        cg_db_log_sql_err("step insert metric", rc, db->handle);
+        sqlite3_reset(stmt);
+        pthread_mutex_unlock(&db->mtx);
+        return CG_DB_ERR_SQL;
+    }
+
+    sqlite3_reset(stmt); /* Ready for re-use. */
+
+    pthread_mutex_unlock(&db->mtx);
+    return CG_DB_OK;
+}
+
+/**
+ * cg_db_foreach_metric
+ * --------------------
+ * Executes a callback for every metric row that matches the (optional) filter.
+ * A NULL filter means “no WHERE clause”.  The call is read-only and does not
+ * lock the mutex, allowing concurrent readers even while writers hold
+ * transactions.
+ */
+int
+cg_db_foreach_metric(cg_db_t                  *db,
+                     const char               *where_sql,   /* WHERE clause */
+                     cg_db_metric_iter_cb_t    cb,
+                     void                     *opaque)
+{
+    if (!db || !cb) {
+        return CG_DB_ERR_ARG;
+    }
+
+    char *sql = NULL;
+    int   rc;
+
+    if (where_sql && *where_sql) {
+        if (asprintf(&sql, "SELECT ts, hostname, metric, value "
+                          "FROM metrics WHERE %s;", where_sql) < 0) {
+            return CG_DB_ERR_SYS;
+        }
+    } else {
+        sql = strdup("SELECT ts, hostname, metric, value FROM metrics;");
+        if (!sql) return CG_DB_ERR_SYS;
+    }
+
+    sqlite3_stmt *stmt = NULL;
+    rc                  = sqlite3_prepare_v2(db->handle, sql, -1, &stmt, NULL);
+    free(sql);
+
+    if (rc != SQLITE_OK) {
+        cg_db_log_sql_err("prepare foreach metric", rc, db->handle);
+        return CG_DB_ERR_SQL;
+    }
+
+    while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
+        cg_metric_t row = {
+            .ts       = (time_t)sqlite3_column_int64(stmt, 0),
+            .hostname = (const char *)sqlite3_column_text(stmt, 1),
+            .name     = (const char *)sqlite3_column_text(stmt, 2),
+            .value    = sqlite3_column_double(stmt, 3),
+        };
+        if (!cb(&row, opaque)) {
+            break; /* Callback asked to stop early. */
+        }
+    }
+
+    if (rc != SQLITE_DONE) {
+        cg_db_log_sql_err("iterate metric", rc, db->handle);
+        sqlite3_finalize(stmt);
+        return CG_DB_ERR_SQL;
+    }
+
+    sqlite3_finalize(stmt);
+    return CG_DB_OK;
+}
+
+/* ---------------------------------------------------------------------------
+ * Private helpers
+ * --------------------------------------------------------------------------- */
+
+/**
+ * cg_db_busy_handler
+ * ------------------
+ * Adaptive busy handler that sleeps exponentially longer on each retry until
+ * CG_DB_BUSY_MAX_RETRY attempts are exhausted.  We sleep in small increments
+ * so that SQLITE_INTERRUPT can break long waits quickly.
+ */
+static int
+cg_db_busy_handler(void *ctx /* unused */, int retry_count)
+{
+    (void)ctx;
+    if (retry_count >= CG_DB_BUSY_MAX_RETRY) {
+        return 0; /* Give up → SQLITE_BUSY is returned to caller. */
+    }
+
+    int delay_ms = CG_DB_BUSY_BASE_DELAY_MS << retry_count; /* Exponential */
+    const struct timespec ts = {
+        .tv_sec  = delay_ms / 1000,
+        .tv_nsec = (delay_ms % 1000) * 1000000L,
+    };
+    nanosleep(&ts, NULL);
+    return 1; /* Retry */
+}
+
+/**
+ * cg_db_run_ddl
+ * -------------
+ * Executes the builtin schema (idempotently); called once on open().
+ */
+static int
+cg_db_run_ddl(cg_db_t *db)
+{
+    static const char *DDL =
+        /* Metrics captured by monitoring agents */
+        "CREATE TABLE IF NOT EXISTS metrics ("
+        "  id        INTEGER PRIMARY KEY AUTOINCREMENT,"
+        "  ts        INTEGER      NOT NULL,"
+        "  hostname  TEXT         NOT NULL,"
+        "  metric    TEXT         NOT NULL,"
+        "  value     REAL         NOT NULL"
+        ");"
+        /* Security scan results (simplified) */
+        "CREATE TABLE IF NOT EXISTS scans ("
+        "  id        INTEGER PRIMARY KEY AUTOINCREMENT,"
+        "  ts        INTEGER      NOT NULL,"
+        "  host      TEXT         NOT NULL,"
+        "  tool      TEXT         NOT NULL,"
+        "  result    TEXT         NOT NULL"
+        ");"
+        /* Alert rules authored by students/administrators */
+        "CREATE TABLE IF NOT EXISTS alert_rules ("
+        "  id        INTEGER PRIMARY KEY AUTOINCREMENT,"
+        "  name      TEXT         UNIQUE NOT NULL,"
+        "  expr      TEXT         NOT NULL," /* PromQL-like expression */
+        "  severity  TEXT         NOT NULL,"
+        "  enabled   INTEGER      NOT NULL DEFAULT 1"
+        ");";
+
+    char *errmsg = NULL;
+    int   rc     = sqlite3_exec(db->handle, DDL, NULL, NULL, &errmsg);
+
+    if (rc != SQLITE_OK) {
+        cg_log_error("DB schema migration failed: %s", errmsg ?: "unknown");
+        sqlite3_free(errmsg);
+        return CG_DB_ERR_SQL;
+    }
+    return CG_DB_OK;
+}
+
+/**
+ * cg_db_log_sql_err
+ * -----------------
+ * Helper that logs SQLite errors with uniform formatting.
+ */
+static void
+cg_db_log_sql_err(const char *ctx, int rc, sqlite3 *handle)
+{
+    cg_log_error("SQLite error in %s: (%d) %s",
+                 ctx,
+                 rc,
+                 sqlite3_errmsg(handle));
+}
+
+/* ---------------------------------------------------------------------------
+ * End of file
+ * --------------------------------------------------------------------------- */

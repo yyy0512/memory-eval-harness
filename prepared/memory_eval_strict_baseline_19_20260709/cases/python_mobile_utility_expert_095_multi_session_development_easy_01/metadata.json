@@ -1,0 +1,59 @@
+{
+  "scenario_id": "python_mobile_utility_expert_095_multi_session_development_easy_01",
+  "case_id": "python_mobile_utility_expert_095",
+  "title": "Implement Feature Flag for Analytics Event Tracking",
+  "description": "PrismPocket is a complex mobile utility application with a mature feature set, including detailed user analytics. The product team wants to introduce a feature flag to give them more granular control over analytics events. This task will be performed in two stages, mimicking a common agile development workflow where configuration changes are deployed ahead of the feature logic.",
+  "difficulty": "easy",
+  "project_spec": {
+    "unique_id": "python_mobile_utility_expert_095",
+    "name": "PrismPocket",
+    "description": "PrismPocket is an \"augmented utility sketchbook\" that transforms everyday mobile tasks into color-rich, shareable micro-experiences. Instead of the classic notes-and-todos model, each captured item—whether text, photo, voice memo, or geotag—is rendered as a vibrant, swipeable \"prism card\" that users can remix with filters, brush-style annotations, and contextual stickers. Cards sync bidirectionally with a cloud workspace, where a real-time analytics engine surfaces creative trends (e.g., most-used color palettes, hotspot locations, mood score) and suggests artistic prompts.\n\nBuilt entirely in Python but packaged natively for iOS and Android, the app layers Clean Architecture’s concentric rings atop an MVVM presentation shell. Domain entities such as PrismCard, PaletteMetric, and RemixSession remain pure and testable, while platform-specific adapters (CameraAdapter, BiometricAdapter, PushAdapter, etc.) bridge the boundary to native SDKs. An Observer bus streams state mutations from repositories to view-models, allowing live canvas updates and offline queue replay. The result is a utility that feels more like a pocket creative studio than a mundane organizer, distinguishing it sharply from conventional mobile_utility projects.\n\nWhether users are scanning receipts, journaling travel, or capturing spur-of-the-moment doodles, PrismPocket reimagines utilitarian capture as an act of micro-creativity—complete with collaborative remixing, social drops, and data-driven inspiration.",
+    "domain": "mobile_utility",
+    "complexity": "expert",
+    "language": "python",
+    "architecture": "clean_architecture",
+    "theme": "creative",
+    "target_file_count": 94,
+    "target_token_count": 793857,
+    "features": [
+      "analytics",
+      "social_sharing",
+      "local_storage",
+      "responsive_ui",
+      "crash_reporting",
+      "biometric_auth",
+      "in_app_purchases",
+      "push_notifications",
+      "offline_sync",
+      "camera_integration",
+      "location_services"
+    ],
+    "architecture_patterns": [
+      "MVVM",
+      "Adapter_Pattern",
+      "Observer_Pattern",
+      "Singleton",
+      "Factory_Pattern",
+      "Repository_Pattern"
+    ],
+    "dependencies": [
+      "Kivy==2.3.0                # cross-platform responsive UI",
+      "KivyMD==1.1.1              # material design widgets",
+      "Plyer==2.1.0               # camera, location, vibration, notification bridges",
+      "SQLAlchemy==2.0.30         # repository + local_storage (SQLite)",
+      "sentry-sdk==1.40.1         # crash_reporting",
+      "pyjwt[crypto]==2.8.0       # secure session + biometric token handoff",
+      "cryptography==42.0.2       # device-side encryption",
+      "geopy==2.4.1               # location_services & geo-analytics",
+      "Pillow==10.3.0             # camera image processing / filters",
+      "requests==2.32.2           # REST gateway (offline_sync)",
+      "apscheduler==3.10.4        # background sync scheduler",
+      "pyfcm==1.5.4               # push_notifications adapter",
+      "inapp-purchase-py==0.3.2   # in_app_purchases wrapper",
+      "rx==3.2.0                  # Observer_Pattern (reactive streams)",
+      "dependency-injector==4.41.0# Factory & Singleton containers",
+      "pytest==8.2.0              # exhaustive domain + adapter tests"
+    ],
+    "seed": 297660
+  }
+}

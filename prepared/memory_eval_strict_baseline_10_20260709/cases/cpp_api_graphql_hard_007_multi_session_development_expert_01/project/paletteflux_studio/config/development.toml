@@ -1,0 +1,119 @@
+# ------------------------------------------------------------
+# PaletteFlux GraphQL Studio — Development Environment Config
+#
+# This file configures local-development behaviour for the
+# PaletteFlux service layer and supporting components.  
+#
+# NOTE: All secrets and credentials contained herein are for
+#       DEVELOPMENT ONLY and must never be promoted to staging
+#       or production environments.
+# ------------------------------------------------------------
+
+[server]
+# Networking / HTTP
+host                = "127.0.0.1"
+port                = 8080
+workers             = 4                 # Thread-pool size
+base_path           = "/api"
+cors_enabled        = true
+allowed_origins     = ["*"]
+max_request_size_mb = 25
+idle_timeout_sec    = 120
+hot_reload          = true              # Auto-reload on file changes
+
+[database]
+driver    = "postgres"
+host      = "127.0.0.1"
+port      = 5432
+name      = "paletteflux_dev"
+user      = "flux_dev"
+password  = "flux_dev"
+migration_dir = "db/migrations"
+pool_max        = 10
+pool_min_idle   = 2
+log_queries     = true
+statement_timeout_ms = 60000
+
+[graphql]
+playground_enabled = true
+introspection      = true
+schema_path        = "schema/schema.graphql"
+depth_limit        = 15
+complexity_limit   = 300
+caching_enabled    = true
+persisted_queries  = false
+
+[rest]
+base_route        = "/v1"
+default_page_size = 50
+max_page_size     = 200
+version_header    = "X-API-Version"
+
+[monitoring]
+enabled         = true
+metrics_route   = "/metrics"
+exporter        = "prometheus"
+sample_rate     = 0.2                  # 20 % of requests
+tracing_enabled = true
+jaeger_endpoint = "http://localhost:14268/api/traces"
+
+[auth]
+# mode = "none" | "development" | "production"
+mode                         = "development"
+token_secret                 = "dev-secret-do-not-use-in-production"
+token_expiry_seconds         = 7200        # 2 hours
+refresh_token_expiry_seconds = 604800      # 7 days
+allow_insecure_http          = true        # OK only in dev
+
+[cache]
+provider           = "redis"
+host               = "127.0.0.1"
+port               = 6379
+ttl_seconds        = 300
+response_compression = "gzip"
+max_body_size      = "10mb"
+
+[pagination]
+default_limit = 25
+max_limit     = 100
+cursor_salt   = "dev-salt"
+
+[docs]
+swagger_route      = "/docs"
+openapi_path       = "docs/openapi.yaml"
+redoc_route        = "/redoc"
+generate_on_build  = true
+
+[build]
+optimization            = "Debug"
+linkage                 = "static"
+cxx_standard            = 20
+compile_commands_export = true
+clang_tidy_enabled      = true
+clang_tidy_checks       = ["modernize-*", "performance-*", "readability-*", "bugprone-*"]
+
+[dev_tools]
+live_reload      = true
+watch_paths      = ["src", "include", "assets", "schema", "templates"]
+watch_ignore     = ["*/.git/*", "*/build/*", "*/tmp/*"]
+docker_compose_file = "docker-compose.dev.yml"
+
+[paths]
+logs   = "var/log"
+temp   = "var/tmp"
+assets = "assets"
+cache  = "var/cache"
+
+[feature_flags]
+experimental_shader_nodes = true
+enable_graph_editor       = true
+allow_anonymous_read      = true
+
+[rate_limiting]
+enabled    = false          # Disabled in dev
+burst      = 100
+sustained  = 1000
+
+# ------------------------------------------------------------
+# End of development.toml
+# ------------------------------------------------------------

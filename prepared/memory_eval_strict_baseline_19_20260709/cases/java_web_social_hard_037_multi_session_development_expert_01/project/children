@@ -1,0 +1,261 @@
+```java
+package com.circleconnect.nexus.web_social.controller;
+
+import com.circleconnect.nexus.web_social.controller.dto.CircleResponseDto;
+import com.circleconnect.nexus.web_social.controller.dto.CreateSubCircleRequest;
+import com.circleconnect.nexus.web_social.exception.ResourceConflictException;
+import com.circleconnect.nexus.web_social.exception.ResourceNotFoundException;
+import com.circleconnect.nexus.web_social.service.CircleHierarchyService;
+import jakarta.validation.Valid;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.validation.annotation.Validated;
+import org.springframework.web.bind.annotation.*;
+
+import java.util.List;
+import java.util.UUID;
+
+/**
+ * REST-style controller that exposes hierarchy-related endpoints underneath the
+ * circle resource. A “child” circle is a first-level sub-circle that inherits
+ * visibility rules, payment settings, and administrative roles from its parent
+ * but can have an independent membership roster.
+ *
+ * Path structure:
+ *     /api/v1/circles/{circleId}/children
+ *
+ * Responsibilities:
+ *  • Delegate intent to {@link CircleHierarchyService}
+ *  • Translate domain exceptions to HTTP status codes
+ *  • Layer validation and method-level security via annotations
+ */
+@Slf4j
+@Validated
+@RequiredArgsConstructor
+@RestController
+@RequestMapping("/api/v1/circles/{circleId}/children")
+public class CircleChildrenController {
+
+    private final CircleHierarchyService hierarchyService;
+
+    /**
+     * Returns an ordered list of children belonging to a circle.
+     */
+    @GetMapping
+    @PreAuthorize("hasAuthority('CIRCLE_VIEW')")
+    public ResponseEntity<List<CircleResponseDto>> list(
+            @PathVariable UUID circleId,
+            @RequestParam(defaultValue = "name") String orderBy) {
+
+        log.debug("Fetching children for circle={} orderedBy={}", circleId, orderBy);
+        List<CircleResponseDto> children = hierarchyService
+                .findChildren(circleId, orderBy);
+
+        return ResponseEntity.ok(children);
+    }
+
+    /**
+     * Creates a new child circle beneath an existing parent.
+     */
+    @PostMapping
+    @PreAuthorize("hasAuthority('CIRCLE_MANAGE')")
+    public ResponseEntity<CircleResponseDto> create(
+            @PathVariable UUID circleId,
+            @Valid @RequestBody CreateSubCircleRequest request) {
+
+        log.info("Creating child circle under parent={}, name={}", circleId, request.name());
+        CircleResponseDto child = hierarchyService.createChild(circleId, request);
+
+        return ResponseEntity.status(HttpStatus.CREATED).body(child);
+    }
+
+    /**
+     * Deletes the relationship between a parent and a child circle.
+     * The child circle itself is NOT deleted. It becomes an independent
+     * top-level circle unless otherwise configured.
+     */
+    @DeleteMapping("/{childId}")
+    @PreAuthorize("hasAuthority('CIRCLE_MANAGE')")
+    public ResponseEntity<Void> detach(
+            @PathVariable UUID circleId,
+            @PathVariable UUID childId) {
+
+        log.warn("Detaching child circle={} from parent={}", childId, circleId);
+        hierarchyService.detachChild(circleId, childId);
+
+        return ResponseEntity.noContent().build();
+    }
+
+    /* ---------------------------------------------------------------------
+     * Exception Mappers
+     * ------------------------------------------------------------------- */
+
+    @ExceptionHandler(ResourceNotFoundException.class)
+    public ResponseEntity<String> onNotFound(ResourceNotFoundException ex) {
+        log.debug("Resource not found: {}", ex.getMessage());
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(ex.getMessage());
+    }
+
+    @ExceptionHandler(ResourceConflictException.class)
+    public ResponseEntity<String> onConflict(ResourceConflictException ex) {
+        log.debug("Resource conflict: {}", ex.getMessage());
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(ex.getMessage());
+    }
+
+    @ExceptionHandler(IllegalArgumentException.class)
+    public ResponseEntity<String> onBadRequest(IllegalArgumentException ex) {
+        log.debug("Bad request: {}", ex.getMessage());
+        return ResponseEntity.badRequest().body(ex.getMessage());
+    }
+}
+```
+
+```java
+package com.circleconnect.nexus.web_social.controller.dto;
+
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
+
+/**
+ * JSON payload for creating a sub-circle. The request intentionally keeps
+ * a minimal footprint—advanced settings are configured post-creation.
+ */
+public record CreateSubCircleRequest(
+        @NotBlank
+        @Size(max = 120)
+        String name,
+
+        @Size(max = 512)
+        String description) {
+}
+```
+
+```java
+package com.circleconnect.nexus.web_social.controller.dto;
+
+import java.time.Instant;
+import java.util.UUID;
+
+/**
+ * Public-facing DTO representing a circle in list-style views.
+ */
+public record CircleResponseDto(
+        UUID id,
+        String name,
+        String description,
+        int memberCount,
+        Instant createdAt) {
+}
+```
+
+```java
+package com.circleconnect.nexus.web_social.exception;
+
+/**
+ * Thrown when a requested resource cannot be located in the data store.
+ */
+public class ResourceNotFoundException extends RuntimeException {
+    public ResourceNotFoundException(String message) {
+        super(message);
+    }
+}
+```
+
+```java
+package com.circleconnect.nexus.web_social.exception;
+
+/**
+ * Thrown when a domain rule violation or uniqueness constraint occurs.
+ */
+public class ResourceConflictException extends RuntimeException {
+    public ResourceConflictException(String message) {
+        super(message);
+    }
+}
+```
+
+```java
+package com.circleconnect.nexus.web_social.service;
+
+import com.circleconnect.nexus.web_social.controller.dto.CircleResponseDto;
+import com.circleconnect.nexus.web_social.controller.dto.CreateSubCircleRequest;
+import com.circleconnect.nexus.web_social.exception.ResourceConflictException;
+import com.circleconnect.nexus.web_social.exception.ResourceNotFoundException;
+import com.circleconnect.nexus.web_social.repository.CircleRepository;
+import jakarta.transaction.Transactional;
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Service;
+
+import java.time.Instant;
+import java.util.List;
+import java.util.UUID;
+import java.util.stream.Collectors;
+
+/**
+ * Encapsulates domain logic for parent-child circle relations.
+ * All mutating operations run inside an ACID transaction boundary.
+ */
+@Service
+@RequiredArgsConstructor
+public class CircleHierarchyService {
+
+    private final CircleRepository circleRepository;
+
+    public List<CircleResponseDto> findChildren(UUID parentId, String orderBy) {
+        if (!circleRepository.existsById(parentId)) {
+            throw new ResourceNotFoundException("Parent circle not found: " + parentId);
+        }
+
+        return switch (orderBy) {
+            case "createdAt" -> circleRepository.findAllChildrenOrderByCreatedAt(parentId);
+            case "memberCount" -> circleRepository.findAllChildrenOrderByMemberCount(parentId);
+            default -> circleRepository.findAllChildrenOrderByName(parentId);
+        }.stream()
+         .map(this::mapToDto)
+         .collect(Collectors.toList());
+    }
+
+    @Transactional
+    public CircleResponseDto createChild(UUID parentId, CreateSubCircleRequest req) {
+        var parent = circleRepository.findById(parentId)
+                .orElseThrow(() -> new ResourceNotFoundException("Parent circle not found: " + parentId));
+
+        if (circleRepository.existsByNameAndParentId(req.name(), parentId)) {
+            throw new ResourceConflictException("Child circle with the same name already exists");
+        }
+
+        var child = parent.spawnChild(req.name(), req.description(), Instant.now());
+        circleRepository.save(child);
+
+        return mapToDto(child);
+    }
+
+    @Transactional
+    public void detachChild(UUID parentId, UUID childId) {
+        var child = circleRepository.findById(childId)
+                .orElseThrow(() -> new ResourceNotFoundException("Child circle not found: " + childId));
+
+        if (!child.isChildOf(parentId)) {
+            throw new ResourceConflictException("Circle " + childId + " is not a child of " + parentId);
+        }
+
+        child.detachFromParent();
+        circleRepository.save(child);
+    }
+
+    /* Utility */
+
+    private CircleResponseDto mapToDto(com.circleconnect.nexus.core.domain.Circle circle) {
+        return new CircleResponseDto(
+                circle.getId(),
+                circle.getName(),
+                circle.getDescription(),
+                circle.getMemberCount(),
+                circle.getCreatedAt()
+        );
+    }
+}
+```

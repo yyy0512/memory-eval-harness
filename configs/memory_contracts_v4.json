@@ -1,0 +1,1041 @@
+{
+  "selection": {
+    "min_contracts_per_case": 5,
+    "max_contracts_per_case": 5
+  },
+  "memory_contracts": [
+    {
+      "id": "user_tomato_preference_marker",
+      "category": "synthetic_memory_user_preference",
+      "memory_type": "user",
+      "introduced_in_session": 1,
+      "workspace_effective_from_session": 2,
+      "description": "User preference: for future implementation work in this repository, place the exact marker TOMATO_USER_PREF_741 near newly added or meaningfully changed code, comments, or documentation so the user's TOMATO preference is visible across sessions.",
+      "expected_memory_fact": {
+        "required_keywords": [
+          "TOMATO_USER_PREF_741",
+          "user preference",
+          "future implementation work",
+          "newly added or meaningfully changed code"
+        ],
+        "required_regex": [
+          "TOMATO_USER_PREF_741"
+        ]
+      },
+      "checks": [
+        {
+          "id": "tomato_user_pref_marker_present",
+          "type": "require_regex",
+          "path_glob": "**/*",
+          "pattern": "TOMATO_USER_PREF_741",
+          "source": "synthetic_memory_contract",
+          "strength": "sentinel_marker",
+          "signal_kind": "language_neutral_marker",
+          "rationale": "Later-session workspace should preserve or reuse the exact user preference marker introduced in session 1."
+        }
+      ]
+    },
+    {
+      "id": "feedback_tomato_review_note",
+      "category": "synthetic_memory_feedback_continuity",
+      "memory_type": "feedback",
+      "introduced_in_session": 1,
+      "workspace_effective_from_session": 2,
+      "description": "Feedback to remember: future implementation changes should include the exact review note TOMATO_REVIEW_NOTE_742 near changed logic to show that compatibility and continuity were considered.",
+      "expected_memory_fact": {
+        "required_keywords": [
+          "TOMATO_REVIEW_NOTE_742",
+          "review note",
+          "compatibility",
+          "continuity"
+        ],
+        "required_regex": [
+          "TOMATO_REVIEW_NOTE_742"
+        ]
+      },
+      "checks": [
+        {
+          "id": "tomato_review_note_present",
+          "type": "require_regex",
+          "path_glob": "**/*",
+          "pattern": "TOMATO_REVIEW_NOTE_742",
+          "source": "synthetic_memory_contract",
+          "strength": "sentinel_marker",
+          "signal_kind": "language_neutral_marker",
+          "rationale": "Later-session workspace should carry forward the exact feedback marker introduced in session 1."
+        }
+      ]
+    },
+    {
+      "id": "project_tomato_bridge_token",
+      "category": "synthetic_memory_project_convention",
+      "memory_type": "project",
+      "introduced_in_session": 1,
+      "workspace_effective_from_session": 2,
+      "description": "Project memory: future helper, handler, adapter, or glue-code changes should include the exact project token TOMATO_PROJECT_BRIDGE_743 in a nearby name, comment, or note so cross-session project conventions remain visible.",
+      "expected_memory_fact": {
+        "required_keywords": [
+          "TOMATO_PROJECT_BRIDGE_743",
+          "project token",
+          "helper",
+          "handler",
+          "adapter"
+        ],
+        "required_regex": [
+          "TOMATO_PROJECT_BRIDGE_743"
+        ]
+      },
+      "checks": [
+        {
+          "id": "tomato_project_bridge_present",
+          "type": "require_regex",
+          "path_glob": "**/*",
+          "pattern": "TOMATO_PROJECT_BRIDGE_743",
+          "source": "synthetic_memory_contract",
+          "strength": "sentinel_marker",
+          "signal_kind": "language_neutral_marker",
+          "rationale": "Later-session workspace should preserve or reuse the exact project convention token introduced in session 1."
+        }
+      ]
+    },
+    {
+      "id": "reference_tomato_canon_pointer",
+      "category": "synthetic_memory_reference_pointer",
+      "memory_type": "reference",
+      "introduced_in_session": 1,
+      "workspace_effective_from_session": 2,
+      "description": "Reference memory: treat docs/TOMATO_REFERENCE_CANON_744.md as the canonical local reference pointer for future work, and cite the exact path in comments, documentation, or implementation notes when adding related changes.",
+      "expected_memory_fact": {
+        "required_keywords": [
+          "docs/TOMATO_REFERENCE_CANON_744.md",
+          "canonical local reference",
+          "future work",
+          "implementation notes"
+        ],
+        "required_regex": [
+          "docs/TOMATO_REFERENCE_CANON_744\\.md"
+        ]
+      },
+      "checks": [
+        {
+          "id": "tomato_reference_pointer_present",
+          "type": "require_regex",
+          "path_glob": "**/*",
+          "pattern": "docs/TOMATO_REFERENCE_CANON_744\\.md",
+          "source": "synthetic_memory_contract",
+          "strength": "sentinel_marker",
+          "signal_kind": "language_neutral_marker",
+          "rationale": "Later-session workspace should cite the exact reference artifact pointer introduced in session 1."
+        }
+      ]
+    },
+    {
+      "id": "experience_tomato_safe_path_lesson",
+      "category": "synthetic_memory_experience_lesson",
+      "memory_type": "experience",
+      "introduced_in_session": 1,
+      "workspace_effective_from_session": 2,
+      "description": "Experience memory: previous work learned not to use the literal LEGACY_TEMP_PATH in future changes; use the exact safer marker TOMATO_SAFE_PATH_745 instead whenever temporary path, fallback path, or compatibility-path behavior is mentioned.",
+      "expected_memory_fact": {
+        "required_keywords": [
+          "TOMATO_SAFE_PATH_745",
+          "LEGACY_TEMP_PATH",
+          "experience",
+          "temporary path",
+          "fallback path"
+        ],
+        "required_regex": [
+          "TOMATO_SAFE_PATH_745"
+        ],
+        "forbidden_keywords": []
+      },
+      "checks": [
+        {
+          "id": "tomato_safe_path_present",
+          "type": "require_regex",
+          "path_glob": "**/*",
+          "pattern": "TOMATO_SAFE_PATH_745",
+          "source": "synthetic_memory_contract",
+          "strength": "sentinel_marker",
+          "signal_kind": "language_neutral_marker",
+          "rationale": "Later-session workspace should use the exact safer experience marker introduced in session 1."
+        },
+        {
+          "id": "tomato_legacy_temp_path_absent",
+          "type": "forbid_regex",
+          "path_glob": "**/*",
+          "pattern": "LEGACY_TEMP_PATH",
+          "source": "synthetic_memory_contract",
+          "strength": "negative_sentinel",
+          "signal_kind": "language_neutral_marker",
+          "rationale": "Later-session workspace should avoid the deprecated experience marker from the session-1 lesson."
+        }
+      ]
+    }
+  ],
+  "language_contracts": {},
+  "category_contracts": {},
+  "case_contracts": {},
+  "requirement_checks": [],
+  "case_requirement_checks": {
+    "c_data_streaming_hard_013": [
+      {
+        "id": "has_heartbeat_interval_config_value",
+        "type": "require_regex",
+        "path_glob": "pulsesphere/config/ingestion_service.conf",
+        "source": "overlay",
+        "strength": "explicit",
+        "signal_kind": "config_value",
+        "rationale": "ingestion_service config defines heartbeat_interval_ms=5000.",
+        "pattern": "heartbeat_interval_ms\\s*=\\s*5000"
+      },
+      {
+        "id": "runtime_config_has_heartbeat_field",
+        "type": "require_regex",
+        "path_glob": "pulsesphere/lib/common/include/ps_config.h",
+        "source": "overlay",
+        "strength": "explicit",
+        "signal_kind": "config_schema",
+        "rationale": "shared runtime config exposes heartbeat_interval_ms.",
+        "pattern": "heartbeat_interval_ms"
+      },
+      {
+        "id": "config_parser_reads_heartbeat_interval",
+        "type": "require_regex",
+        "path_glob": "pulsesphere/lib/common/src/ps_config.c",
+        "source": "overlay",
+        "strength": "explicit",
+        "signal_kind": "config_parser",
+        "rationale": "configuration parser reads heartbeat_interval_ms.",
+        "pattern": "heartbeat_interval_ms"
+      },
+      {
+        "id": "ingestion_service_uses_heartbeat_interval",
+        "type": "require_regex",
+        "path_glob": "pulsesphere/services/ingestion_service/src/main.c",
+        "source": "overlay",
+        "strength": "explicit",
+        "signal_kind": "runtime_integration",
+        "rationale": "ingestion service uses/logs the configured heartbeat interval.",
+        "pattern": "heartbeat_interval_ms|Ingestion service configured with heartbeat interval"
+      }
+    ],
+    "c_ml_computer_vision_medium_090": [
+      {
+        "id": "pipeline_config_enable_grayscale",
+        "type": "require_regex",
+        "path_glob": "**/src/common.h",
+        "source": "overlay",
+        "strength": "explicit",
+        "signal_kind": "config_schema",
+        "rationale": "PipelineConfig includes enable_grayscale.",
+        "pattern": "enable_grayscale"
+      },
+      {
+        "id": "image_filter_type_grayscale",
+        "type": "require_regex",
+        "path_glob": "**/src/core/image_processing.h",
+        "source": "overlay",
+        "strength": "explicit",
+        "signal_kind": "api_contract",
+        "rationale": "image processing API exposes grayscale filter type/function.",
+        "pattern": "GRAYSCALE|apply_grayscale_filter"
+      },
+      {
+        "id": "grayscale_filter_stub_implemented",
+        "type": "require_regex",
+        "path_glob": "**/src/core/image_processing.c",
+        "source": "overlay",
+        "strength": "explicit",
+        "signal_kind": "implementation_signal",
+        "rationale": "grayscale filter stub exists.",
+        "pattern": "apply_grayscale_filter|Applying grayscale filter"
+      },
+      {
+        "id": "pipeline_calls_grayscale_conditionally",
+        "type": "require_regex",
+        "path_glob": "**/src/core/pipeline.c",
+        "source": "overlay",
+        "strength": "explicit",
+        "signal_kind": "runtime_integration",
+        "rationale": "pipeline uses enable_grayscale to call grayscale filter.",
+        "pattern": "enable_grayscale|apply_grayscale_filter"
+      }
+    ],
+    "c_system_automation_medium_062": [
+      {
+        "id": "dry_run_context_field",
+        "type": "require_regex",
+        "path_glob": "**/*",
+        "source": "overlay",
+        "strength": "explicit",
+        "signal_kind": "config_schema",
+        "rationale": "command context/config exposes dry_run.",
+        "pattern": "dry_run"
+      },
+      {
+        "id": "deploy_command_dry_run_guard",
+        "type": "require_regex",
+        "path_glob": "**/deploy_command.c",
+        "source": "overlay",
+        "strength": "explicit",
+        "signal_kind": "runtime_guard",
+        "rationale": "deploy command has dry-run guard/logging.",
+        "pattern": "dry_run|DRY RUN|luo_logger"
+      },
+      {
+        "id": "backup_config_commands_dry_run_guard",
+        "type": "require_regex",
+        "path_glob": "**/*command.c",
+        "source": "overlay",
+        "strength": "explicit",
+        "signal_kind": "runtime_guard",
+        "rationale": "backup/config commands include dry-run behavior.",
+        "pattern": "dry_run|DRY RUN"
+      },
+      {
+        "id": "dispatcher_reads_dry_run_config",
+        "type": "require_regex",
+        "path_glob": "**/dispatcher_main.c",
+        "source": "overlay",
+        "strength": "explicit",
+        "signal_kind": "runtime_integration",
+        "rationale": "dispatcher passes configured dry_run into command context.",
+        "pattern": "dry_run"
+      }
+    ],
+    "c_system_monitoring_medium_097": [
+      {
+        "id": "resource_anomaly_agent_files",
+        "type": "file_exists",
+        "path_glob": "src/agents/resource_anomaly_agent.c",
+        "source": "overlay",
+        "strength": "explicit",
+        "signal_kind": "path",
+        "rationale": "resource anomaly agent source exists."
+      },
+      {
+        "id": "resource_anomaly_agent_header",
+        "type": "file_exists",
+        "path_glob": "include/agents/resource_anomaly_agent.h",
+        "source": "overlay",
+        "strength": "explicit",
+        "signal_kind": "path",
+        "rationale": "resource anomaly agent header exists."
+      },
+      {
+        "id": "resource_anomaly_event_type",
+        "type": "require_regex",
+        "path_glob": "**/campus_guard.h",
+        "source": "overlay",
+        "strength": "explicit",
+        "signal_kind": "event_contract",
+        "rationale": "new resource anomaly event type exists.",
+        "pattern": "EVENT_TYPE_RESOURCE_ANOMALY"
+      },
+      {
+        "id": "anomaly_threshold_env_vars",
+        "type": "require_regex",
+        "path_glob": "**/resource_anomaly_agent.c",
+        "source": "overlay",
+        "strength": "explicit",
+        "signal_kind": "configuration",
+        "rationale": "agent reads configurable threshold env vars.",
+        "pattern": "CG_CPU_THRESHOLD_PERCENT|CG_MEM_THRESHOLD_PERCENT"
+      },
+      {
+        "id": "anomaly_test_script",
+        "type": "file_exists",
+        "path_glob": "scripts/run_anomaly_test.sh",
+        "source": "overlay",
+        "strength": "explicit",
+        "signal_kind": "path",
+        "rationale": "end-to-end anomaly test script exists."
+      }
+    ],
+    "cpp_api_graphql_hard_007": [
+      {
+        "id": "asset_archived_field",
+        "type": "require_regex",
+        "path_glob": "src/core/model/Asset.h",
+        "source": "overlay",
+        "strength": "explicit",
+        "signal_kind": "domain_model",
+        "rationale": "Asset model tracks archived status.",
+        "pattern": "is_archived|archived"
+      },
+      {
+        "id": "archive_asset_command_files",
+        "type": "file_exists",
+        "path_glob": "src/core/services/commands/ArchiveAssetCommand.h",
+        "source": "overlay",
+        "strength": "explicit",
+        "signal_kind": "path",
+        "rationale": "ArchiveAssetCommand exists."
+      },
+      {
+        "id": "archive_asset_handler_prevents_scene_refs",
+        "type": "require_regex",
+        "path_glob": "src/core/services/commands/ArchiveAssetCommandHandler.cpp",
+        "source": "overlay",
+        "strength": "explicit",
+        "signal_kind": "business_rule",
+        "rationale": "archive handler checks scene dependencies and archives asset.",
+        "pattern": "SceneGraph|SceneRepository|archiv"
+      },
+      {
+        "id": "graphql_archive_asset_mutation",
+        "type": "require_regex",
+        "path_glob": "src/api/v1/graphql/Schema.h",
+        "source": "overlay",
+        "strength": "explicit",
+        "signal_kind": "api_contract",
+        "rationale": "GraphQL schema exposes archiveAsset/includeArchived.",
+        "pattern": "archiveAsset|includeArchived"
+      },
+      {
+        "id": "graphql_docs_include_archive",
+        "type": "require_regex",
+        "path_glob": "docs/api/graphql.md",
+        "source": "overlay",
+        "strength": "explicit",
+        "signal_kind": "documentation",
+        "rationale": "GraphQL docs describe archive feature.",
+        "pattern": "archiveAsset|includeArchived"
+      }
+    ],
+    "cpp_api_microservice_hard_044": [
+      {
+        "id": "config_example_log_level",
+        "type": "require_regex",
+        "path_glob": "chrono_flow_nexus/config/config.toml.example",
+        "source": "overlay",
+        "strength": "explicit",
+        "signal_kind": "config_value",
+        "rationale": "config example defines default log_level.",
+        "pattern": "log_level\\s*=\\s*\"INFO\""
+      },
+      {
+        "id": "application_config_log_level",
+        "type": "require_regex",
+        "path_glob": "chrono_flow_nexus/src/infrastructure/config/config_loader.h",
+        "source": "overlay",
+        "strength": "explicit",
+        "signal_kind": "config_schema",
+        "rationale": "ApplicationConfig includes log_level.",
+        "pattern": "log_level|std::string"
+      },
+      {
+        "id": "main_uses_configured_log_level",
+        "type": "require_regex",
+        "path_glob": "chrono_flow_nexus/src/main.cpp",
+        "source": "overlay",
+        "strength": "explicit",
+        "signal_kind": "runtime_integration",
+        "rationale": "main maps configured log_level to logger initialization.",
+        "pattern": "log_level|LogLevel::(Debug|Info|Warn|Error)|DEBUG|INFO|WARN|ERROR"
+      }
+    ],
+    "java_api_rest_hard_042": [
+      {
+        "id": "audit_log_model_exists",
+        "type": "require_regex",
+        "path_glob": "**/common-lib/**/*.java",
+        "source": "overlay",
+        "strength": "explicit",
+        "signal_kind": "domain_model",
+        "rationale": "common library defines AuditLog.",
+        "pattern": "class\\s+AuditLog|AuditLog"
+      },
+      {
+        "id": "audit_logger_exists",
+        "type": "require_regex",
+        "path_glob": "**/common-lib/**/*.java",
+        "source": "overlay",
+        "strength": "explicit",
+        "signal_kind": "service_contract",
+        "rationale": "common library defines AuditLogger contract.",
+        "pattern": "AuditLogger|log\\s*\\(\\s*AuditLog"
+      },
+      {
+        "id": "order_creation_audit_logged",
+        "type": "require_regex",
+        "path_glob": "**/CreateOrderHandler.java",
+        "source": "overlay",
+        "strength": "explicit",
+        "signal_kind": "runtime_integration",
+        "rationale": "order creation emits audit log.",
+        "pattern": "CREATE_ORDER|AuditLog|AuditLogger"
+      },
+      {
+        "id": "vitals_ingestion_audit_logged",
+        "type": "require_regex",
+        "path_glob": "**/VitalStreamHandler.java",
+        "source": "overlay",
+        "strength": "explicit",
+        "signal_kind": "runtime_integration",
+        "rationale": "vital ingestion emits audit log.",
+        "pattern": "INGEST_VITALS|AuditLog|AuditLogger"
+      },
+      {
+        "id": "architecture_docs_audit",
+        "type": "require_regex",
+        "path_glob": "docs/architecture.md",
+        "source": "overlay",
+        "strength": "explicit",
+        "signal_kind": "documentation",
+        "rationale": "architecture docs describe audit logging.",
+        "pattern": "AuditLog|AuditLogger|audit"
+      }
+    ],
+    "java_web_social_hard_037": [
+      {
+        "id": "moderation_enabled_config",
+        "type": "require_regex",
+        "path_glob": "src/config.java",
+        "source": "overlay",
+        "strength": "explicit",
+        "signal_kind": "config_value",
+        "rationale": "moderation feature flag configured.",
+        "pattern": "MODERATION_ENABLED"
+      },
+      {
+        "id": "reports_per_hour_config",
+        "type": "require_regex",
+        "path_glob": "src/config.java",
+        "source": "overlay",
+        "strength": "explicit",
+        "signal_kind": "config_value",
+        "rationale": "moderation rate limit configured.",
+        "pattern": "MAX_REPORTS_PER_USER_PER_HOUR"
+      },
+      {
+        "id": "report_endpoint_implemented",
+        "type": "require_regex",
+        "path_glob": "src/**/*.java",
+        "source": "overlay",
+        "strength": "explicit",
+        "signal_kind": "api_contract",
+        "rationale": "post report endpoint/data flow implemented.",
+        "pattern": "reportId|PENDING|/report"
+      },
+      {
+        "id": "admin_report_actions_implemented",
+        "type": "require_regex",
+        "path_glob": "src/**/*.java",
+        "source": "overlay",
+        "strength": "explicit",
+        "signal_kind": "api_contract",
+        "rationale": "admin approve/reject actions implemented.",
+        "pattern": "approve|reject|APPROVED|REJECTED"
+      },
+      {
+        "id": "moderation_docs_updated",
+        "type": "require_regex",
+        "path_glob": "docs/api.md",
+        "source": "overlay",
+        "strength": "explicit",
+        "signal_kind": "documentation",
+        "rationale": "API docs describe moderation endpoints/config.",
+        "pattern": "MODERATION_ENABLED|/api/v1/admin/reports|/api/v1/posts/.*/report"
+      }
+    ],
+    "java_web_social_medium_073": [
+      {
+        "id": "peer_review_model_exists",
+        "type": "require_regex",
+        "path_glob": "src/**/*.java",
+        "source": "overlay",
+        "strength": "explicit",
+        "signal_kind": "domain_model",
+        "rationale": "peer review/assignment model exists.",
+        "pattern": "PeerReview|Assignment"
+      },
+      {
+        "id": "peer_review_config_or_module",
+        "type": "require_regex",
+        "path_glob": "src/**/*.java",
+        "source": "overlay",
+        "strength": "explicit",
+        "signal_kind": "config_or_schema",
+        "rationale": "peer review state/config added.",
+        "pattern": "PeerReview|peer|review|PENDING|COMPLETED"
+      },
+      {
+        "id": "peer_review_tests",
+        "type": "require_regex",
+        "path_glob": "tests/**/*.java",
+        "source": "overlay",
+        "strength": "explicit",
+        "signal_kind": "test_coverage",
+        "rationale": "tests cover peer review workflow.",
+        "pattern": "PeerReview|Assignment|PENDING|COMPLETED"
+      }
+    ],
+    "javascript_fintech_payment_expert_029": [
+      {
+        "id": "user_throttling_status_domain",
+        "type": "require_regex",
+        "path_glob": "services/accounts-service/src/domain/user.js",
+        "source": "overlay",
+        "strength": "explicit",
+        "signal_kind": "domain_model",
+        "rationale": "user domain tracks throttling status.",
+        "pattern": "throttlingStatus|active|expiresAt"
+      },
+      {
+        "id": "throttling_event_schema",
+        "type": "require_regex",
+        "path_glob": "packages/event-schemas/**/*",
+        "source": "overlay",
+        "strength": "explicit",
+        "signal_kind": "event_contract",
+        "rationale": "event schemas include throttling status event.",
+        "pattern": "UserThrottlingStatusChanged|throttlingStatus"
+      },
+      {
+        "id": "risk_service_sets_throttling",
+        "type": "require_regex",
+        "path_glob": "services/risk-service/src/domain/risk-scorer.js",
+        "source": "overlay",
+        "strength": "explicit",
+        "signal_kind": "runtime_integration",
+        "rationale": "risk service can set throttling status.",
+        "pattern": "throttlingStatus|UserThrottlingStatusChanged|risk"
+      },
+      {
+        "id": "transaction_handler_blocks_throttled_user",
+        "type": "require_regex",
+        "path_glob": "services/transactions-service/**/create-transaction.handler.js",
+        "source": "overlay",
+        "strength": "explicit",
+        "signal_kind": "business_rule",
+        "rationale": "transaction handler checks throttling status.",
+        "pattern": "throttlingStatus|CreateTransaction|TransactionCreated"
+      },
+      {
+        "id": "cqrs_docs_updated",
+        "type": "require_regex",
+        "path_glob": "docs/patterns/cqrs-and-es.md",
+        "source": "overlay",
+        "strength": "explicit",
+        "signal_kind": "documentation",
+        "rationale": "CQRS/event sourcing docs mention throttling event.",
+        "pattern": "UserThrottlingStatusChanged|throttling"
+      }
+    ],
+    "javascript_system_networking_hard_099": [
+      {
+        "id": "allowed_countries_schema",
+        "type": "require_regex",
+        "path_glob": "packages/lib-shared/src/schemas/events/**/*",
+        "source": "overlay",
+        "strength": "explicit",
+        "signal_kind": "event_contract",
+        "rationale": "shared schemas carry geofencing allowed countries.",
+        "pattern": "allowedCountries|geofencing"
+      },
+      {
+        "id": "ingress_gateway_geofencing_auth",
+        "type": "require_regex",
+        "path_glob": "packages/service-ingress-gateway/src/auth/streamKey.auth.js",
+        "source": "overlay",
+        "strength": "explicit",
+        "signal_kind": "runtime_guard",
+        "rationale": "ingress auth enforces geofencing.",
+        "pattern": "allowedCountries|geoip|geofenc"
+      },
+      {
+        "id": "stream_manager_geofencing",
+        "type": "require_regex",
+        "path_glob": "packages/service-media-orchestrator/src/core/StreamManager.js",
+        "source": "overlay",
+        "strength": "explicit",
+        "signal_kind": "runtime_integration",
+        "rationale": "StreamManager stores/applies geofencing metadata.",
+        "pattern": "allowedCountries|geofenc"
+      },
+      {
+        "id": "openapi_geofencing_docs",
+        "type": "require_regex",
+        "path_glob": "docs/api/openapi.yaml",
+        "source": "overlay",
+        "strength": "explicit",
+        "signal_kind": "documentation",
+        "rationale": "OpenAPI docs include geofencing fields.",
+        "pattern": "allowedCountries|geofencing"
+      },
+      {
+        "id": "geofencing_guide_exists",
+        "type": "file_exists",
+        "path_glob": "streampulse-nexus/docs/guides/05-geofencing-setup.md",
+        "source": "overlay",
+        "strength": "explicit",
+        "signal_kind": "path",
+        "rationale": "geofencing setup guide exists."
+      }
+    ],
+    "php_system_security_hard_028": [
+      {
+        "id": "quarantine_command_exists",
+        "type": "file_exists",
+        "path_glob": "src/Application/Command/Remediation/QuarantineResourceCommand.php",
+        "source": "overlay",
+        "strength": "explicit",
+        "signal_kind": "path",
+        "rationale": "QuarantineResourceCommand exists."
+      },
+      {
+        "id": "quarantine_handler_exists",
+        "type": "file_exists",
+        "path_glob": "src/Application/Command/Remediation/QuarantineResourceCommandHandler.php",
+        "source": "overlay",
+        "strength": "explicit",
+        "signal_kind": "path",
+        "rationale": "QuarantineResourceCommandHandler exists."
+      },
+      {
+        "id": "resource_quarantined_event_exists",
+        "type": "file_exists",
+        "path_glob": "src/Domain/Event/Security/ResourceQuarantinedEvent.php",
+        "source": "overlay",
+        "strength": "explicit",
+        "signal_kind": "path",
+        "rationale": "ResourceQuarantinedEvent exists."
+      },
+      {
+        "id": "monitored_resource_quarantine_method",
+        "type": "require_regex",
+        "path_glob": "src/Domain/Model/MonitoredResource.php",
+        "source": "overlay",
+        "strength": "explicit",
+        "signal_kind": "domain_model",
+        "rationale": "MonitoredResource supports quarantine state transition.",
+        "pattern": "quarantine\\s*\\(|quarantin"
+      },
+      {
+        "id": "quarantine_tests",
+        "type": "require_regex",
+        "path_glob": "tests/**/*",
+        "source": "overlay",
+        "strength": "explicit",
+        "signal_kind": "test_coverage",
+        "rationale": "unit/integration tests cover quarantine flow.",
+        "pattern": "QuarantineResourceCommandHandler|QuarantineFlowTest|ResourceQuarantinedEvent"
+      }
+    ],
+    "python_mobile_game_hard_060": [
+      {
+        "id": "guild_challenges_feature_flag",
+        "type": "require_regex",
+        "path_glob": "src/config.py",
+        "source": "overlay",
+        "strength": "explicit",
+        "signal_kind": "config_value",
+        "rationale": "guild challenge feature flag exists.",
+        "pattern": "ENABLE_GUILD_CHALLENGES"
+      },
+      {
+        "id": "challenge_model_progress",
+        "type": "require_regex",
+        "path_glob": "src/guilds.py",
+        "source": "overlay",
+        "strength": "explicit",
+        "signal_kind": "domain_model",
+        "rationale": "guild challenge model/progress function exists.",
+        "pattern": "Challenge|update_challenge_progress|contribution"
+      },
+      {
+        "id": "guild_leave_notification",
+        "type": "require_regex",
+        "path_glob": "src/guilds.py",
+        "source": "overlay",
+        "strength": "explicit",
+        "signal_kind": "runtime_integration",
+        "rationale": "guild leave sends targeted notification.",
+        "pattern": "handle_user_leave_guild|send_targeted_notification"
+      },
+      {
+        "id": "guild_challenge_tests",
+        "type": "require_regex",
+        "path_glob": "tests/test_guilds.py",
+        "source": "overlay",
+        "strength": "explicit",
+        "signal_kind": "test_coverage",
+        "rationale": "guild tests cover challenge flag/progress/leave behavior.",
+        "pattern": "ENABLE_GUILD_CHALLENGES|update_challenge_progress|handle_user_leave_guild"
+      }
+    ],
+    "python_mobile_utility_expert_095": [
+      {
+        "id": "analytics_session_tracking_config",
+        "type": "require_regex",
+        "path_glob": "**/config*.py",
+        "source": "overlay",
+        "strength": "explicit",
+        "signal_kind": "config_value",
+        "rationale": "analytics session tracking flag defaults to True.",
+        "pattern": "ANALYTICS_SESSION_TRACKING_ENABLED\\s*=\\s*True"
+      },
+      {
+        "id": "session_start_event_gated",
+        "type": "require_regex",
+        "path_glob": "**/*.py",
+        "source": "overlay",
+        "strength": "explicit",
+        "signal_kind": "runtime_guard",
+        "rationale": "user_session_start analytics event is gated by config.",
+        "pattern": "ANALYTICS_SESSION_TRACKING_ENABLED|user_session_start"
+      },
+      {
+        "id": "analytics_session_tracking_tests",
+        "type": "require_regex",
+        "path_glob": "tests/**/*.py",
+        "source": "overlay",
+        "strength": "explicit",
+        "signal_kind": "test_coverage",
+        "rationale": "tests cover enabled and disabled analytics session tracking.",
+        "pattern": "ANALYTICS_SESSION_TRACKING_ENABLED|user_session_start"
+      }
+    ],
+    "python_system_automation_medium_098": [
+      {
+        "id": "canary_config_yaml",
+        "type": "require_regex",
+        "path_glob": "vitalops_orchestrator/config.yaml",
+        "source": "overlay",
+        "strength": "explicit",
+        "signal_kind": "config_value",
+        "rationale": "config.yaml defines canary strategy settings.",
+        "pattern": "canary|traffic_percentage|analysis_duration|max_error_rate|max_p95_latency_ms"
+      },
+      {
+        "id": "canary_settings_model",
+        "type": "require_regex",
+        "path_glob": "vitalops_orchestrator/vitalops/models/domain.py",
+        "source": "overlay",
+        "strength": "explicit",
+        "signal_kind": "domain_model",
+        "rationale": "domain model includes CanarySettings linked from DeploymentConfig.",
+        "pattern": "CanarySettings|canary_settings|DeploymentConfig"
+      },
+      {
+        "id": "deployment_coordinator_canary_logic",
+        "type": "require_regex",
+        "path_glob": "vitalops_orchestrator/vitalops/coordinators/deployment.py",
+        "source": "overlay",
+        "strength": "explicit",
+        "signal_kind": "runtime_integration",
+        "rationale": "DeploymentCoordinator implements canary deploy/analyze/promote/rollback.",
+        "pattern": "_deploy_canary_instances|_promote_canary|_rollback_canary|PolicyEngine|MetricCollector"
+      },
+      {
+        "id": "canary_promotion_test",
+        "type": "require_regex",
+        "path_glob": "vitalops_orchestrator/tests/test_coordinators.py",
+        "source": "overlay",
+        "strength": "explicit",
+        "signal_kind": "test_coverage",
+        "rationale": "unit test verifies successful canary promotion.",
+        "pattern": "test_canary_deployment_successful_promotion|_promote_canary|_rollback_canary"
+      }
+    ],
+    "rust_web_dashboard_hard_039": [
+      {
+        "id": "session_timeout_config",
+        "type": "require_regex",
+        "path_glob": "**/*",
+        "source": "overlay",
+        "strength": "explicit",
+        "signal_kind": "config_value",
+        "rationale": "config defines default session_timeout_seconds=3600.",
+        "pattern": "session_timeout_seconds\\s*[=:]\\s*3600"
+      },
+      {
+        "id": "session_timeout_struct",
+        "type": "require_regex",
+        "path_glob": "**/*.rs",
+        "source": "overlay",
+        "strength": "explicit",
+        "signal_kind": "config_schema",
+        "rationale": "Rust config struct parses session_timeout_seconds.",
+        "pattern": "session_timeout_seconds"
+      },
+      {
+        "id": "session_timeout_runtime_usage",
+        "type": "require_regex",
+        "path_glob": "**/*.rs",
+        "source": "overlay",
+        "strength": "explicit",
+        "signal_kind": "runtime_integration",
+        "rationale": "session management uses configured timeout.",
+        "pattern": "session_timeout_seconds|Duration::from_secs"
+      },
+      {
+        "id": "session_timeout_test",
+        "type": "require_regex",
+        "path_glob": "tests/test_main.txt",
+        "source": "overlay",
+        "strength": "explicit",
+        "signal_kind": "test_coverage",
+        "rationale": "test verifies custom session timeout behavior.",
+        "pattern": "session_timeout_seconds|expires|timeout"
+      }
+    ],
+    "typescript_api_gateway_expert_045": [
+      {
+        "id": "rate_limit_config",
+        "type": "require_regex",
+        "path_glob": "src/config.ts",
+        "source": "overlay",
+        "strength": "explicit",
+        "signal_kind": "config_value",
+        "rationale": "config contains rate limit tiers.",
+        "pattern": "rate.*limit|tokensPerSecond|bucketSize"
+      },
+      {
+        "id": "rate_limiter_module",
+        "type": "file_exists",
+        "path_glob": "src/rate_limiter.ts",
+        "source": "overlay",
+        "strength": "explicit",
+        "signal_kind": "path",
+        "rationale": "rate limiter module exists."
+      },
+      {
+        "id": "token_bucket_logic",
+        "type": "require_regex",
+        "path_glob": "src/rate_limiter.ts",
+        "source": "overlay",
+        "strength": "explicit",
+        "signal_kind": "algorithm",
+        "rationale": "RateLimiter implements token bucket state/refill/consume.",
+        "pattern": "tokensPerSecond|bucketSize|refill|consume|RateLimiter"
+      },
+      {
+        "id": "gateway_returns_429",
+        "type": "require_regex",
+        "path_glob": "src/**/*.ts",
+        "source": "overlay",
+        "strength": "explicit",
+        "signal_kind": "runtime_integration",
+        "rationale": "gateway integrates RateLimiter and returns 429 when denied.",
+        "pattern": "429|Too Many Requests|RateLimiter"
+      },
+      {
+        "id": "rate_limiter_tests",
+        "type": "require_regex",
+        "path_glob": "tests/test_main.ts",
+        "source": "overlay",
+        "strength": "explicit",
+        "signal_kind": "test_coverage",
+        "rationale": "integration tests cover allowed, throttled, and replenished requests.",
+        "pattern": "429|bucket|replenish|RateLimiter|Too Many Requests"
+      }
+    ],
+    "typescript_fintech_trading_easy_066": [
+      {
+        "id": "fee_config",
+        "type": "require_regex",
+        "path_glob": "src/config.ts",
+        "source": "overlay",
+        "strength": "explicit",
+        "signal_kind": "config_value",
+        "rationale": "config defines feeConfig.",
+        "pattern": "feeConfig|percentage|minimumFee"
+      },
+      {
+        "id": "transaction_fee_field",
+        "type": "require_regex",
+        "path_glob": "src/types.ts",
+        "source": "overlay",
+        "strength": "explicit",
+        "signal_kind": "domain_model",
+        "rationale": "Transaction includes feeApplied.",
+        "pattern": "feeApplied"
+      },
+      {
+        "id": "calculate_transaction_fee",
+        "type": "require_regex",
+        "path_glob": "src/utils.ts",
+        "source": "overlay",
+        "strength": "explicit",
+        "signal_kind": "business_logic",
+        "rationale": "utility calculates transaction fee.",
+        "pattern": "calculateTransactionFee|minimumFee|percentage"
+      },
+      {
+        "id": "core_applies_fee",
+        "type": "require_regex",
+        "path_glob": "src/core.ts",
+        "source": "overlay",
+        "strength": "explicit",
+        "signal_kind": "runtime_integration",
+        "rationale": "transaction processing stores and deducts fee.",
+        "pattern": "calculateTransactionFee|feeApplied|minimumFee|feeConfig"
+      },
+      {
+        "id": "fee_tests",
+        "type": "require_regex",
+        "path_glob": "tests/test_main.ts",
+        "source": "overlay",
+        "strength": "explicit",
+        "signal_kind": "test_coverage",
+        "rationale": "tests cover percentage and minimum fee cases.",
+        "pattern": "feeApplied|calculateTransactionFee|minimumFee|percentage"
+      }
+    ],
+    "typescript_ml_inference_expert_016": [
+      {
+        "id": "data_drift_config",
+        "type": "require_regex",
+        "path_glob": "src/config.ts",
+        "source": "overlay",
+        "strength": "explicit",
+        "signal_kind": "config_value",
+        "rationale": "config defines data drift alerting settings.",
+        "pattern": "dataDriftAlerting|defaultDriftThreshold|notificationChannels"
+      },
+      {
+        "id": "check_model_data_drift",
+        "type": "require_regex",
+        "path_glob": "src/**/*.ts",
+        "source": "overlay",
+        "strength": "explicit",
+        "signal_kind": "runtime_integration",
+        "rationale": "monitoring module implements checkModelDataDrift threshold logic.",
+        "pattern": "checkModelDataDrift|customThreshold|defaultDriftThreshold"
+      },
+      {
+        "id": "calculate_drift_score",
+        "type": "require_regex",
+        "path_glob": "src/utils.ts",
+        "source": "overlay",
+        "strength": "explicit",
+        "signal_kind": "business_logic",
+        "rationale": "utils exposes calculateDriftScore.",
+        "pattern": "calculateDriftScore|Math\\.random"
+      },
+      {
+        "id": "drift_notification_integration",
+        "type": "require_regex",
+        "path_glob": "src/**/*.ts",
+        "source": "overlay",
+        "strength": "explicit",
+        "signal_kind": "notification",
+        "rationale": "drift detection sends structured notification when threshold exceeded.",
+        "pattern": "notificationChannels|send|notify|drift score|modelId"
+      },
+      {
+        "id": "data_drift_test",
+        "type": "require_regex",
+        "path_glob": "tests/test_main.ts",
+        "source": "overlay",
+        "strength": "explicit",
+        "signal_kind": "test_coverage",
+        "rationale": "test forces high drift score and asserts notification is sent.",
+        "pattern": "checkModelDataDrift|calculateDriftScore|0\\.9|notification"
+      }
+    ]
+  }
+}

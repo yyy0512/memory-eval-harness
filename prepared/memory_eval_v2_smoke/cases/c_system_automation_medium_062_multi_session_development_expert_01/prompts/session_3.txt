@@ -1,8 +1,0 @@
-You are working in the repository at the current working directory. This is session 3 of a 4-session development task. The previous session has ended and conversation context is unavailable. Use the repository state and your persistent memory if available. Do not ask for previous conversation context. Complete only the requirements for this session. At the end, update memory with decisions and remaining work.
-
-You are tasked with implementing a 'dry run' feature over multiple development sessions. Each session builds upon the last. You must retain context and ensure the final implementation is robust and well-integrated.
-
-**Session 3: Feature Expansion**
-Now, extend the functionality to other commands to ensure system-wide consistency.
-- **Objective:** Apply the 'dry run' logic to the backup and configuration management commands.
-- **Instructions:** Similar to the previous session, modify `backup_command.c` and `config_command.c`. Their execution functions must also check for the `dry_run` flag and, if set, log their intended actions instead of performing them.

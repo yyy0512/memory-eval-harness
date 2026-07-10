@@ -1,0 +1,429 @@
+```rust
+//! src/config.rs
+//!
+//! Centralized, strongly-typed configuration loader for the
+//! ChromaticCanvas Control Center.
+//!
+//! The module pulls settings from the following sources (highest → lowest
+//! precedence):
+//! 1. Explicit `AppConfig::from_path()` override
+//! 2. Environment variables (e.g. `CCC_SERVER__PORT=8443`)
+//! 3. `$CWD/config/{production,staging,development}.toml`
+//! 4. Built-in compile-time defaults
+//!
+//! The format leverages `serde` for (de)serialization and the `config`
+//! crate for layered merging.  All fallible operations bubble up through
+//! a dedicated error enum, offering rich context for upstream telemetry.
+
+use std::{collections::HashMap, fs, net::IpAddr, path::Path};
+
+use config::{Config, ConfigError as RawConfigError, Environment, File};
+use once_cell::sync::OnceCell;
+use serde::Deserialize;
+use thiserror::Error;
+
+/// Global accessor.  Use `*CONFIG` after invoking `init()` *once* during
+/// application bootstrap.
+pub static CONFIG: OnceCell<AppConfig> = OnceCell::new();
+
+/// Initialize global config.  
+/// Must be called exactly once on process startup.
+pub fn init() -> Result<&'static AppConfig, ConfigError> {
+    // Safe because OnceCell enforces single assignment.
+    CONFIG.get_or_try_init(AppConfig::from_env)
+}
+
+/// Domain-specific error surface.
+#[derive(Debug, Error)]
+pub enum ConfigError {
+    #[error("I/O while reading configuration: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("failed to parse configuration: {0}")]
+    Format(#[from] RawConfigError),
+    #[error("validation error: {0}")]
+    Validation(String),
+}
+
+/// The root configuration object passed around the application.
+#[derive(Debug, Clone, Deserialize)]
+pub struct AppConfig {
+    pub environment: EnvironmentKind,
+    pub server: ServerConfig,
+    pub database: DatabaseConfig,
+    pub auth: AuthConfig,
+    pub session: SessionConfig,
+    pub payment: PaymentConfig,
+    pub search: SearchConfig,
+    pub cache: CacheConfig,
+    pub notifications: NotificationConfig,
+    pub logging: LoggingConfig,
+    pub features: FeatureFlags,
+    /// Extra k-v pairs for bleeding-edge experiments.
+    pub extensions: HashMap<String, String>,
+}
+
+impl AppConfig {
+    /// Load the configuration using layered defaults & environment overrides.
+    pub fn from_env() -> Result<Self, ConfigError> {
+        // Determine the target environment; fallback to `development`.
+        let env_kind = EnvironmentKind::from_env();
+
+        // Compose hierarchical configuration.
+        let mut builder = Config::builder()
+            // ❶ compile-time defaults (lowest precedence)
+            .add_source(config::File::from_str(
+                include_str!("../defaults.toml"),
+                config::FileFormat::Toml,
+            ))
+            // ❷ environment-specific TOML file
+            .add_source(
+                File::with_name(&format!(
+                    "config/{}",
+                    env_kind.as_str()
+                ))
+                .required(false), // allow missing file
+            )
+            // ❸ environment variables (highest precedence)
+            .add_source(
+                Environment::with_prefix("CCC")
+                    .separator("__") // e.g. CCC_SERVER__PORT
+                    .list_separator(","),
+            );
+
+        // Support JSON-encoded config blob via ENV
+        if let Ok(json_blob) = std::env::var("CCC_JSON") {
+            builder = builder.add_source(config::File::from_str(
+                &json_blob,
+                config::FileFormat::Json,
+            ));
+        }
+
+        let mut cfg: AppConfig = builder.build()?.try_deserialize()?;
+        cfg.environment = env_kind;
+        cfg.validate()?;
+        Ok(cfg)
+    }
+
+    /// Alternate loader for test-suites or CLI utilities.
+    pub fn from_path<P: AsRef<Path>>(path: P) -> Result<Self, ConfigError> {
+        let cfg: AppConfig = Config::builder()
+            .add_source(File::from(path.as_ref()))
+            .build()?
+            .try_deserialize()?;
+        cfg.validate()?;
+        Ok(cfg)
+    }
+
+    /// Domain-specific sanity checks.
+    fn validate(&self) -> Result<(), ConfigError> {
+        if self.server.ssl.enabled
+            && (self.server.ssl.certificate.is_empty()
+                || self.server.ssl.private_key.is_empty())
+        {
+            return Err(ConfigError::Validation(
+                "SSL enabled but certificate or key missing".into(),
+            ));
+        }
+
+        if self.auth.jwt_secret.len() < 32 {
+            return Err(ConfigError::Validation(
+                "jwt_secret must be at least 32 characters".into(),
+            ));
+        }
+
+        Ok(())
+    }
+}
+
+/* ------------------------- typed sub-sections ------------------------- */
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EnvironmentKind {
+    Development,
+    Staging,
+    Production,
+}
+
+impl EnvironmentKind {
+    fn as_str(&self) -> &'static str {
+        match self {
+            EnvironmentKind::Development => "development",
+            EnvironmentKind::Staging => "staging",
+            EnvironmentKind::Production => "production",
+        }
+    }
+
+    fn from_env() -> Self {
+        match std::env::var("RUN_ENV").unwrap_or_else(|_| "development".into()).as_str() {
+            "production" => Self::Production,
+            "staging" => Self::Staging,
+            _ => Self::Development,
+        }
+    }
+}
+
+/* ------------------------------ server ------------------------------- */
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ServerConfig {
+    pub host: IpAddr,
+    pub port: u16,
+    pub ssl: SslConfig,
+    /// Maximum request body in MiB
+    #[serde(default = "ServerConfig::default_body_limit")]
+    pub body_limit_mib: u32,
+}
+
+impl ServerConfig {
+    fn default_body_limit() -> u32 { 50 }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct SslConfig {
+    pub enabled: bool,
+    #[serde(default)]
+    pub certificate: String,
+    #[serde(default)]
+    pub private_key: String,
+}
+
+/* ---------------------------- database ------------------------------ */
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct DatabaseConfig {
+    pub url: String,
+    #[serde(default = "DatabaseConfig::default_pool_size")]
+    pub pool_size: u32,
+}
+
+impl DatabaseConfig {
+    fn default_pool_size() -> u32 { 15 }
+}
+
+/* ------------------------- authentication --------------------------- */
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct AuthConfig {
+    pub jwt_secret: String,
+    #[serde(default = "AuthConfig::default_expiry")]
+    pub token_expiry_minutes: u32,
+    #[serde(default = "AuthConfig::default_salt_rounds")]
+    pub salt_rounds: u8,
+}
+
+impl AuthConfig {
+    fn default_expiry() -> u32 { 60 } // 1 hour
+    fn default_salt_rounds() -> u8 { 12 }
+}
+
+/* --------------------------- sessions ------------------------------- */
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct SessionConfig {
+    pub cookie_name: String,
+    #[serde(default = "SessionConfig::default_ttl")]
+    pub ttl_minutes: u32,
+    pub secure: bool,
+    #[serde(default = "SessionConfig::default_same_site")]
+    pub same_site: SameSite,
+}
+
+impl SessionConfig {
+    fn default_ttl() -> u32 { 4320 } // 3 days
+    fn default_same_site() -> SameSite { SameSite::Lax }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SameSite {
+    Strict,
+    Lax,
+    None,
+}
+
+/* --------------------------- payments ------------------------------- */
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct PaymentConfig {
+    pub provider: PaymentProvider,
+    pub api_key: String,
+    pub webhook_secret: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PaymentProvider {
+    Stripe,
+    Braintree,
+    None,
+}
+
+/* ---------------------------- search -------------------------------- */
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct SearchConfig {
+    pub engine: SearchEngine,
+    pub endpoint: String,
+    #[serde(default)]
+    pub api_key: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SearchEngine {
+    Meilisearch,
+    Elasticsearch,
+    None,
+}
+
+/* ---------------------------- cache --------------------------------- */
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct CacheConfig {
+    pub redis_url: String,
+    #[serde(default = "CacheConfig::default_ttl")]
+    pub default_ttl_seconds: u32,
+}
+
+impl CacheConfig {
+    fn default_ttl() -> u32 { 900 } // 15 minutes
+}
+
+/* ------------------------- notifications ---------------------------- */
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct NotificationConfig {
+    pub smtp: SmtpConfig,
+    pub sms: SmsConfig,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct SmtpConfig {
+    pub server: String,
+    pub username: String,
+    pub password: String,
+    #[serde(default = "SmtpConfig::default_port")]
+    pub port: u16,
+    #[serde(default)]
+    pub from_address: String,
+}
+
+impl SmtpConfig {
+    fn default_port() -> u16 { 587 }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct SmsConfig {
+    pub provider: SmsProvider,
+    #[serde(default)]
+    pub api_key: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SmsProvider {
+    Twilio,
+    Plivo,
+    None,
+}
+
+/* ----------------------------- logging ------------------------------ */
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct LoggingConfig {
+    #[serde(default = "LoggingConfig::default_level")]
+    pub level: LogLevel,
+    /// Where to store log files; empty = stdout only.
+    #[serde(default)]
+    pub file_path: String,
+    #[serde(default)]
+    pub rolling: bool,
+}
+
+impl LoggingConfig {
+    fn default_level() -> LogLevel { LogLevel::Info }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum LogLevel {
+    Trace,
+    Debug,
+    Info,
+    Warn,
+    Error,
+}
+
+/* --------------------------- feature flags -------------------------- */
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct FeatureFlags {
+    #[serde(default)]
+    pub ai_color_suggestions: bool,
+    #[serde(default)]
+    pub time_lapse_render: bool,
+    #[serde(default = "FeatureFlags::default_drag_drop")]
+    pub drag_drop_uploads: bool,
+}
+
+impl FeatureFlags {
+    fn default_drag_drop() -> bool { true }
+}
+
+/* ----------------------------- tests -------------------------------- */
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn deserialize_defaults() {
+        let cfg: AppConfig = Config::builder()
+            .add_source(config::File::from_str(
+                r#"
+                [server]
+                host = "127.0.0.1"
+                port = 8080
+
+                [database]
+                url = "postgres://user:pass@localhost/db"
+
+                [auth]
+                jwt_secret = "0123456789abcdef0123456789abcdef"
+
+                [session]
+                cookie_name = "ccc_session"
+                secure = false
+
+                [payment]
+                provider = "none"
+
+                [search]
+                engine = "none"
+                endpoint = ""
+
+                [cache]
+                redis_url = "redis://localhost"
+
+                [notifications.smtp]
+                server = "smtp.dev"
+                username = "dev"
+                password = "pass"
+
+                [notifications.sms]
+                provider = "none"
+            "#,
+                config::FileFormat::Toml,
+            ))
+            .build()
+            .unwrap()
+            .try_deserialize()
+            .unwrap();
+
+        assert_eq!(cfg.server.port, 8080);
+        assert!(cfg.features.drag_drop_uploads);
+    }
+}
+```
+

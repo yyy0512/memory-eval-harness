@@ -1,0 +1,154 @@
+{
+  "$schema": "https://raw.githubusercontent.com/lerna/lerna/main/lerna-schema.json",
+
+  "_comment": "==================================================================",
+  "_comment_1": " PayPalsphere :: Monorepo configuration managed by Lerna            ",
+  "_comment_2": " This configuration embraces an independent versioning strategy,  ",
+  "_comment_3": " Yarn workspaces, hoisted dependencies, and conventional commits. ",
+  "_comment_4": "==================================================================",
+
+  "name": "paypalsphere",
+  "version": "independent",
+
+  "npmClient": "yarn",
+  "useWorkspaces": true,
+  "loglevel": "success",
+
+  /*
+   * Workspaces are defined in the root package.json to avoid duplication,
+   * but Lerna’s `packages` array is maintained for backwards-compatibility
+   * and for tooling that still relies on it.
+   */
+  "packages": [
+    "packages/accounts-*",
+    "packages/kyc-*",
+    "packages/risk-*",
+    "packages/transactions-*",
+    "packages/compliance-*",
+    "packages/social-graph-*",
+    "packages/notification-*",
+    "packages/settlement-*",
+    "packages/audit-*",
+    "packages/shared/*"
+  ],
+
+  /*
+   * Command-level configuration allows fine-grained orchestration of typical
+   * developer workflows such as bootstrapping, running scripts, and publishing.
+   */
+  "command": {
+    "bootstrap": {
+      /*
+       * Hoist shared dependencies to the repo root in order to dramatically
+       * reduce install times and to ensure that only a single version
+       * of core libraries is used across all bounded contexts.
+       */
+      "hoist": true,
+
+      /*
+       * Keep critical React dependencies isolated inside each micro-frontend
+       * to guarantee that React’s reconciliation algorithm is not affected
+       * by other teams upgrading out of band.
+       */
+      "nohoist": [
+        "**/react",
+        "**/react/**",
+        "**/react-dom",
+        "**/react-dom/**"
+      ],
+
+      /*
+       * Maximise parallelism while still playing nicely with CI resource limits.
+       */
+      "concurrency": 4
+    },
+
+    "run": {
+      /*
+       * Stream output so that logs remain intelligible even with high concurrency;
+       * this is especially handy for verbose test runners such as Jest or Vitest.
+       */
+      "stream": true,
+
+      /*
+       * Ensure deterministic ordering of script execution across packages.
+       */
+      "sort": true
+    },
+
+    "exec": {
+      /*
+       * Echo command before execution for traceability in CI.
+       */
+      "bail": true
+    },
+
+    "version": {
+      /*
+       * Ignore changes to non-source files so that documentation tweaks don’t
+       * inadvertently bump package versions.
+       */
+      "ignoreChanges": [
+        "**/*.md",
+        "**/README.md",
+        "**/.github/**",
+        "**/docs/**"
+      ],
+
+      /*
+       * Use conventional commits to drive semantic versioning automatically.
+       */
+      "conventionalCommits": true,
+
+      /*
+       * Tag format example: accounts-service@1.3.2
+       */
+      "tagVersionPrefix": ""
+    },
+
+    "publish": {
+      /*
+       * Publish only from the main branch to prevent mismatched artifacts
+       * when multiple release trains are active (e.g. hotfix branches).
+       */
+      "allowBranch": "main",
+
+      /*
+       * Automatically generate CHANGELOG.md files based on commit history.
+       */
+      "conventionalCommits": true,
+
+      /*
+       * Skip CI pipelines triggered by the automated version commit.
+       */
+      "message": "chore(release): publish [skip ci]",
+
+      /*
+       * Registry is configured to leverage GitHub Packages for internal
+       * prereleases while production releases are pushed to npmjs.org.
+       * Individual package.json files can override via `publishConfig`.
+       */
+      "registry": "https://registry.npmjs.org/"
+    }
+  },
+
+  /*
+   * Where license compliance is mandatory, SPDX identifiers assist
+   * automated scanners in quickly establishing dependency legality.
+   */
+  "license": "MIT",
+
+  /*
+   * Default release channel prefix used by semantic-release plugins in CI.
+   */
+  "changelogPreset": "@conventional-changelog/angular",
+
+  /*
+   * Tooling metadata — consumed by commitlint, husky, and others to enforce
+   * a predictable, secure, and maintainable contribution workflow.
+   */
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/paypalsphere/paypalsphere.git"
+  }
+}

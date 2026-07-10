@@ -1,1 +1,0 @@
-- [EduGate rate limiting](edugate_rate_limiting_multisession.md) — multi-session rate-limiting feature context.

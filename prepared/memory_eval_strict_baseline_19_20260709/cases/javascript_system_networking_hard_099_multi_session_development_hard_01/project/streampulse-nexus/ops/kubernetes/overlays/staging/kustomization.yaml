@@ -1,0 +1,200 @@
+```javascript
+/**
+ * StreamPulse Nexus — Kustomization Overlay Generator
+ * ---------------------------------------------------
+ * File: ops/kubernetes/overlays/staging/kustomization.yaml
+ * Language: JavaScript (node >= 14)
+ *
+ * This script programmatically generates the `kustomization.yaml` file that is
+ * required by Kustomize to materialise the staging environment.  We lean on code
+ * (instead of static YAML) so that we can:
+ *   • Embed build-time metadata (git SHA, build number, timestamp).
+ *   • Perform basic validation/sanity checks before the manifest ever hits CI.
+ *   • Keep sensitive or high-churn values out of Git.
+ *
+ * Usage (package.json):
+ *   {
+ *     "scripts": {
+ *       "generate:kustomize:staging": "node ops/kubernetes/overlays/staging/kustomization.yaml"
+ *     }
+ *   }
+ *
+ * The script will overwrite <cwd>/kustomization.yaml if it already exists.
+ */
+
+/* eslint-disable no-console */
+import fs from 'fs/promises';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import { execSync } from 'child_process';
+import { dump as toYaml } from 'js-yaml';
+
+/* ------------------------------------------------------------ *
+ * Utility Helpers
+ * ------------------------------------------------------------ */
+
+/**
+ * Returns the git SHA (short form) for the current repo.
+ * If git is not available, we fallback to 'latest'.
+ */
+function resolveGitSha() {
+  try {
+    return execSync('git rev-parse --short HEAD', { encoding: 'utf8' }).trim();
+  } catch {
+    console.warn('[kustomize] Falling back to image tag "latest" (git not found)');
+    return 'latest';
+  }
+}
+
+/**
+ * Basic invariant checker; throws if condition is false.
+ * @param {boolean} condition
+ * @param {string} message
+ */
+function invariant(condition, message) {
+  if (!condition) {
+    throw new Error(message);
+  }
+}
+
+/* ------------------------------------------------------------ *
+ * Build the Kustomization Object
+ * ------------------------------------------------------------ */
+
+/**
+ * Generates the JS object that will be stringified to YAML.
+ */
+function generateKustomization() {
+  const imageTag = resolveGitSha();
+
+  // Most of our overlays inherit from the base defined at:
+  //   ops/kubernetes/base/kustomization.yaml
+  const kustomization = {
+    apiVersion: 'kustomize.config.k8s.io/v1beta1',
+    kind: 'Kustomization',
+
+    # ---------------------------------------------------------------- #
+    # REQUIRED BASES
+    # ---------------------------------------------------------------- #
+    # The order matters: common components come first, environment-specific
+    # adjustments come later.
+    bases: [
+      '../../base',
+      '../../base/system-monitoring',
+      '../../base/security-scanning',
+      '../../base/backup-recovery',
+      '../../base/alerting',
+    ],
+
+    # ---------------------------------------------------------------- #
+    # GLOBAL LABELS
+    # ---------------------------------------------------------------- #
+    commonLabels: {
+      'app.kubernetes.io/name': 'streampulse-nexus',
+      'app.kubernetes.io/instance': 'staging',
+      'app.kubernetes.io/component': 'system-networking',
+      'app.kubernetes.io/managed-by': 'kustomize',
+    },
+
+    # ---------------------------------------------------------------- #
+    # IMAGE TAG OVERRIDES
+    # ---------------------------------------------------------------- #
+    images: [
+      {
+        name: 'ghcr.io/streampulse/nexus-core',
+        newTag: imageTag,
+      },
+      {
+        name: 'ghcr.io/streampulse/nexus-edge',
+        newTag: imageTag,
+      },
+      {
+        name: 'ghcr.io/streampulse/nexus-telemetry',
+        newTag: imageTag,
+      },
+    ],
+
+    # ---------------------------------------------------------------- #
+    # CONFIGMAP & SECRET GENERATORS
+    # ---------------------------------------------------------------- #
+    configMapGenerator: [
+      {
+        name: 'nexus-staging-config',
+        behavior: 'replace',
+        literals: [
+          `ENV=staging`,
+          `INGRESS_CLASS=traefik`,
+          `METRICS_EXPORTER_PORT=9090`,
+          `NODE_ENV=production`,
+        ],
+      },
+    ],
+
+    secretGenerator: [
+      {
+        name: 'nexus-staging-secrets',
+        behavior: 'replace',
+        files: [
+          // Each file is expected to exist in `secrets/` dir during CI.
+          'secrets/csrf.key',
+          'secrets/cookie.key',
+        ],
+      },
+    ],
+
+    # ---------------------------------------------------------------- #
+    # STRATEGIC MERGE PATCHES
+    # ---------------------------------------------------------------- #
+    patchesStrategicMerge: [
+      'patches/tolerations.yaml',
+      'patches/node-affinity.yaml',
+    ],
+
+    # ---------------------------------------------------------------- #
+    # TRANSFORMERS
+    # ---------------------------------------------------------------- #
+    transformers: [
+      '../../base/transformers/otel-sidecar.yaml',
+      '../../base/transformers/security-annotations.yaml',
+    ],
+  };
+
+  return kustomization;
+}
+
+/* ------------------------------------------------------------ *
+ * Main Entrypoint
+ * ------------------------------------------------------------ */
+
+async function main() {
+  const __filename = fileURLToPath(import.meta.url);
+  const overlayDir = path.dirname(__filename);
+  const outputPath = path.join(overlayDir, 'kustomization.yaml');
+
+  // Basic sanity checks to avoid clobbering prod.
+  invariant(
+    /overlays\/staging$/.test(overlayDir),
+    'Attempting to generate kustomization.yaml outside of the staging overlay.',
+  );
+
+  const kustomization = generateKustomization();
+  const yamlString = toYaml(kustomization, { noRefs: true, sortKeys: true });
+
+  // Pretty header for our generated file—makes grepping friendlier.
+  const header = [
+    '# -----------------------------------------------------------------------------',
+    '#  AUTO-GENERATED FILE.  DO NOT EDIT MANUALLY.',
+    '#  Run `npm run generate:kustomize:staging` to regenerate.',
+    '# -----------------------------------------------------------------------------',
+    '',
+  ].join('\n');
+
+  await fs.writeFile(outputPath, `${header}${yamlString}`, 'utf8');
+  console.log(`[kustomize] Staging overlay written → ${path.relative(process.cwd(), outputPath)}`);
+}
+
+main().catch((err) => {
+  console.error('[kustomize] Failed to generate staging overlay:\n', err);
+  process.exitCode = 1;
+});
+```

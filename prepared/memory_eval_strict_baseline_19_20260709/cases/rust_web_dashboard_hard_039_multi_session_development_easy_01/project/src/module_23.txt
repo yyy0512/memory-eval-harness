@@ -1,0 +1,421 @@
+```rust
+//! src/module_23.rs
+//! ------------------------------------------------------------
+//! Session & CSRF middleware for ChromaticCanvas Control Center.
+//!
+//! This module provides a production-ready implementation of secure,
+//! database-backed session handling for Actix-Web.  It couples
+//! signed, Http-Only cookies with a Postgres persistence layer and
+//! exposes convenience helpers for login, renewal, and termination.
+//!
+//! Key features
+//!   • HMAC-SHA256 cookie signing (tamper-evident)
+//!   • Sliding expiration with proactive renewal
+//!   • CSRF double-submit token support
+//!   • Single-query lazy loading of the session record
+//!   • Graceful error propagation and tracing
+//!
+//! The code purposefully lives in a stand-alone file so that it can be
+//! imported verbatim in integration tests without pulling the entire
+//! bin package graph.
+//!
+//! ------------------------------------------------------------
+
+use actix_web::{
+    cookie::{Cookie, SameSite},
+    dev::{forward_ready, Service, ServiceRequest, ServiceResponse, Transform},
+    http::header,
+    Error, HttpMessage, HttpResponse,
+};
+use chrono::{DateTime, Duration, Utc};
+use futures_util::future::{self, LocalBoxFuture, Ready};
+use hmac::{Hmac, Mac};
+use rand::{rngs::OsRng, RngCore};
+use serde::{Deserialize, Serialize};
+use sha2::Sha256;
+use sqlx::{postgres::PgQueryResult, PgPool};
+use std::{
+    future::Future,
+    pin::Pin,
+    rc::Rc,
+    sync::Arc,
+    task::{Context, Poll},
+};
+use tracing::{debug, error, info, instrument};
+use uuid::Uuid;
+
+/// The name of the cookie we use for session identification.
+const SESSION_COOKIE: &str = "cc_sid";
+/// Size (in bytes) of the random nonce used to generate a new session id.
+const SESSION_ID_BYTES: usize = 32;
+/// Minimum remaining lifetime before we proactively extend the expiry.
+const RENEW_BEFORE: Duration = Duration::minutes(10);
+
+/// Type alias for the HMAC we use to sign cookies.
+type HmacSha256 = Hmac<Sha256>;
+
+/// A wrapper around the session information stored in `actix_web::Extensions`.
+#[derive(Clone, Debug)]
+pub struct Session {
+    pub id: Uuid,
+    pub user_id: Option<Uuid>,
+    pub csrf_token: String,
+    pub expires_at: DateTime<Utc>,
+}
+
+impl Session {
+    /// Convenience accessor for whether the session has an authenticated user.
+    pub fn is_authenticated(&self) -> bool {
+        self.user_id.is_some()
+    }
+}
+
+/// DTO that represents the row in the `sessions` table.
+#[derive(Debug, Serialize, Deserialize)]
+struct SessionRow {
+    id: Uuid,
+    user_id: Option<Uuid>,
+    csrf_token: String,
+    expires_at: DateTime<Utc>,
+}
+
+impl From<SessionRow> for Session {
+    fn from(row: SessionRow) -> Self {
+        Self {
+            id: row.id,
+            user_id: row.user_id,
+            csrf_token: row.csrf_token,
+            expires_at: row.expires_at,
+        }
+    }
+}
+
+/// Configuration for the [`SessionMiddleware`].
+#[derive(Clone)]
+pub struct SessionConfig {
+    /// Cryptographic secret for HMAC signing.  MUST be 256-bits.
+    pub signing_key: Arc<[u8; 32]>,
+    /// Duration for which a session is valid.
+    pub ttl: Duration,
+    /// Whether to enforce the secure (HTTPS-only) flag on cookies.
+    pub secure_only: bool,
+}
+
+impl SessionConfig {
+    /// Build a [`SessionConfig`] with reasonable defaults.
+    pub fn new(signing_key: [u8; 32]) -> Self {
+        Self {
+            signing_key: Arc::new(signing_key),
+            ttl: Duration::hours(8),
+            secure_only: true,
+        }
+    }
+}
+
+/// Actix-Web middleware that loads / verifies / renews sessions.
+///
+/// On each request, the middleware:
+/// 1. Extracts the `SESSION_COOKIE`
+/// 2. Verifies its HMAC signature
+/// 3. Loads the session record from Postgres (lazy cached in extensions)
+/// 4. Renews expiry when expiration is imminent
+///
+/// Any error in these steps downgrades to an anonymous session; only DB
+/// connection failures propagate as 5xx.
+pub struct SessionMiddleware {
+    pool: PgPool,
+    cfg: SessionConfig,
+}
+
+impl SessionMiddleware {
+    pub fn new(pool: PgPool, cfg: SessionConfig) -> Self {
+        Self { pool, cfg }
+    }
+}
+
+impl<S, B> Transform<S, ServiceRequest> for SessionMiddleware
+where
+    S: Service<ServiceRequest, Response = ServiceResponse<B>, Error = Error> + 'static,
+    S::Future: 'static,
+    B: 'static,
+{
+    type Response = ServiceResponse<B>;
+    type Error = Error;
+    type Transform = SessionMiddlewareService<S>;
+    type InitError = ();
+    type Future = Ready<Result<Self::Transform, Self::InitError>>;
+
+    fn new_transform(&self, service: S) -> Self::Future {
+        future::ok(SessionMiddlewareService {
+            service: Rc::new(service),
+            pool: self.pool.clone(),
+            cfg: self.cfg.clone(),
+        })
+    }
+}
+
+pub struct SessionMiddlewareService<S> {
+    service: Rc<S>,
+    pool: PgPool,
+    cfg: SessionConfig,
+}
+
+impl<S, B> Service<ServiceRequest> for SessionMiddlewareService<S>
+where
+    S: Service<ServiceRequest, Response = ServiceResponse<B>, Error = Error> + 'static,
+    S::Future: 'static,
+    B: 'static,
+{
+    type Response = ServiceResponse<B>;
+    type Error = Error;
+    type Future = LocalBoxFuture<'static, Result<Self::Response, Self::Error>>;
+
+    #[instrument(skip(self, req), fields(path = %req.path()))]
+    fn poll_ready(&self, ctx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.service.poll_ready(ctx)
+    }
+
+    #[instrument(skip(self, req))]
+    fn call(&self, mut req: ServiceRequest) -> Self::Future {
+        let svc = Rc::clone(&self.service);
+        let pool = self.pool.clone();
+        let cfg = self.cfg.clone();
+
+        Box::pin(async move {
+            // Extract and validate the cookie (if present).
+            let cookie_opt = req.cookie(SESSION_COOKIE);
+            let mut session: Option<Session> = None;
+
+            if let Some(cookie) = cookie_opt {
+                match verify_and_decode_cookie(cookie.value(), &cfg.signing_key) {
+                    Ok(session_id) => {
+                        session = load_session(&pool, session_id).await?;
+                    }
+                    Err(e) => {
+                        debug!("Invalid session cookie: {e}");
+                    }
+                }
+            }
+
+            // If no session loaded, create an ephemeral guest session.
+            if session.is_none() {
+                session = Some(create_guest_session(&pool, &cfg).await?);
+            }
+
+            // Take ownership.
+            let mut session = session.unwrap();
+
+            // Proactively renew if expiration near.
+            let now = Utc::now();
+            if session.expires_at - now < RENEW_BEFORE {
+                session.expires_at = now + cfg.ttl;
+                persist_session_expiry(&pool, session.id, session.expires_at).await?;
+                let cookie_val = sign_and_encode_cookie(session.id, &cfg);
+                let cookie = build_cookie(&cookie_val, &cfg);
+                req.headers_mut().append(
+                    header::SET_COOKIE,
+                    header::HeaderValue::from_str(&cookie.to_string()).unwrap(),
+                );
+            }
+
+            // Insert session into request extensions for downstream handlers.
+            req.extensions_mut().insert(session.clone());
+
+            // Call the next service/middleware.
+            let res = svc.call(req).await?;
+
+            Ok(res)
+        })
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper ‑ functions
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Decode a cookie value into a [`Uuid`] session id, verifying its HMAC tag.
+fn verify_and_decode_cookie(cookie_val: &str, key: &[u8; 32]) -> anyhow::Result<Uuid> {
+    let (raw_uuid, tag) = cookie_val
+        .split_once('.')
+        .ok_or_else(|| anyhow::anyhow!("Malformed cookie"))?;
+
+    let uuid_bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(raw_uuid)?;
+    let tag_bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(tag)?;
+
+    // Recompute expected MAC
+    let mut mac =
+        HmacSha256::new_from_slice(key).expect("HMAC can take key of any size");
+    mac.update(&uuid_bytes);
+    mac.verify_slice(&tag_bytes)?;
+
+    let id = Uuid::from_slice(&uuid_bytes)?;
+    Ok(id)
+}
+
+/// Sign and encode the cookie for the given session id.
+fn sign_and_encode_cookie(id: Uuid, cfg: &SessionConfig) -> String {
+    let uuid_bytes = id.as_bytes();
+
+    let mut mac =
+        HmacSha256::new_from_slice(&cfg.signing_key).expect("HMAC can take key of any size");
+    mac.update(uuid_bytes);
+    let tag = mac.finalize().into_bytes();
+
+    let enc = |bytes: &[u8]| URL_SAFE_NO_PAD.encode(bytes);
+    format!("{}.{}", enc(uuid_bytes), enc(&tag))
+}
+
+/// Build the actual [`Cookie`] with flags.
+fn build_cookie(encoded: &str, cfg: &SessionConfig) -> Cookie<'static> {
+    let mut cookie = Cookie::build(SESSION_COOKIE, encoded.to_owned())
+        .path("/")
+        .http_only(true)
+        .same_site(SameSite::Lax)
+        .max_age(cookie::time::Duration::seconds(cfg.ttl.num_seconds()))
+        .finish();
+
+    if cfg.secure_only {
+        cookie.set_secure(true);
+    }
+    cookie
+}
+
+/// Persist a new guest (anonymous) session and return it.
+#[instrument(skip(pool, cfg))]
+async fn create_guest_session(pool: &PgPool, cfg: &SessionConfig) -> anyhow::Result<Session> {
+    let id = Uuid::new_v4();
+    let csrf_token = generate_random_token();
+
+    let expires_at = Utc::now() + cfg.ttl;
+
+    sqlx::query!(
+        r#"
+        INSERT INTO sessions (id, csrf_token, expires_at)
+        VALUES ($1, $2, $3)
+        "#,
+        id,
+        csrf_token,
+        expires_at
+    )
+    .execute(pool)
+    .await?;
+
+    Ok(Session {
+        id,
+        user_id: None,
+        csrf_token,
+        expires_at,
+    })
+}
+
+/// Fetch a session from the database by id.
+#[instrument(skip(pool))]
+async fn load_session(pool: &PgPool, id: Uuid) -> anyhow::Result<Option<Session>> {
+    if let Some(row) = sqlx::query_as!(
+        SessionRow,
+        r#"
+        SELECT id, user_id, csrf_token, expires_at
+        FROM sessions
+        WHERE id = $1
+        "#,
+        id
+    )
+    .fetch_optional(pool)
+    .await?
+    {
+        // Check expiry
+        if row.expires_at > Utc::now() {
+            return Ok(Some(row.into()));
+        }
+
+        // Expired: cleanup persisted record.
+        delete_session(pool, id).await?;
+    }
+    Ok(None)
+}
+
+/// Update only the expiry of a session (sliding window).
+#[instrument(skip(pool))]
+async fn persist_session_expiry(
+    pool: &PgPool,
+    id: Uuid,
+    new_expiry: DateTime<Utc>,
+) -> anyhow::Result<PgQueryResult> {
+    let res = sqlx::query!(
+        r#"
+        UPDATE sessions
+        SET expires_at = $2
+        WHERE id = $1
+        "#,
+        id,
+        new_expiry
+    )
+    .execute(pool)
+    .await?;
+
+    Ok(res)
+}
+
+/// Delete a session record.
+#[instrument(skip(pool))]
+async fn delete_session(pool: &PgPool, id: Uuid) -> anyhow::Result<PgQueryResult> {
+    let res = sqlx::query!(
+        r#"
+        DELETE FROM sessions WHERE id = $1
+        "#,
+        id
+    )
+    .execute(pool)
+    .await?;
+    Ok(res)
+}
+
+/// Generate a cryptographically-secure random token for CSRF.
+fn generate_random_token() -> String {
+    let mut buf = [0u8; 32];
+    OsRng.fill_bytes(&mut buf);
+    URL_SAFE_NO_PAD.encode(buf)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Public helper API (can be re-exported by library root)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Extract the [`Session`] from a request.  Panics if the middleware
+/// is not registered (by intent—this is a programmer error).
+pub trait RequestSessionExt {
+    fn session(&self) -> Session;
+}
+
+impl RequestSessionExt for actix_web::HttpRequest {
+    fn session(&self) -> Session {
+        self.extensions()
+            .get::<Session>()
+            .cloned()
+            .expect("SessionMiddleware not registered")
+    }
+}
+
+/// Invalidate the caller's session and purge the cookie.
+pub async fn invalidate_session(
+    pool: &PgPool,
+    mut res: HttpResponse,
+    session: &Session,
+) -> Result<HttpResponse, Error> {
+    delete_session(pool, session.id)
+        .await
+        .map_err(|e| {
+            error!("Failed to delete session: {e}");
+            actix_web::error::ErrorInternalServerError("Failed to end session")
+        })?;
+
+    // Clear cookie
+    res.add_removal_cookie(&Cookie::build(SESSION_COOKIE, "").path("/").finish())
+        .map_err(|e| {
+            error!("Failed to clear cookie: {e}");
+            actix_web::error::ErrorInternalServerError("Failed to clear cookie")
+        })?;
+
+    Ok(res)
+}
+```

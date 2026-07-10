@@ -1,0 +1,614 @@
+```rust
+//! src/module_15.rs
+//! -----------------------------------------------------------------------------
+//! Secure session management subsystem for ChromaticCanvas Control Center.
+//! This module implements a production–grade session handler that can be plugged
+//! into any Actix-web HTTP service.  It supports multiple back-ends (an
+//! in-memory store for dev/testing and a Redis store for staging/prod),
+//! cryptographically signed cookies, sliding expiration, and a light-weight
+//! middleware that makes the current `Session` available to request handlers.
+//!
+//! The design favours *composition over inheritance*: application code only
+//! cares about a single façade (`SessionManager`) while the specific store is
+//! selected at runtime via a trait object.  All security primitives live in
+//! this file so that it is easy to audit and fuzz.
+//!
+//! `module_15` is intentionally standalone; it has zero compile-time
+//! dependencies on the rest of the dashboard—other subsystems import *us*.
+//!
+//! -----------------------------------------------------------------------------
+//! Highlights
+//! -----------------------------------------------------------------------------
+//! - Strong typing (`SessionId`, `SessionToken`).
+//! - Reduced attack surface by using authenticated encryption—currently HMAC-SHA256.
+//! - RFC 6265-compliant cookies (HttpOnly, Secure, SameSite=Lax by default).
+//! - Async-ready and test-friendly (uses `tokio` + `async_trait`).
+//! - Non-trivial error taxonomy via `thiserror`.
+//! - Highly commented, production-quality implementation.
+//!
+//! -----------------------------------------------------------------------------
+//! Public Re-Exports
+//! -----------------------------------------------------------------------------
+pub use middleware::SessionMiddleware;
+pub use session::{SessionData, SessionId, SessionManager};
+
+// -----------------------------------------------------------------------------
+// Crate Imports
+// -----------------------------------------------------------------------------
+use async_trait::async_trait;
+use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
+use chrono::{Duration, Utc};
+use dashmap::DashMap;
+use hmac::{Hmac, Mac};
+use once_cell::sync::Lazy;
+use rand::{distributions::Alphanumeric, rngs::OsRng, Rng};
+use redis::AsyncCommands;
+use sha2::Sha256;
+use std::{
+    net::IpAddr,
+    sync::Arc,
+    time::{Duration as StdDuration, SystemTime},
+};
+use thiserror::Error;
+use uuid::Uuid;
+
+// -----------------------------------------------------------------------------
+// Internal Modules
+// -----------------------------------------------------------------------------
+mod errors;
+mod middleware;
+mod session;
+mod store;
+
+// -----------------------------------------------------------------------------
+// Re-export error for convenience
+// -----------------------------------------------------------------------------
+pub use errors::SessionError;
+```
+
+```rust
+// src/module_15/errors.rs
+//! Error types used throughout the secure session subsystem.
+use crate::session::SessionId;
+use redis::RedisError;
+use thiserror::Error;
+
+#[derive(Debug, Error)]
+pub enum SessionError {
+    #[error("backend unavailable")]
+    BackendUnavailable(#[source] anyhow::Error),
+
+    #[error("redis error")]
+    Redis(#[from] RedisError),
+
+    #[error("failed to serialize session")]
+    Serialization(#[from] serde_json::Error),
+
+    #[error("signature verification failed")]
+    InvalidSignature,
+
+    #[error("malformed cookie")]
+    MalformedCookie,
+
+    #[error("session {0} not found or expired")]
+    NotFound(SessionId),
+
+    #[error("session expired")]
+    Expired,
+
+    #[error("I/O error")]
+    Io(#[from] std::io::Error),
+
+    #[error("randomness source failure")]
+    Rand(#[from] rand::Error),
+}
+
+impl From<ring::error::Unspecified> for SessionError {
+    fn from(e: ring::error::Unspecified) -> Self {
+        Self::BackendUnavailable(anyhow::Error::new(e))
+    }
+}
+```
+
+```rust
+// src/module_15/session.rs
+//! Core domain entities and the high-level `SessionManager` façade.
+use super::{
+    errors::SessionError,
+    store::{InMemoryStore, RedisStore, SessionStore},
+};
+use crate::*;
+use chrono::{DateTime, Utc};
+use hmac::{Hmac, Mac};
+use sha2::Sha256;
+use std::net::IpAddr;
+use std::sync::Arc;
+
+/// The unique identifier attached to each logical session.
+/// Internally, we store it as a `Uuid` for 128-bit uniqueness guarantees.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct SessionId(Uuid);
+
+impl SessionId {
+    pub fn new() -> Self {
+        Self(Uuid::new_v4())
+    }
+}
+
+/// Raw payload that lives in the backing store.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct SessionData {
+    pub id: SessionId,
+    pub user_id: Uuid,
+    pub ip: IpAddr,
+    pub created_at: DateTime<Utc>,
+    pub last_seen_at: DateTime<Utc>,
+    pub expires_at: DateTime<Utc>,
+}
+
+/// A `SessionCookie` is what we hand back to the browser.
+/// The `value` field is already URL-safe Base64.
+#[derive(Debug, Clone)]
+pub struct SessionCookie {
+    pub name: String,
+    pub value: String,
+    pub max_age: time::Duration,
+    pub secure: bool,
+    pub http_only: bool,
+}
+
+/// Cryptographic dependencies are expensive to initialise; we do it once.
+/// We are currently using HMAC-SHA256 (we can swap it out w/o touching API).
+type HmacSha256 = Hmac<Sha256>;
+static GLOBAL_SECRET: Lazy<[u8; 64]> = Lazy::new(|| {
+    let mut key = [0u8; 64];
+    getrandom::getrandom(&mut key).expect("RNG failure");
+    key
+});
+
+/// SessionManager ties everything together.
+#[derive(Clone)]
+pub struct SessionManager {
+    store: Arc<dyn SessionStore>,
+    cookie_name: String,
+    lifetime: chrono::Duration,
+    sliding: bool,
+    secure_cookie: bool,
+}
+
+impl SessionManager {
+    /// Create a new `SessionManager` backed by an in-memory store.
+    pub fn in_memory() -> Self {
+        Self::with_store(Arc::new(InMemoryStore::default()))
+    }
+
+    /// Create a new `SessionManager` backed by Redis.
+    pub fn with_redis(redis_url: impl Into<String>) -> Result<Self, SessionError> {
+        let store = RedisStore::connect(redis_url)?;
+        Ok(Self::with_store(Arc::new(store)))
+    }
+
+    fn with_store(store: Arc<dyn SessionStore>) -> Self {
+        Self {
+            store,
+            cookie_name: "cc_session".into(),
+            lifetime: chrono::Duration::hours(8),
+            sliding: true,
+            secure_cookie: true,
+        }
+    }
+
+    /// Generates a new session, persists it, and returns a ready-to-send cookie.
+    pub async fn create_session(
+        &self,
+        user_id: Uuid,
+        ip: IpAddr,
+    ) -> Result<SessionCookie, SessionError> {
+        let now = Utc::now();
+        let data = SessionData {
+            id: SessionId::new(),
+            user_id,
+            ip,
+            created_at: now,
+            last_seen_at: now,
+            expires_at: now + self.lifetime,
+        };
+
+        self.store.save_session(&data).await?;
+
+        let token = self.sign_session_id(&data.id, data.expires_at)?;
+        Ok(SessionCookie {
+            name: self.cookie_name.clone(),
+            value: token,
+            max_age: time::Duration::seconds(self.lifetime.num_seconds()),
+            secure: self.secure_cookie,
+            http_only: true,
+        })
+    }
+
+    /// Validate incoming cookie; returns `SessionData` on success.
+    pub async fn validate_cookie(
+        &self,
+        raw_cookie: &str,
+        ip: IpAddr,
+    ) -> Result<SessionData, SessionError> {
+        let (id, exp) = self.verify_token(raw_cookie)?;
+        if exp < Utc::now() {
+            return Err(SessionError::Expired);
+        }
+
+        let mut data = self.store.load_session(&id).await?.ok_or(
+            SessionError::NotFound(id),
+        )?;
+
+        // Optional: IP pinning to mitigate session hijacking.
+        if data.ip != ip {
+            return Err(SessionError::InvalidSignature);
+        }
+
+        // Sliding expiration.
+        if self.sliding {
+            data.last_seen_at = Utc::now();
+            data.expires_at = Utc::now() + self.lifetime;
+            self.store.save_session(&data).await?;
+        }
+
+        Ok(data)
+    }
+
+    /// Invalidate session (logout).
+    pub async fn invalidate(&self, id: SessionId) -> Result<(), SessionError> {
+        self.store.delete_session(&id).await
+    }
+
+    // -------------------------------------------------------------------------
+    // Internals
+    // -------------------------------------------------------------------------
+
+    fn sign_session_id(
+        &self,
+        id: &SessionId,
+        expires_at: chrono::DateTime<Utc>,
+    ) -> Result<String, SessionError> {
+        let mut mac = HmacSha256::new_from_slice(&*GLOBAL_SECRET).unwrap();
+        mac.update(id.0.as_bytes());
+        mac.update(&expires_at.timestamp_millis().to_be_bytes());
+        let signature = mac.finalize().into_bytes();
+
+        let mut buf = Vec::with_capacity(16 + 8 + 32);
+        buf.extend_from_slice(id.0.as_bytes());
+        buf.extend_from_slice(&expires_at.timestamp_millis().to_be_bytes());
+        buf.extend_from_slice(&signature);
+        Ok(URL_SAFE_NO_PAD.encode(buf))
+    }
+
+    fn verify_token(
+        &self,
+        token: &str,
+    ) -> Result<(SessionId, chrono::DateTime<Utc>), SessionError> {
+        let raw = URL_SAFE_NO_PAD
+            .decode(token)
+            .map_err(|_| SessionError::MalformedCookie)?;
+
+        if raw.len() != 16 + 8 + 32 {
+            return Err(SessionError::MalformedCookie);
+        }
+        let (id_bytes, rest) = raw.split_at(16);
+        let (exp_bytes, sig) = rest.split_at(8);
+
+        let id = SessionId(
+            Uuid::from_slice(id_bytes).map_err(|_| SessionError::MalformedCookie)?,
+        );
+        let exp_ms = i64::from_be_bytes(exp_bytes.try_into().unwrap());
+        let exp = chrono::DateTime::<Utc>::from_utc(
+            chrono::NaiveDateTime::from_timestamp_millis(exp_ms).ok_or(SessionError::MalformedCookie)?,
+            Utc,
+        );
+
+        // Recompute signature.
+        let mut mac = HmacSha256::new_from_slice(&*GLOBAL_SECRET).unwrap();
+        mac.update(id.0.as_bytes());
+        mac.update(exp_bytes);
+        mac.verify_slice(sig).map_err(|_| SessionError::InvalidSignature)?;
+
+        Ok((id, exp))
+    }
+}
+```
+
+```rust
+// src/module_15/store.rs
+//! Pluggable storage back-ends for session data.
+use super::{errors::SessionError, session::*};
+use async_trait::async_trait;
+use dashmap::DashMap;
+use redis::{aio::ConnectionManager, AsyncCommands};
+use std::sync::Arc;
+
+/// Abstract storage definition so we can swap data sources easily.
+#[async_trait]
+pub trait SessionStore: Send + Sync {
+    async fn save_session(&self, session: &SessionData) -> Result<(), SessionError>;
+    async fn load_session(
+        &self,
+        id: &SessionId,
+    ) -> Result<Option<SessionData>, SessionError>;
+    async fn delete_session(&self, id: &SessionId) -> Result<(), SessionError>;
+}
+
+// -----------------------------------------------------------------------------
+// In-Memory Store (good for unit tests & dev mode)
+// -----------------------------------------------------------------------------
+#[derive(Default)]
+pub struct InMemoryStore {
+    map: Arc<DashMap<SessionId, SessionData>>,
+}
+
+#[async_trait]
+impl SessionStore for InMemoryStore {
+    async fn save_session(&self, session: &SessionData) -> Result<(), SessionError> {
+        self.map.insert(session.id, session.clone());
+        Ok(())
+    }
+
+    async fn load_session(
+        &self,
+        id: &SessionId,
+    ) -> Result<Option<SessionData>, SessionError> {
+        Ok(self.map.get(id).map(|r| r.clone()))
+    }
+
+    async fn delete_session(&self, id: &SessionId) -> Result<(), SessionError> {
+        self.map.remove(id);
+        Ok(())
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Redis Store (production)
+// -----------------------------------------------------------------------------
+pub struct RedisStore {
+    conn: ConnectionManager,
+}
+
+impl RedisStore {
+    pub fn connect(url: impl Into<String>) -> Result<Self, SessionError> {
+        let client = redis::Client::open(url.into()).map_err(SessionError::Redis)?;
+        let conn = tokio::runtime::Handle::current()
+            .block_on(ConnectionManager::new(client))
+            .map_err(SessionError::Redis)?;
+        Ok(Self { conn })
+    }
+
+    fn key(id: &SessionId) -> String {
+        format!("cc:sessions:{}", id.0)
+    }
+}
+
+#[async_trait]
+impl SessionStore for RedisStore {
+    async fn save_session(&self, session: &SessionData) -> Result<(), SessionError> {
+        let mut conn = self.conn.clone();
+        let key = Self::key(&session.id);
+        let ttl = (session.expires_at - chrono::Utc::now()).num_seconds();
+        let json = serde_json::to_string(session)?;
+        conn.set_ex(key.clone(), json, ttl as usize).await?;
+        Ok(())
+    }
+
+    async fn load_session(
+        &self,
+        id: &SessionId,
+    ) -> Result<Option<SessionData>, SessionError> {
+        let mut conn = self.conn.clone();
+        let key = Self::key(id);
+        let opt: Option<String> = conn.get(key).await?;
+        match opt {
+            Some(s) => Ok(Some(serde_json::from_str(&s)?)),
+            None => Ok(None),
+        }
+    }
+
+    async fn delete_session(&self, id: &SessionId) -> Result<(), SessionError> {
+        let mut conn = self.conn.clone();
+        let key = Self::key(id);
+        let _: () = conn.del(key).await?;
+        Ok(())
+    }
+}
+```
+
+```rust
+// src/module_15/middleware.rs
+//! Actix-web middleware that attaches `SessionData` to the request.
+//!
+//! Usage:
+//! ```rust,no_run
+//! use actix_web::{App, HttpServer};
+//! use module_15::{SessionManager, SessionMiddleware};
+//!
+//! #[actix_web::main]
+//! async fn main() -> std::io::Result<()> {
+//!     let sessions = SessionManager::with_redis("redis://127.0.0.1/").unwrap();
+//!     HttpServer::new(move || {
+//!         App::new()
+//!             .wrap(SessionMiddleware::new(sessions.clone()))
+//!             // routes...
+//!     })
+//!     .bind(("0.0.0.0", 8080))?
+//!     .run()
+//!     .await
+//! }
+//! ```
+use super::{errors::SessionError, session::SessionManager, SessionData};
+use actix_web::{
+    cookie::{Cookie, SameSite},
+    dev::{forward_ready, Service, ServiceRequest, ServiceResponse, Transform},
+    http::header,
+    Error, HttpMessage,
+};
+use futures_util::future::{ok, LocalBoxFuture, Ready};
+use std::future::{ready, Ready as StdReady};
+use std::pin::Pin;
+use std::rc::Rc;
+use std::task::{Context, Poll};
+
+pub struct SessionMiddleware {
+    manager: SessionManager,
+}
+
+impl SessionMiddleware {
+    pub fn new(manager: SessionManager) -> Self {
+        Self { manager }
+    }
+}
+
+impl<S, B> Transform<S, ServiceRequest> for SessionMiddleware
+where
+    S: Service<ServiceRequest, Response = ServiceResponse<B>, Error = Error> + 'static,
+    S::Future: 'static,
+    B: 'static,
+{
+    type Response = ServiceResponse<B>;
+    type Error = Error;
+    type Transform = SessionMiddlewareImpl<S>;
+    type InitError = ();
+    type Future = Ready<Result<Self::Transform, Self::InitError>>;
+
+    fn new_transform(&self, service: S) -> Self::Future {
+        ok(SessionMiddlewareImpl {
+            service: Rc::new(service),
+            manager: self.manager.clone(),
+        })
+    }
+}
+
+pub struct SessionMiddlewareImpl<S> {
+    service: Rc<S>,
+    manager: SessionManager,
+}
+
+impl<S, B> Service<ServiceRequest> for SessionMiddlewareImpl<S>
+where
+    S: Service<ServiceRequest, Response = ServiceResponse<B>, Error = Error> + 'static,
+    B: 'static,
+{
+    type Response = ServiceResponse<B>;
+    type Error = Error;
+    type Future = LocalBoxFuture<'static, Result<Self::Response, Self::Error>>;
+
+    forward_ready!(service);
+
+    fn call(&self, mut req: ServiceRequest) -> Self::Future {
+        let manager = self.manager.clone();
+
+        // Extract cookie and attempt validation.
+        let cookie = req
+            .cookie(&manager.cookie_name)
+            .map(|c| c.value().to_owned());
+        let peer_ip = req
+            .connection_info()
+            .realip_remote_addr()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or_else(|| "0.0.0.0".parse().unwrap());
+
+        let fut = self.service.call(req);
+
+        Box::pin(async move {
+            let mut res = fut.await?;
+
+            if let Some(raw) = cookie {
+                match manager.validate_cookie(&raw, peer_ip).await {
+                    Ok(session) => {
+                        // Attach to request extensions for handlers to access.
+                        res.request()
+                            .extensions_mut()
+                            .insert::<SessionData>(session);
+                    }
+                    Err(SessionError::Expired | SessionError::NotFound(_)) => {
+                        // Clear invalid cookie
+                        let mut removal = Cookie::named(manager.cookie_name.clone());
+                        removal.make_removal();
+                        res.headers_mut().append(
+                            header::SET_COOKIE,
+                            removal.to_string().parse().unwrap(),
+                        );
+                    }
+                    Err(e) => {
+                        tracing::warn!("session error: {:#}", e);
+                    }
+                }
+            }
+
+            Ok(res)
+        })
+    }
+}
+```
+
+```rust
+// src/module_15/tests.rs
+//! Smoke-tests for the session subsystem.
+//! Run with `cargo test -p web_dashboard`.
+use super::*;
+use actix_web::{test, web, App, HttpResponse, Responder};
+use std::net::{IpAddr, Ipv4Addr};
+use uuid::Uuid;
+
+#[actix_web::test]
+async fn roundtrip_in_memory() {
+    let mgr = SessionManager::in_memory();
+    let uid = Uuid::new_v4();
+    let ip: IpAddr = Ipv4Addr::LOCALHOST.into();
+
+    let cookie = mgr.create_session(uid, ip).await.unwrap();
+    let data = mgr.validate_cookie(&cookie.value, ip).await.unwrap();
+    assert_eq!(data.user_id, uid);
+
+    mgr.invalidate(data.id).await.unwrap();
+    let err = mgr.validate_cookie(&cookie.value, ip).await.unwrap_err();
+    matches!(err, SessionError::NotFound(_));
+}
+
+#[actix_web::test]
+async fn middleware_integration() {
+    let mgr = SessionManager::in_memory();
+    let cookie = mgr
+        .create_session(Uuid::new_v4(), Ipv4Addr::LOCALHOST.into())
+        .await
+        .unwrap();
+
+    async fn handler(data: Option<web::ReqData<SessionData>>) -> impl Responder {
+        if let Some(session) = data {
+            HttpResponse::Ok().body(format!("user={}", session.user_id))
+        } else {
+            HttpResponse::Unauthorized().finish()
+        }
+    }
+
+    let app = test::init_service(
+        App::new()
+            .wrap(SessionMiddleware::new(mgr.clone()))
+            .route("/", web::get().to(handler)),
+    )
+    .await;
+
+    // First call w/o cookie -> 401.
+    let req = test::TestRequest::get().uri("/").to_request();
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 401);
+
+    // Call with cookie -> 200.
+    let req = test::TestRequest::get()
+        .uri("/")
+        .cookie(
+            actix_web::cookie::Cookie::build(cookie.name, cookie.value)
+                .secure(false)
+                .finish(),
+        )
+        .to_request();
+
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+}
+```

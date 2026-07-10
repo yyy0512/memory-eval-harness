@@ -1,0 +1,455 @@
+```c
+/**
+ * RetinaGuard Vision Suite
+ * Module   : Diabetic-Retinopathy Model Wrapper (dr_detection_v1)
+ * File     : models/dr_detection_v1.onnx   (C source wrapper around ONNX model)
+ * Language : C17
+ *
+ * This file exposes a thin, production-grade C API for executing the
+ * `dr_detection_v1.onnx` model via the ONNX Runtime C API.  The wrapper
+ * integrates   • Thread-safety
+ *              • Observer Pattern hooks (for in-process monitoring)
+ *              • Robust error handling & resource lifetime management
+ *              • Model metadata/versioning utilities
+ *
+ * The implementation purposefully hides all ONNX-specific details from
+ * upstream pipeline stages, encouraging clean abstraction boundaries.
+ *
+ * NOTE: The compiled artifact must be linked against `onnxruntime` and
+ *       `pthread`:
+ *          gcc -std=c17 -Wall -Wextra -pedantic -O2 \
+ *              dr_detection_v1.onnx.c -lonnxruntime -lpthread -ldl -o librg_dr_model.so
+ */
+
+#define _POSIX_C_SOURCE 200809L   /* for strdup / clock_gettime */
+#include <assert.h>
+#include <inttypes.h>
+#include <pthread.h>
+#include <stdbool.h>
+#include <stdatomic.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
+
+#include <onnxruntime_c_api.h>     /* ONNX Runtime C API */
+
+/* --------------------------------------------------------
+ * Configuration constants (tuned to model requirements)
+ * ----------------------------------------------------- */
+#define DR_MODEL_EXPECTED_WIDTH       512U
+#define DR_MODEL_EXPECTED_HEIGHT      512U
+#define DR_MODEL_EXPECTED_CHANNELS      3U
+#define DR_MODEL_INPUT_TENSOR_NAME   "input_1"
+#define DR_MODEL_OUTPUT_TENSOR_NAME  "predictions"
+#define DR_MODEL_CLASS_COUNT            5U     /* No DR, Mild, Moderate, Severe, Proliferative */
+
+/* --------------------------------------------------------
+ * Error-handling helper macros
+ * ----------------------------------------------------- */
+#define RG_UNUSED(x)   ((void)(x))
+
+#define RG_LOG_ERROR(fmt, ...) \
+    fprintf(stderr, "[RG/DR_MODEL][ERROR] " fmt "\n", ##__VA_ARGS__)
+
+#define RG_LOG_INFO(fmt, ...) \
+    fprintf(stdout, "[RG/DR_MODEL][INFO ] " fmt "\n", ##__VA_ARGS__)
+
+#define ORT_ABORT_ON_ERROR(ort_status)                                            \
+    do {                                                                          \
+        if ((ort_status) != NULL) {                                               \
+            const char* _msg = g_ort->GetErrorMessage(ort_status);                \
+            RG_LOG_ERROR("%s (code=%d)", _msg, g_ort->GetErrorCode(ort_status));  \
+            g_ort->ReleaseStatus(ort_status);                                     \
+            abort();                                                              \
+        }                                                                         \
+    } while (0)
+
+/* --------------------------------------------------------
+ * Data structures
+ * ----------------------------------------------------- */
+typedef enum {
+    DR_GRADE_NONE = 0,
+    DR_GRADE_MILD,
+    DR_GRADE_MODERATE,
+    DR_GRADE_SEVERE,
+    DR_GRADE_PROLIFERATIVE,
+    DR_GRADE_UNKNOWN = 255,
+} DR_Grade_e;
+
+typedef struct {
+    /* index maps to DR_Grade_e */
+    float probabilities[DR_MODEL_CLASS_COUNT];
+    DR_Grade_e predicted_grade;
+} DR_InferenceResult_t;
+
+/* Forward declared handle type */
+typedef struct RG_DrModel     RG_DrModel_t;
+
+/* Observer pattern -------------------------------------------------------- */
+typedef void (*RG_DrObserver_f)(const DR_InferenceResult_t* result,
+                                uint64_t                   inference_us,
+                                void*                      user_data);
+
+typedef struct {
+    RG_DrObserver_f cb;
+    void*           user_data;
+} ObserverEntry_t;
+
+/* --------------------------------------------------------
+ * RG_DrModel_t internal representation
+ * ----------------------------------------------------- */
+struct RG_DrModel {
+    OrtSession*        session;
+    OrtAllocator*      allocator;
+    char*              model_path;
+    char*              version_string;
+
+    /* Observer management */
+    ObserverEntry_t*   observers;
+    size_t             observer_count;
+    pthread_mutex_t    observer_lock;
+};
+
+/* --------------------------------------------------------
+ * Global ONNX Runtime environment (shared process-wide)
+ * ----------------------------------------------------- */
+static const OrtApi* g_ort    = NULL;
+static OrtEnv*       g_env    = NULL;
+static pthread_once_t g_ort_once = PTHREAD_ONCE_INIT;
+
+/* ******************************************************
+ *  Internal helpers
+ * **************************************************** */
+static void
+_init_onnxruntime_once(void)
+{
+    g_ort = OrtGetApiBase()->GetApi(ORT_API_VERSION);
+    ORT_ABORT_ON_ERROR( g_ort->CreateEnv(ORT_LOGGING_LEVEL_WARNING,
+                                         "RetinaGuard", &g_env) );
+}
+
+static inline uint64_t
+_now_monotonic_us(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint64_t)ts.tv_sec * 1000000ULL + (uint64_t)ts.tv_nsec/1000ULL;
+}
+
+static DR_Grade_e
+_argmax_grade(const float* probs, size_t count)
+{
+    size_t max_idx = 0;
+    float max_val  = probs[0];
+    for (size_t i = 1; i < count; ++i) {
+        if (probs[i] > max_val) {
+            max_idx = i;
+            max_val = probs[i];
+        }
+    }
+    return (DR_Grade_e)max_idx;
+}
+
+/* ******************************************************
+ *  Public API
+ * **************************************************** */
+
+/**
+ * rg_dr_model_load
+ * ------------------------------------------------------------------
+ * Initialize an ONNX Runtime session for the DR model.
+ *
+ * @param model_path Path to `dr_detection_v1.onnx`.
+ * @return           Pointer to model handle or NULL on failure.
+ */
+RG_DrModel_t*
+rg_dr_model_load(const char* model_path)
+{
+    if (!model_path) {
+        RG_LOG_ERROR("model_path == NULL");
+        return NULL;
+    }
+
+    pthread_once(&g_ort_once, _init_onnxruntime_once);
+
+    OrtSessionOptions* session_opts = NULL;
+    ORT_ABORT_ON_ERROR( g_ort->CreateSessionOptions(&session_opts) );
+    g_ort->SetIntraOpNumThreads(session_opts, 1);
+    g_ort->SetGraphOptimizationLevel(session_opts, ORT_ENABLE_EXTENDED);
+
+    OrtSession* session = NULL;
+    OrtStatus* status   = g_ort->CreateSession(g_env, model_path,
+                                               session_opts, &session);
+    g_ort->ReleaseSessionOptions(session_opts);
+
+    if (status != NULL) {
+        RG_LOG_ERROR("Failed to create ONNX session for '%s': %s",
+                     model_path, g_ort->GetErrorMessage(status));
+        g_ort->ReleaseStatus(status);
+        return NULL;
+    }
+
+    /* Retrieve default allocator */
+    OrtAllocator* allocator = NULL;
+    ORT_ABORT_ON_ERROR( g_ort->GetAllocatorWithDefaultOptions(&allocator) );
+
+    /* Model metadata: retrieve version string if present */
+    char* version_str = NULL;
+    OrtModelMetadata* metadata = NULL;
+    if (g_ort->SessionGetModelMetadata(session, &metadata) == NULL) {
+        OrtStatus* meta_status = NULL;
+        OrtAllocatedStringPtr version_ptr = {0};
+        meta_status = g_ort->ModelMetadataGetCustomMetadataMap(
+            metadata, allocator, "rg:model_version", &version_ptr);
+        if (meta_status == NULL && version_ptr != NULL) {
+            version_str = strdup(version_ptr);
+            allocator->Free(allocator, version_ptr);
+        }
+        if (metadata) g_ort->ReleaseModelMetadata(metadata);
+    }
+
+    RG_DrModel_t* handle = calloc(1, sizeof(*handle));
+    if (!handle) {
+        RG_LOG_ERROR("Out of memory");
+        g_ort->ReleaseSession(session);
+        return NULL;
+    }
+
+    *handle = (RG_DrModel_t){
+        .session         = session,
+        .allocator       = allocator,
+        .model_path      = strdup(model_path),
+        .version_string  = version_str ? version_str : strdup("unknown"),
+        .observers       = NULL,
+        .observer_count  = 0,
+    };
+    pthread_mutex_init(&handle->observer_lock, NULL);
+
+    RG_LOG_INFO("DR model loaded (version='%s')", handle->version_string);
+    return handle;
+}
+
+/**
+ * rg_dr_model_register_observer
+ * ------------------------------------------------------------------
+ * Registers an observer callback invoked after each successful inference.
+ */
+bool
+rg_dr_model_register_observer(RG_DrModel_t*    model,
+                              RG_DrObserver_f  cb,
+                              void*            user_data)
+{
+    if (!model || !cb)
+        return false;
+
+    pthread_mutex_lock(&model->observer_lock);
+    size_t new_count = model->observer_count + 1;
+    ObserverEntry_t* resized = realloc(model->observers,
+                                       new_count * sizeof(*resized));
+    if (!resized) {
+        pthread_mutex_unlock(&model->observer_lock);
+        return false;
+    }
+    model->observers = resized;
+    model->observers[model->observer_count] = (ObserverEntry_t){
+        .cb        = cb,
+        .user_data = user_data
+    };
+    model->observer_count = new_count;
+    pthread_mutex_unlock(&model->observer_lock);
+    return true;
+}
+
+/**
+ * rg_dr_model_infer
+ * ------------------------------------------------------------------
+ * Synchronously run inference on an RGB image already pre-processed to
+ * the model’s input resolution and channel order (HWC, uint8-RGB).
+ *
+ * @param model        Handle returned by rg_dr_model_load
+ * @param rgb_image    Pointer to contiguous HWC uint8 buffer
+ * @param result_out   Populated with classification result
+ * @return             true on success, false otherwise
+ */
+bool
+rg_dr_model_infer(RG_DrModel_t*          model,
+                  const uint8_t*         rgb_image,
+                  DR_InferenceResult_t*  result_out)
+{
+    if (!model || !rgb_image || !result_out) {
+        RG_LOG_ERROR("Invalid arguments passed to rg_dr_model_infer");
+        return false;
+    }
+
+    /* Prepare input tensor (float32 NCHW: 1x3xH x W, normalized 0-1) */
+    const size_t img_size = DR_MODEL_EXPECTED_WIDTH *
+                            DR_MODEL_EXPECTED_HEIGHT *
+                            DR_MODEL_EXPECTED_CHANNELS;
+    float* input_buf = malloc(sizeof(float) * img_size);
+    if (!input_buf) {
+        RG_LOG_ERROR("Out of memory allocating input tensor");
+        return false;
+    }
+
+    /* Simple normalization (0-255) → (0-1) and HWC→CHW */
+    const uint8_t* src = rgb_image;
+    for (uint32_t h = 0; h < DR_MODEL_EXPECTED_HEIGHT; ++h) {
+        for (uint32_t w = 0; w < DR_MODEL_EXPECTED_WIDTH; ++w) {
+            for (uint32_t c = 0; c < DR_MODEL_EXPECTED_CHANNELS; ++c) {
+                size_t dst_idx =
+                    c * (DR_MODEL_EXPECTED_HEIGHT * DR_MODEL_EXPECTED_WIDTH) +
+                    h * DR_MODEL_EXPECTED_WIDTH + w;
+                input_buf[dst_idx] = (*src++) / 255.0f;
+            }
+        }
+    }
+
+    uint64_t t0 = _now_monotonic_us();
+
+    /* Build Ort tensors */
+    OrtMemoryInfo* mem_info = NULL;
+    ORT_ABORT_ON_ERROR( g_ort->CreateCpuMemoryInfo(OrtArenaAllocator, OrtMemTypeDefault, &mem_info) );
+
+    OrtValue* input_tensor  = NULL;
+    int64_t input_shape[4]  = {1, DR_MODEL_EXPECTED_CHANNELS,
+                               DR_MODEL_EXPECTED_HEIGHT,
+                               DR_MODEL_EXPECTED_WIDTH};
+    ORT_ABORT_ON_ERROR( g_ort->CreateTensorWithDataAsOrtValue(
+        mem_info,
+        input_buf,
+        sizeof(float) * img_size,
+        input_shape, 4,
+        ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT,
+        &input_tensor) );
+    g_ort->ReleaseMemoryInfo(mem_info);
+
+    const char* input_names[]  = { DR_MODEL_INPUT_TENSOR_NAME };
+    const char* output_names[] = { DR_MODEL_OUTPUT_TENSOR_NAME };
+
+    OrtValue* output_tensor = NULL;
+    OrtStatus* run_status   = g_ort->Run(model->session, NULL,
+                                         input_names,  &input_tensor,  1,
+                                         output_names, 1,
+                                         &output_tensor);
+
+    /* Free input tensor memory early */
+    g_ort->ReleaseValue(input_tensor);
+    free(input_buf);
+
+    if (run_status != NULL) {
+        RG_LOG_ERROR("ONNX Run() failed: %s",
+                     g_ort->GetErrorMessage(run_status));
+        g_ort->ReleaseStatus(run_status);
+        if (output_tensor) g_ort->ReleaseValue(output_tensor);
+        return false;
+    }
+
+    /* Extract output */
+    float* output_data   = NULL;
+    ORT_ABORT_ON_ERROR( g_ort->GetTensorMutableData(output_tensor,
+                                                    (void**)&output_data) );
+
+    for (size_t i = 0; i < DR_MODEL_CLASS_COUNT; ++i)
+        result_out->probabilities[i] = output_data[i];
+
+    result_out->predicted_grade = _argmax_grade(result_out->probabilities,
+                                                DR_MODEL_CLASS_COUNT);
+
+    g_ort->ReleaseValue(output_tensor);
+
+    uint64_t t1 = _now_monotonic_us();
+    uint64_t inference_us = t1 - t0;
+
+    /* Notify observers */
+    pthread_mutex_lock(&model->observer_lock);
+    for (size_t i = 0; i < model->observer_count; ++i) {
+        ObserverEntry_t* entry = &model->observers[i];
+        if (entry->cb) {
+            entry->cb(result_out, inference_us, entry->user_data);
+        }
+    }
+    pthread_mutex_unlock(&model->observer_lock);
+
+    RG_LOG_INFO("Inference complete (grade=%u, latency=%" PRIu64 "µs)",
+                result_out->predicted_grade, inference_us);
+
+    return true;
+}
+
+/**
+ * rg_dr_model_unload
+ * ------------------------------------------------------------------
+ * Releases all resources associated with a model handle.
+ */
+void
+rg_dr_model_unload(RG_DrModel_t* model)
+{
+    if (!model) return;
+
+    g_ort->ReleaseSession(model->session);
+    free(model->model_path);
+    free(model->version_string);
+    free(model->observers);
+    pthread_mutex_destroy(&model->observer_lock);
+    free(model);
+}
+
+/* ******************************************************
+ *  Example usage (can be removed in production builds)
+ * **************************************************** */
+#ifdef RG_DR_MODEL_SELFTEST
+#include <unistd.h>
+
+static void print_observer(const DR_InferenceResult_t* res,
+                           uint64_t latency,
+                           void* user_data)
+{
+    RG_UNUSED(user_data);
+    printf("Observer: Grade=%u, p=[", res->predicted_grade);
+    for (int i = 0; i < DR_MODEL_CLASS_COUNT; ++i) {
+        printf("%.3f%s", res->probabilities[i],
+               (i == DR_MODEL_CLASS_COUNT-1) ? "" : ", ");
+    }
+    printf("], %lu µs\n", latency);
+}
+
+int main(int argc, char* argv[])
+{
+    if (argc < 3) {
+        fprintf(stderr, "Usage: %s <model.onnx> <rgb_raw_image>\n", argv[0]);
+        return EXIT_FAILURE;
+    }
+
+    /* Load model */
+    RG_DrModel_t* mdl = rg_dr_model_load(argv[1]);
+    if (!mdl) return EXIT_FAILURE;
+
+    rg_dr_model_register_observer(mdl, print_observer, NULL);
+
+    /* Load raw RGB image (assumes exact expected dimensions) */
+    const size_t img_bytes = DR_MODEL_EXPECTED_WIDTH *
+                             DR_MODEL_EXPECTED_HEIGHT *
+                             DR_MODEL_EXPECTED_CHANNELS;
+    uint8_t* img = malloc(img_bytes);
+    FILE* fp = fopen(argv[2], "rb");
+    if (!fp || fread(img, 1, img_bytes, fp) != img_bytes) {
+        perror("reading image");
+        free(img);
+        if (fp) fclose(fp);
+        rg_dr_model_unload(mdl);
+        return EXIT_FAILURE;
+    }
+    fclose(fp);
+
+    DR_InferenceResult_t res = {0};
+    if (!rg_dr_model_infer(mdl, img, &res)) {
+        RG_LOG_ERROR("Inference failed");
+    }
+
+    free(img);
+    rg_dr_model_unload(mdl);
+    return EXIT_SUCCESS;
+}
+#endif /* RG_DR_MODEL_SELFTEST */
+```

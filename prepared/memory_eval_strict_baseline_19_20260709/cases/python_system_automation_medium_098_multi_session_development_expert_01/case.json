@@ -1,0 +1,47 @@
+{
+  "scenario_id": "python_system_automation_medium_098_multi_session_development_expert_01",
+  "case_id": "python_system_automation_medium_098",
+  "category": "extended_development_projects",
+  "original_task_category": "multi_session_development",
+  "project_source": "cases/python_system_automation_medium_098_multi_session_development_expert_01/project",
+  "project_name": "VitalOps Orchestrator",
+  "language": "python",
+  "complexity": "medium",
+  "session_count": 3,
+  "turns": [
+    {
+      "session": 1,
+      "file": "turns/session_1.jsonl",
+      "turn_count": 2
+    },
+    {
+      "session": 2,
+      "file": "turns/session_2.jsonl",
+      "turn_count": 1
+    },
+    {
+      "session": 3,
+      "file": "turns/session_3.jsonl",
+      "turn_count": 1
+    }
+  ],
+  "prompts_for_review": [
+    {
+      "session": 1,
+      "file": "prompts/session_1.txt"
+    },
+    {
+      "session": 2,
+      "file": "prompts/session_2.txt"
+    },
+    {
+      "session": 3,
+      "file": "prompts/session_3.txt"
+    }
+  ],
+  "hashes": {
+    "scenario_json_sha256": "586c207483a948b527db75ff8e71eabe90cd53e11e2b63cd9c9b3a477ba41d35",
+    "project_tree_sha256": "fbed2a84c56975521caae4491bae0e6ab52ac7fdbdae8e353955e72a02be1590",
+    "prepared_case_sha256": "1b11db6dfaaefe37e854baad99808aaa19c56b9103af1924d55f68d19e9fbe63"
+  }
+}

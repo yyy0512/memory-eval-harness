@@ -1,1 +1,0 @@
-- [GraphQL subscriptions multi-session](graphql_subscriptions_multi_session.md) — foundational registration done before event bus delivery.

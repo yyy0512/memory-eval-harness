@@ -1,0 +1,47 @@
+{
+  "scenario_id": "typescript_fintech_trading_easy_066_multi_session_development_medium_01",
+  "case_id": "typescript_fintech_trading_easy_066",
+  "category": "extended_development_projects",
+  "original_task_category": "multi_session_development",
+  "project_source": "cases/typescript_fintech_trading_easy_066_multi_session_development_medium_01/project",
+  "project_name": "MediTrade Pulse",
+  "language": "typescript",
+  "complexity": "easy",
+  "session_count": 3,
+  "turns": [
+    {
+      "session": 1,
+      "file": "turns/session_1.jsonl",
+      "turn_count": 2
+    },
+    {
+      "session": 2,
+      "file": "turns/session_2.jsonl",
+      "turn_count": 1
+    },
+    {
+      "session": 3,
+      "file": "turns/session_3.jsonl",
+      "turn_count": 1
+    }
+  ],
+  "prompts_for_review": [
+    {
+      "session": 1,
+      "file": "prompts/session_1.txt"
+    },
+    {
+      "session": 2,
+      "file": "prompts/session_2.txt"
+    },
+    {
+      "session": 3,
+      "file": "prompts/session_3.txt"
+    }
+  ],
+  "hashes": {
+    "scenario_json_sha256": "c84db03c4c09943490f96b77cddafd08364c54e111cc0be55952446305b1b177",
+    "project_tree_sha256": "829a29f28e897c9e26c52423db9d903466b674a9058fb04c70eefb0dfa9458ee",
+    "prepared_case_sha256": "5ceeaf403f562348e68da64b6e931d15aa95720936d295e405e6a244a45531a9"
+  }
+}

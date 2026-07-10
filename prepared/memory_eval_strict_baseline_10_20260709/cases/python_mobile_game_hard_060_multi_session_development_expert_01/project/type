@@ -1,0 +1,403 @@
+```python
+"""
+QuestSmith – type.py
+====================
+
+Centralized, strongly-typed enumerations and data models shared across the
+QuestSmith code-base.  Having a single, canonical module for *types* eliminates
+stringly-typed anti-patterns, improves IDE autocompletion, and allows us to
+extend gameplay semantics (e.g. DLC quest categories) via a plug-in friendly
+registry without touching core logic.
+
+The module purposefully lives in the top-level namespace as ``type`` to make
+imports terse ::
+
+    from type import QuestCategory, DifficultyLevel, RewardType
+
+NOTE: Because ``type`` is a Python built-in, we only shadow it **within the
+QuestSmith package scope**.  External callers should import from
+``questsmith.type`` to avoid collisions.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import uuid
+from dataclasses import dataclass, field, asdict
+from enum import Enum
+from functools import wraps
+from typing import Any, Dict, Mapping, Optional, Type, TypeVar
+
+_LOG = logging.getLogger(__name__)
+
+
+# --------------------------------------------------------------------------- #
+#                                Enumerations                                 #
+# --------------------------------------------------------------------------- #
+
+class _StrEnum(str, Enum):
+    """Enum whose members are also (and first-class) strings."""
+
+    def __str__(self) -> str:          # pragma: no cover
+        return str(self.value)
+
+    @classmethod
+    def has_value(cls, value: str) -> bool:
+        return any(value == item.value for item in cls)
+
+
+class QuestCategory(_StrEnum):
+    HABIT = "habit"
+    DAILY = "daily"
+    EVENT = "event"
+    LOCATION = "location"
+    SOCIAL = "social"
+
+
+class DifficultyLevel(_StrEnum):
+    TRIVIAL = "trivial"
+    EASY = "easy"
+    NORMAL = "normal"
+    HARD = "hard"
+    EPIC = "epic"
+    LEGENDARY = "legendary"
+
+
+class RewardType(_StrEnum):
+    EXPERIENCE = "experience"
+    CURRENCY = "currency"
+    MATERIAL = "material"
+    COSMETIC = "cosmetic"
+    POWER_UP = "power_up"
+
+
+class ItemRarity(_StrEnum):
+    COMMON = "common"
+    UNCOMMON = "uncommon"
+    RARE = "rare"
+    EPIC = "epic"
+    LEGENDARY = "legendary"
+    MYTHIC = "mythic"
+
+
+class EventType(_StrEnum):
+    """Internal bus events broadcast through the Observer/EventBus."""
+    QUEST_COMPLETED = "quest_completed"
+    QUEST_FAILED = "quest_failed"
+    QUEST_ADDED = "quest_added"
+    ITEM_CRAFTED = "item_crafted"
+    LEVEL_UP = "level_up"
+
+
+# --------------------------------------------------------------------------- #
+#                       Strongly-Typed Identifier Classes                     #
+# --------------------------------------------------------------------------- #
+
+@dataclass(frozen=True, order=True)
+class _UUIDBasedID:
+    """
+    Base class for all strongly-typed IDs within QuestSmith.
+
+    Equality is *structural*, i.e. two IDs are equal if their underlying UUIDs
+    match, regardless of instance type.  This simplifies comparisons and use as
+    dictionary keys.
+    """
+    value: uuid.UUID = field(compare=True, hash=True)
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.value, uuid.UUID):
+            # Allow constructing from string for convenience
+            object.__setattr__(self, "value", uuid.UUID(str(self.value)))
+
+    # Py3.10+: pattern matching support
+    def __iter__(self):  # pragma: no cover
+        yield self.value
+
+    def __str__(self) -> str:          # pragma: no cover
+        return str(self.value)
+
+
+class QuestID(_UUIDBasedID):
+    """Unique identifier for *Quest* domain objects."""
+
+
+class ItemID(_UUIDBasedID):
+    """Unique identifier for *Item* domain objects."""
+
+
+# --------------------------------------------------------------------------- #
+#                              Data-Model Layer                               #
+# --------------------------------------------------------------------------- #
+
+@dataclass(frozen=True, slots=True)
+class QuestTypeMeta:
+    """
+    Metadata describing *classes* of quests.  Concrete quest instances reference
+    this to inherit drop tables, xp curves, etc.
+
+    The class is frozen/immutable by design; runtime balancing is done by
+    patching the registry, not mutating live objects.
+    """
+
+    key: str
+    category: QuestCategory = QuestCategory.HABIT
+    difficulty: DifficultyLevel = DifficultyLevel.NORMAL
+    base_xp: int = 10
+    base_currency: int = 1
+    drop_rarity: ItemRarity = ItemRarity.COMMON
+    description: Optional[str] = None
+
+    # ------------------------- Serialization Helpers ------------------------ #
+
+    def to_dict(self) -> Dict[str, Any]:
+        """JSON-serializable representation."""
+        data = asdict(self)
+        # Enums -> str for persistence
+        for k, v in data.items():
+            if isinstance(v, Enum):
+                data[k] = v.value
+        return data
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> "QuestTypeMeta":
+        """
+        Re-create ``QuestTypeMeta`` from its serialized form.  Raises
+        ``ValueError`` if unknown enum values are supplied.
+        """
+        try:
+            return cls(
+                key=str(data["key"]),
+                category=QuestCategory(data.get("category", QuestCategory.HABIT)),
+                difficulty=DifficultyLevel(data.get("difficulty", DifficultyLevel.NORMAL)),
+                base_xp=int(data.get("base_xp", 10)),
+                base_currency=int(data.get("base_currency", 1)),
+                drop_rarity=ItemRarity(data.get("drop_rarity", ItemRarity.COMMON)),
+                description=data.get("description"),
+            )
+        except (ValueError, KeyError) as exc:
+            raise ValueError(f"Invalid QuestTypeMeta payload: {data}") from exc
+
+
+# --------------------------------------------------------------------------- #
+#                              Registry Pattern                               #
+# --------------------------------------------------------------------------- #
+
+T = TypeVar("T", bound=QuestTypeMeta)
+
+
+class QuestTypeRegistry:
+    """
+    Authoritative, in-memory registry for :class:`QuestTypeMeta` entries.
+
+    Allows DLC modules or seasonal events to call
+    ``QuestTypeRegistry.register(meta)`` at import time to inject new quest
+    categories, which become instantly available to the core engine.
+    """
+
+    _entries: Dict[str, QuestTypeMeta] = {}
+
+    # ---------------------------- CRUD Routers ----------------------------- #
+
+    @classmethod
+    def register(cls, meta: QuestTypeMeta, *, override: bool = False) -> None:
+        """
+        Register a new ``QuestTypeMeta``.
+
+        :param meta:      The object to register.
+        :param override:  If *False*, attempting to re-register an existing key
+                          raises ``KeyError``.  Use *True* to override.
+        """
+        if not override and meta.key in cls._entries:
+            raise KeyError(f"Quest type '{meta.key}' already registered")
+        cls._entries[meta.key] = meta
+        _LOG.debug("Registered QuestTypeMeta: %s", meta)
+
+    @classmethod
+    def bulk_register(cls, metas: Mapping[str, QuestTypeMeta], *, override: bool = False) -> None:
+        """Register many quest types in one pass (atomic)."""
+        # Pre-flight check ensures atomicity
+        duplicate = next((k for k in metas if k in cls._entries and not override), None)
+        if duplicate:
+            raise KeyError(f"Quest type '{duplicate}' already registered")
+
+        cls._entries.update(metas)
+        _LOG.debug("Bulk-registered %d quest types", len(metas))
+
+    @classmethod
+    def get(cls, key: str) -> QuestTypeMeta:
+        """Return the quest metadata associated with *key* or raise KeyError."""
+        try:
+            return cls._entries[key]
+        except KeyError as exc:
+            raise KeyError(f"Unknown quest type '{key}'") from exc
+
+    @classmethod
+    def try_get(cls, key: str) -> Optional[QuestTypeMeta]:
+        """Graceful variant of :meth:`get` returning ``None`` instead of raising."""
+        return cls._entries.get(key)
+
+    @classmethod
+    def all(cls) -> Dict[str, QuestTypeMeta]:
+        """Snapshot of all registered quest types."""
+        return dict(cls._entries)
+
+    # -------------------------- Decorator Helpers -------------------------- #
+
+    @classmethod
+    def quest_type(cls, *, override: bool = False) -> Any:
+        """
+        Class decorator shorthand::
+
+            @QuestTypeRegistry.quest_type()
+            class MyQuestType(QuestTypeMeta): ...
+
+        The decorated ``QuestTypeMeta`` subclass is instantiated and registered.
+        """
+
+        def decorator(model: Type[T]) -> Type[T]:
+            if not issubclass(model, QuestTypeMeta):
+                raise TypeError("@quest_type can only decorate QuestTypeMeta subclasses")
+
+            instance: QuestTypeMeta = model()  # type: ignore[arg-type]
+            cls.register(instance, override=override)
+            return model
+
+        return decorator
+
+
+# --------------------------------------------------------------------------- #
+#                           JSON (De)Serialization                            #
+# --------------------------------------------------------------------------- #
+
+class _QuestSmithJSONEncoder(json.JSONEncoder):
+    """
+    JSON encoder aware of QuestSmith domain types:
+      * Enums → ``str``
+      * UUID-based IDs → ``str(uuid)``
+      * dataclasses with ``to_dict`` → their dict representation
+    """
+
+    def default(self, obj: Any):  # type: ignore[override]
+        if isinstance(obj, Enum):
+            return obj.value
+        if isinstance(obj, _UUIDBasedID):
+            return str(obj.value)
+        if hasattr(obj, "to_dict"):
+            return obj.to_dict()
+        return super().default(obj)
+
+
+def dumps(obj: Any, **kwargs) -> str:
+    """
+    Serialize *obj* to JSON using QuestSmith-aware encoding.  ``kwargs`` are
+    forwarded to :func:`json.dumps`.
+    """
+    return json.dumps(obj, cls=_QuestSmithJSONEncoder, ensure_ascii=False, **kwargs)
+
+
+def loads(data: str, **kwargs) -> Any:
+    """Wrapper around :func:`json.loads` for symmetry."""
+    return json.loads(data, **kwargs)
+
+
+# --------------------------------------------------------------------------- #
+#                       Payload Validation / Sanity Checks                    #
+# --------------------------------------------------------------------------- #
+
+def validate_quest_payload(payload: Mapping[str, Any]) -> None:
+    """
+    Perform lightweight, synchronous validation of quest payloads received
+    from untrusted sources (sync service, mods, player community).
+
+    Raises:
+        ValueError:  On validation failure with human-readable reason.
+    """
+
+    # Mandatory keys
+    mandatory = {"key", "category", "difficulty", "base_xp"}
+    missing = mandatory.difference(payload)
+    if missing:
+        raise ValueError(f"Missing mandatory fields: {', '.join(sorted(missing))}")
+
+    # Enum sanity checks
+    if not QuestCategory.has_value(payload["category"]):
+        raise ValueError(f"Unknown QuestCategory '{payload['category']}'")
+
+    if not DifficultyLevel.has_value(payload["difficulty"]):
+        raise ValueError(f"Unknown DifficultyLevel '{payload['difficulty']}'")
+
+    # Field types / ranges
+    xp = payload.get("base_xp")
+    if not isinstance(xp, int) or xp < 0:
+        raise ValueError("base_xp must be a non-negative integer")
+
+    _LOG.debug("Quest payload validated: %s", payload)
+
+
+# --------------------------------------------------------------------------- #
+#                            Built-in Quest Types                             #
+# --------------------------------------------------------------------------- #
+
+def _bootstrap_defaults() -> None:
+    """Register vanilla quest types shipped with the core game."""
+    defaults = [
+        QuestTypeMeta(
+            key="morning_routine",
+            category=QuestCategory.HABIT,
+            difficulty=DifficultyLevel.EASY,
+            base_xp=5,
+            base_currency=1,
+            drop_rarity=ItemRarity.COMMON,
+            description="Brush teeth, make bed, quick stretch",
+        ),
+        QuestTypeMeta(
+            key="gym_session",
+            category=QuestCategory.EVENT,
+            difficulty=DifficultyLevel.NORMAL,
+            base_xp=20,
+            base_currency=5,
+            drop_rarity=ItemRarity.UNCOMMON,
+            description="One hour at the gym",
+        ),
+        QuestTypeMeta(
+            key="weekly_review",
+            category=QuestCategory.DAILY,
+            difficulty=DifficultyLevel.HARD,
+            base_xp=35,
+            base_currency=10,
+            drop_rarity=ItemRarity.RARE,
+            description="Plan and reflect on the week",
+        ),
+    ]
+    QuestTypeRegistry.bulk_register({entry.key: entry for entry in defaults})
+
+
+_bootstrap_defaults()
+
+
+# --------------------------------------------------------------------------- #
+#                                  __all__                                    #
+# --------------------------------------------------------------------------- #
+
+__all__ = [
+    # Enums
+    "QuestCategory",
+    "DifficultyLevel",
+    "RewardType",
+    "ItemRarity",
+    "EventType",
+    # IDs
+    "QuestID",
+    "ItemID",
+    # Data classes
+    "QuestTypeMeta",
+    # Registry
+    "QuestTypeRegistry",
+    # JSON helpers
+    "dumps",
+    "loads",
+    # Validators
+    "validate_quest_payload",
+]
+```

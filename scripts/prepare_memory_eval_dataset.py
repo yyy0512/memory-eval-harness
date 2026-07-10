@@ -19,6 +19,12 @@ def main() -> None:
     parser.add_argument("--category", default="extended_development_projects")
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--limit", type=int, default=None)
+    parser.add_argument(
+        "--contract-overlay",
+        default=None,
+        type=Path,
+        help="Optional evaluator-owned JSON file with memory_contracts to inject into prepared prompts and scoring_reference",
+    )
     args = parser.parse_args()
 
     summary = prepare_dataset(
@@ -27,6 +33,7 @@ def main() -> None:
         output_dir=args.output,
         category=args.category,
         limit=args.limit,
+        contract_overlay=args.contract_overlay,
     )
     print(f"Prepared {summary['case_count']} memory eval cases at {args.output}")
 

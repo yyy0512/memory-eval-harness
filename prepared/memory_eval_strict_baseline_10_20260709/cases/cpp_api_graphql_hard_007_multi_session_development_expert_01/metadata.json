@@ -1,0 +1,54 @@
+{
+  "scenario_id": "cpp_api_graphql_hard_007_multi_session_development_expert_01",
+  "case_id": "cpp_api_graphql_hard_007",
+  "title": "Implement Asset Archiving via GraphQL Mutation with Multi-Session Workflow",
+  "description": "You are a senior C++ developer tasked with adding a critical new feature to the PaletteFlux GraphQL Studio. The request is to implement a 'soft delete' or 'archiving' mechanism for digital assets. This feature must be exposed through a new GraphQL mutation. The implementation must be robust, respecting existing architectural patterns (specifically, the Command Query Responsibility Segregation - CQRS - pattern evident in the codebase) and business rules, such as preventing the archival of assets that are currently in use within a scene. This task will be completed over several sessions, requiring you to retain context and build upon your previous work.",
+  "difficulty": "expert",
+  "project_spec": {
+    "unique_id": "cpp_api_graphql_hard_007",
+    "name": "PaletteFlux GraphQL Studio",
+    "description": "PaletteFlux GraphQL Studio is a creative-centric API platform that lets digital artists, game designers, and interactive storytellers programmatically compose, remix, and stream multilayer visual assets through a single GraphQL endpoint while exposing complementary REST views for legacy clients. Built on a rigorously applied Model-View-Controller pattern, the project treats each ‘creative asset’ (brush stroke, shader node, animation curve, sound layer) as a first-class model object, controlled by command/query services and rendered to multiple representations (JSON, binary texture atlases, GLSL snippets) depending on the requesting client. \n\nThe application demonstrates how an MVC core can power highly interactive, real-time creative workflows: controllers orchestrate command buses for mutating complex scene graphs, while query handlers gather materialized views optimized for pagination, response caching, and cross-version schema evolution. A unified GraphQL schema allows flexible, client-driven traversal through nested asset relationships, whereas curated REST endpoints serve well-defined, cache-friendly snapshots for CDN distribution. Monitoring hooks, authentication guards, and API-gateway patterns ensure production-grade robustness without sacrificing the free-form expressiveness required by artists and tool developers.",
+    "domain": "api_graphql",
+    "complexity": "hard",
+    "language": "cpp",
+    "architecture": "mvc",
+    "theme": "creative",
+    "target_file_count": 78,
+    "target_token_count": 461803,
+    "features": [
+      "monitoring",
+      "pagination",
+      "api_documentation",
+      "versioning",
+      "response_caching",
+      "rest_endpoints",
+      "authentication",
+      "graphql_schema",
+      "request_validation",
+      "logging"
+    ],
+    "architecture_patterns": [
+      "Service_Layer",
+      "Command_Query_Separation",
+      "REST_Architecture",
+      "API_Gateway",
+      "Microservices",
+      "GraphQL_Schema"
+    ],
+    "dependencies": [
+      "Pistache (HTTP REST server & routing)",
+      "graphqlcpp / graphqlservice (C++ GraphQL implementation)",
+      "nlohmann/json (JSON serialization)",
+      "jwt-cpp (JWT authentication)",
+      "Redis++ (response caching, pub/sub asset invalidation)",
+      "spdlog (structured logging)",
+      "Prometheus-cpp (metrics & monitoring)",
+      "SQLite or PostgreSQL (asset metadata persistence)",
+      "fmt (string formatting)",
+      "cpr or cpp-httplib (outgoing HTTP calls, API gateway)",
+      "OpenTelemetry-cpp (distributed tracing)",
+      "RapidJSON (high-performance parsing for binary view generation)"
+    ],
+    "seed": 822556
+  }
+}
